@@ -304,6 +304,79 @@
       opacity: 1;
       transform: translate(-50%, 0);
     }
+    #win-line {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: none;
+    }
+
+    #win-line.show {
+      display: block;
+    }
+
+    #win-line line {
+      stroke: #fde047;
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      filter: drop-shadow(0 0 6px rgba(253, 224, 71, 0.9));
+    }
+
+    #win-line.draw line {
+      animation: drawLine 0.4s ease-out forwards;
+    }
+
+    @keyframes drawLine {
+      to {
+        stroke-dashoffset: 0;
+      }
+    }
+
+    #confetti {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 250;
+      display: none;
+    }
+
+    #winner-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 32px;
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.9);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      animation: cardIn 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+    }
+
+    #winner-card.lose {
+      animation: none;
+      background: rgba(30, 41, 59, 0.9);
+    }
+
+    #winner-score {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+
+    @keyframes cardIn {
+      from {
+        transform: scale(0.6);
+        opacity: 0;
+      }
+
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
   </style>
 </head>
 
@@ -330,14 +403,21 @@
     <div id="panel">
       <div id="board-wrap">
         <div id="board"></div>
+        <svg id="win-line" viewBox="0 0 900 900" preserveAspectRatio="none">
+          <line pathLength="100" x1="0" y1="0" x2="0" y2="0"></line>
+        </svg>
       </div>
     </div>
   </div>
 
   <div id="winner-overlay">
-    <div id="winner-text"></div>
-    <button id="new-game-btn" onclick="requestNewGame()">Ván mới</button>
+    <div id="winner-card">
+      <div id="winner-text"></div>
+      <div id="winner-score"></div>
+      <button id="new-game-btn" onclick="requestNewGame()">Ván mới</button>
+    </div>
   </div>
+  <canvas id="confetti"></canvas>
 
   <div id="toast"></div>
   <script>
@@ -429,6 +509,75 @@
       if (lastServerTurn) updateTurn(lastServerTurn);
     }
 
+    // ---- Win celebration
+    const RESULT_DELAY_MS = 1000; // 400ms line draw + 600ms pause
+    let resultTimeout = null;
+
+    function drawWinLine(cells) {
+      if (!cells || cells.length < 2) return;
+      // DCAS sends the cells unordered; sorting by row then column gives the two ends of any straight line.
+      const sorted = cells.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const svg = document.getElementById('win-line');
+      const line = svg.querySelector('line');
+      line.setAttribute('x1', (first[1] + 0.5) * 100);
+      line.setAttribute('y1', (first[0] + 0.5) * 100);
+      line.setAttribute('x2', (last[1] + 0.5) * 100);
+      line.setAttribute('y2', (last[0] + 0.5) * 100);
+      svg.classList.remove('draw');
+      void svg.getBoundingClientRect(); // restart the animation
+      svg.classList.add('show', 'draw');
+    }
+
+    function clearWinLine() {
+      document.getElementById('win-line').classList.remove('show', 'draw');
+    }
+
+    function launchConfetti(durationMs) {
+      fx('confetti');
+      const canvas = document.getElementById('confetti');
+      const ctx2d = canvas.getContext && canvas.getContext('2d');
+      if (!ctx2d) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.display = 'block';
+      const colors = ['#f87171', '#60a5fa', '#fbbf24', '#34d399', '#a78bfa', '#f472b6'];
+      const parts = Array.from({ length: 120 }, () => ({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * canvas.height * 0.5,
+        vx: (Math.random() - 0.5) * 2,
+        vy: 2 + Math.random() * 3,
+        size: 4 + Math.random() * 5,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      }));
+      const start = performance.now();
+      function frame(now) {
+        ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+        for (const p of parts) {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.04;
+          p.rot += p.vr;
+          ctx2d.save();
+          ctx2d.translate(p.x, p.y);
+          ctx2d.rotate(p.rot);
+          ctx2d.fillStyle = p.color;
+          ctx2d.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+          ctx2d.restore();
+        }
+        if (now - start < durationMs) {
+          requestAnimationFrame(frame);
+        } else {
+          ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.style.display = 'none';
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+
     function sendToServer(payload) {
       if (window.IMSDataChannelBridge) {
         window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
@@ -500,6 +649,7 @@
 
     function requestNewGame() {
       document.getElementById('winner-overlay').classList.remove('show');
+      clearWinLine();
       sendToServer({
         service: 'caro',
         action: 'new_game'
@@ -555,18 +705,38 @@
       gameActive = false;
       setActivePill(null);
       const overlay = document.getElementById('winner-overlay');
+      const card = document.getElementById('winner-card');
       const text = document.getElementById('winner-text');
+      const iWon = !isDraw && winner === mySymbol;
+
       if (isDraw) {
-        text.textContent = '🤝 Hòa!';
+        text.textContent = '🤝 Hòa';
         text.style.color = '#94a3b8';
-      } else if (winner === mySymbol) {
+        card.className = 'draw';
+      } else if (iWon) {
         text.textContent = '🎉 Bạn thắng!';
         text.style.color = '#22c55e';
+        card.className = 'win';
       } else {
-        text.textContent = '😢 Bạn thua!';
-        text.style.color = '#ef4444';
+        text.textContent = 'Bạn thua 😅';
+        text.style.color = '#f87171';
+        card.className = 'lose';
       }
-      overlay.classList.add('show');
+      document.getElementById('winner-score').textContent = 'Bạn ' + myScore + ' – ' + opponentScore + ' Đối thủ';
+
+      if (!isDraw) drawWinLine(winCells);
+
+      clearTimeout(resultTimeout);
+      resultTimeout = setTimeout(() => {
+        overlay.classList.add('show');
+        if (iWon) {
+          launchConfetti(2500);
+          buzz([40, 60, 40, 60, 40]);
+          playTone(523, 120, 'triangle', 0.2);
+          setTimeout(() => playTone(659, 120, 'triangle', 0.2), 130);
+          setTimeout(() => playTone(784, 220, 'triangle', 0.2), 260);
+        }
+      }, isDraw ? 0 : RESULT_DELAY_MS);
     }
 
     function rememberServerState(data) {
@@ -602,6 +772,8 @@
           renderBoard(data.board, null, false);
           updateScores();
           updateTurn(data.next_turn);
+          clearTimeout(resultTimeout);
+          clearWinLine();
           document.getElementById('winner-overlay').classList.remove('show');
         } else if (data.status === 'update_board') {
           if (!initialized) {

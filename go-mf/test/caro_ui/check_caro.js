@@ -102,6 +102,63 @@ scenario('feedback', async (page) => {
     (await page.evaluate(() => window.__sent.filter((m) => m.action === 'move').length)) === sentBefore);
 });
 
+function winMessage() {
+  const b = emptyBoard();
+  // Unordered on purpose: DCAS sends forward cells then backward cells.
+  const cells = [[4, 4], [4, 0], [4, 1], [4, 2], [4, 3]];
+  cells.forEach(([r, c]) => { b[r][c] = 'X'; });
+  return {
+    service: 'caro', status: 'update_board', board: b, last_move: { row: 4, col: 4, player: 'X' },
+    next_turn: 'O', move_count: 9, score_x: 1, score_o: 0, winner: 'X', draw: false,
+    win_cells: cells, turn_ms_left: 0,
+  };
+}
+
+scenario('win', async (page) => {
+  await send(page, gameStart('X'));
+  await send(page, winMessage());
+  const line = await page.evaluate(() => {
+    const l = document.querySelector('#win-line line');
+    return {
+      shown: document.getElementById('win-line').classList.contains('show'),
+      x1: +l.getAttribute('x1'), y1: +l.getAttribute('y1'),
+      x2: +l.getAttribute('x2'), y2: +l.getAttribute('y2'),
+    };
+  });
+  check('win line shown', line.shown);
+  check('win line spans (4,0) to (4,4)',
+    line.x1 === 50 && line.y1 === 450 && line.x2 === 450 && line.y2 === 450, JSON.stringify(line));
+  check('result card waits for the line',
+    !(await page.$eval('#winner-overlay', (o) => o.classList.contains('show'))));
+  await page.waitForTimeout(1200);
+  check('result card shown', await page.$eval('#winner-overlay', (o) => o.classList.contains('show')));
+  check('winner text', (await page.textContent('#winner-text')).includes('Bạn thắng'));
+  check('score on card', (await page.textContent('#winner-score')).includes('1'));
+  const fx = await page.evaluate(() => window.__fx || []);
+  check('confetti on the winner phone', fx.includes('confetti'), fx.join(','));
+  check('winner vibration', fx.includes('buzz:[40,60,40,60,40]'), fx.join(','));
+});
+
+scenario('lose', async (page) => {
+  await send(page, gameStart('O'));
+  await send(page, winMessage());
+  await page.waitForTimeout(1200);
+  check('loser text', (await page.textContent('#winner-text')).includes('Bạn thua'));
+  const fx = await page.evaluate(() => window.__fx || []);
+  check('no confetti on the loser phone', !fx.includes('confetti'), fx.join(','));
+});
+
+scenario('new-game-clears-win', async (page) => {
+  await send(page, gameStart('X'));
+  await send(page, winMessage());
+  await send(page, gameStart('X', { score_x: 1 }));
+  await page.waitForTimeout(1200);
+  check('win line hidden after new game',
+    !(await page.$eval('#win-line', (s) => s.classList.contains('show'))));
+  check('result card does not pop up after new game',
+    !(await page.$eval('#winner-overlay', (o) => o.classList.contains('show'))));
+});
+
 // ---------------------------------------------------------------- runner
 
 (async () => {
