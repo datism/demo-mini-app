@@ -106,4 +106,4 @@ __pycache__/
 !go-mf/vendor/modules.txt
 
 # Preserve static assets zip files
-!go-mf/static/assets/*.zip
+!go-mf/static/assets/*.zip.superpowers/
