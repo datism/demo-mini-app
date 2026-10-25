@@ -213,6 +213,44 @@ scenario('timer-opponent-timeout', async (page) => {
   check('opponent-timeout toast', (await page.textContent('#toast')).includes('Đối thủ hết giờ'));
 });
 
+scenario('timer-rollback', async (page) => {
+  await send(page, gameStart('X', { turn_ms_left: 15000 }));
+  await page.waitForTimeout(200);
+  await page.click('.cell[data-row="0"][data-col="0"]');
+  await page.waitForTimeout(100);
+  await send(page, { service: 'caro', status: 'error', message: 'Nước đi không hợp lệ.' });
+  await page.waitForTimeout(200);
+  const st = await page.evaluate(() => {
+    const a = document.querySelector('.score-pill.active');
+    return { pill: a ? a.id : null, timing: !!a && a.classList.contains('timing'), text: document.getElementById('turn-timer').textContent };
+  });
+  const secs = parseInt(st.text.replace(/\D/g, ''), 10);
+  check('rollback restores previous countdown', st.pill === 'pill-me' && st.timing && secs >= 13 && secs <= 15, JSON.stringify(st));
+});
+
+scenario('timer-no-server-value', async (page) => {
+  await send(page, gameStart('X', { turn_ms_left: 15000 }));
+  await send(page, {
+    service: 'caro', status: 'update_board', board: emptyBoard(), next_turn: 'O', move_count: 0,
+    score_x: 0, score_o: 0, winner: '', draw: false,
+  });
+  await page.waitForTimeout(150);
+  const st = await page.evaluate(() => ({
+    timing: document.querySelectorAll('.score-pill.timing').length,
+    text: document.getElementById('turn-timer').textContent,
+  }));
+  check('no running ring without turn_ms_left', st.timing === 0 && st.text === '', JSON.stringify(st));
+});
+
+scenario('timer-no-tick-after-win', async (page) => {
+  await send(page, gameStart('X', { turn_ms_left: 3500 }));
+  await send(page, winMessage());
+  const before = await page.evaluate(() => (window.__fx || []).filter((f) => f === 'tick').length);
+  await page.waitForTimeout(1500);
+  const after = await page.evaluate(() => (window.__fx || []).filter((f) => f === 'tick').length);
+  check('no tick after the game is over', after === before, before + ' -> ' + after);
+});
+
 scenario('new-game-during-delay', async (page) => {
   await send(page, gameStart('X'));
   await send(page, winMessage());

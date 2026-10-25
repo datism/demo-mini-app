@@ -387,7 +387,7 @@
       display: none;
     }
 
-    .score-pill.active .timer-ring {
+    .score-pill.active.timing .timer-ring {
       display: block;
     }
 
@@ -544,7 +544,8 @@
       rejectLocally(message || 'Nước đi không hợp lệ.');
       if (lastServerBoard) renderBoard(lastServerBoard, lastServerMove, false);
       if (lastServerTurn) updateTurn(lastServerTurn);
-      if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now());
+      if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now(), savedTickSecond);
+      else stopTurnTimer();
       savedTurnDeadline = 0;
     }
 
@@ -636,12 +637,15 @@
     let timerRaf = 0;
     let lastTickSecond = -1;
     let savedTurnDeadline = 0; // restored if the server rejects an optimistic move
+    let savedTickSecond = -1;
 
-    function startTurnTimer(msLeft) {
+    function startTurnTimer(msLeft, resumeTickSecond) {
       stopTurnTimer();
       if (!msLeft || msLeft <= 0) return;
       turnDeadline = performance.now() + msLeft;
-      lastTickSecond = -1;
+      // A restored countdown keeps its last ticked second so it does not tick twice.
+      lastTickSecond = resumeTickSecond === undefined ? -1 : resumeTickSecond;
+      document.querySelectorAll('.score-pill').forEach(p => p.classList.add('timing'));
       tickTimer();
     }
 
@@ -649,7 +653,11 @@
       if (timerRaf) cancelAnimationFrame(timerRaf);
       timerRaf = 0;
       turnDeadline = 0;
-      document.querySelectorAll('.timer-ring').forEach(r => r.classList.remove('warn', 'danger'));
+      document.querySelectorAll('.score-pill').forEach(p => p.classList.remove('timing'));
+      document.querySelectorAll('.timer-ring').forEach(r => {
+        r.classList.remove('warn', 'danger');
+        r.querySelector('rect').style.strokeDashoffset = '0';
+      });
       document.getElementById('turn-timer').textContent = '';
     }
 
@@ -735,6 +743,7 @@
       updateTurn(mySymbol === 'X' ? 'O' : 'X');
 
       savedTurnDeadline = turnDeadline;
+      savedTickSecond = lastTickSecond;
       startTurnTimer(TURN_TOTAL_MS);
       sendToServer({
         service: 'caro',
@@ -872,6 +881,7 @@
           renderBoard(data.board, null, false);
           updateScores();
           updateTurn(data.next_turn);
+          savedTurnDeadline = 0;
           startTurnTimer(data.turn_ms_left);
           clearTimeout(resultTimeout);
           cancelConfetti();
@@ -895,6 +905,7 @@
           } else {
             gameActive = true;
             updateTurn(data.next_turn);
+            savedTurnDeadline = 0;
             startTurnTimer(data.turn_ms_left);
             if (data.timeout) {
               showToast(data.timed_out === mySymbol ? '⏰ Hết giờ! Bạn mất lượt' : 'Đối thủ hết giờ — đến lượt bạn');
