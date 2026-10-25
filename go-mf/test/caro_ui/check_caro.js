@@ -228,6 +228,22 @@ scenario('timer-rollback', async (page) => {
   check('rollback restores previous countdown', st.pill === 'pill-me' && st.timing && secs >= 13 && secs <= 15, JSON.stringify(st));
 });
 
+scenario('timer-late-error', async (page) => {
+  await send(page, gameStart('X', { turn_ms_left: 15000 }));
+  await page.click('.cell[data-row="0"][data-col="0"]');
+  await send(page, {
+    service: 'caro', status: 'update_board', board: emptyBoard(), next_turn: 'O', move_count: 0,
+    score_x: 0, score_o: 0, winner: '', draw: false, timeout: true, timed_out: 'X', turn_ms_left: 20000,
+  });
+  await send(page, { service: 'caro', status: 'error', message: 'Chưa đến lượt của bạn.' });
+  await page.waitForTimeout(200);
+  const st = await page.evaluate(() => ({
+    timing: document.querySelectorAll('.score-pill.timing').length,
+    text: document.getElementById('turn-timer').textContent,
+  }));
+  check('new turn timer keeps running after a late error', st.timing > 0 && st.text !== '', JSON.stringify(st));
+});
+
 scenario('timer-no-server-value', async (page) => {
   await send(page, gameStart('X', { turn_ms_left: 15000 }));
   await send(page, {

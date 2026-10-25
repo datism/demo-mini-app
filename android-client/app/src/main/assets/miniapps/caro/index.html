@@ -487,6 +487,11 @@
           audioCtx = null;
         }
       }
+      try {
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) {
+        // audio not available
+      }
       return audioCtx;
     }
 
@@ -544,8 +549,11 @@
       rejectLocally(message || 'Nước đi không hợp lệ.');
       if (lastServerBoard) renderBoard(lastServerBoard, lastServerMove, false);
       if (lastServerTurn) updateTurn(lastServerTurn);
-      if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now(), savedTickSecond);
-      else stopTurnTimer();
+      if (optimisticPending) {
+        if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now(), savedTickSecond);
+        else stopTurnTimer();
+      }
+      optimisticPending = false;
       savedTurnDeadline = 0;
     }
 
@@ -638,6 +646,7 @@
     let lastTickSecond = -1;
     let savedTurnDeadline = 0; // restored if the server rejects an optimistic move
     let savedTickSecond = -1;
+    let optimisticPending = false; // an optimistic move is awaiting the server's answer
 
     function startTurnTimer(msLeft, resumeTickSecond) {
       stopTurnTimer();
@@ -744,6 +753,7 @@
 
       savedTurnDeadline = turnDeadline;
       savedTickSecond = lastTickSecond;
+      optimisticPending = true;
       startTurnTimer(TURN_TOTAL_MS);
       sendToServer({
         service: 'caro',
@@ -882,6 +892,7 @@
           updateScores();
           updateTurn(data.next_turn);
           savedTurnDeadline = 0;
+          optimisticPending = false;
           startTurnTimer(data.turn_ms_left);
           clearTimeout(resultTimeout);
           cancelConfetti();
@@ -892,6 +903,7 @@
             console.log('[Caro] Ignoring update_board because not initialized yet.');
             return;
           }
+          optimisticPending = false;
           rememberServerState(data);
           const opponentMoved = !!(data.last_move && data.last_move.player && data.last_move.player !== mySymbol);
           renderBoard(data.board, data.last_move, opponentMoved);

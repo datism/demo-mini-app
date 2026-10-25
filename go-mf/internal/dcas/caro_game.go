@@ -518,6 +518,7 @@ func (s *DCASServer) caroOnTimeout(callID string, seq int) {
 	gameVal, err := getFromRedis("caro:game:" + callID)
 	if err != nil {
 		log.Printf("[DCAS-CARO] Turn timeout for CallID=%s: Redis read failed: %v", callID, err)
+		delete(s.caroTimers, callID) // fired timer is spent; let caroEnsureTimer re-arm on the next sync_state
 		return
 	}
 	sessions := s.getAllCallSessions(callID)
@@ -530,6 +531,7 @@ func (s *DCASServer) caroOnTimeout(callID string, seq int) {
 	var game CaroGame
 	if err := json.Unmarshal([]byte(gameVal), &game); err != nil {
 		log.Printf("[DCAS-CARO] Turn timeout for CallID=%s: parse game failed: %v", callID, err)
+		delete(s.caroTimers, callID) // fired timer is spent; let caroEnsureTimer re-arm on the next sync_state
 		return
 	}
 
