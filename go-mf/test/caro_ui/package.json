@@ -1,0 +1,11 @@
+{
+  "name": "caro-ui-check",
+  "private": true,
+  "description": "Headless checks for the Caro mini-app page",
+  "scripts": {
+    "check": "node check_caro.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

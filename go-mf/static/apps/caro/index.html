@@ -6,6 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Caro Game</title>
   <style>
+    :root {
+      /* Clear area above the board so the remote face stays visible. Tune on device. */
+      --video-gap: 25vh;
+      --board-size: min(92vw, calc(100vh - var(--video-gap) - 76px));
+      --x-color: #60a5fa;
+      --o-color: #f87171;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -25,56 +33,116 @@
 
     #game-container {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      inset: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #video-gap {
+      flex: 0 0 var(--video-gap);
     }
 
     #game-header {
+      width: 100%;
+      padding: 0 12px 6px;
       color: white;
       text-align: center;
-      margin-bottom: 12px;
-    }
-
-    #game-header h2 {
-      font-size: 20px;
-      font-weight: 700;
-      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
 
     #status-bar {
       display: flex;
-      gap: 16px;
-      margin-top: 6px;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .score-pill {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.55);
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      transition: background 0.2s, transform 0.2s;
     }
 
-    .score-item {
-      padding: 4px 12px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.15);
-    }
-
-    .score-item.active {
-      background: rgba(59, 130, 246, 0.6);
+    .score-pill.active {
+      background: rgba(37, 99, 235, 0.7);
+      transform: scale(1.06);
       font-weight: 700;
     }
 
+    .pill-symbol {
+      font-weight: 800;
+    }
+
+    .pill-symbol.x {
+      color: var(--x-color);
+    }
+
+    .pill-symbol.o {
+      color: var(--o-color);
+    }
+
+    .pill-score {
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .vs {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 12px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    #header-new-game-btn {
+      margin-left: 6px;
+      padding: 5px 12px;
+      border-radius: 16px;
+      border: none;
+      background: rgba(59, 130, 246, 0.85);
+      color: white;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
     #turn-indicator {
-      color: #fbbf24;
-      font-size: 14px;
-      font-weight: 600;
       margin-top: 4px;
-      min-height: 20px;
+      min-height: 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fbbf24;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    }
+
+    #turn-timer {
+      margin-left: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #panel {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 10px;
+      background: rgba(2, 6, 23, 0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 20px 20px 0 0;
+    }
+
+    #board-wrap {
+      position: relative;
+      width: var(--board-size);
+      height: var(--board-size);
     }
 
     #board {
@@ -82,20 +150,20 @@
       grid-template-columns: repeat(9, 1fr);
       grid-template-rows: repeat(9, 1fr);
       gap: 1px;
-      width: min(85vw, 85vh - 120px);
-      height: min(85vw, 85vh - 120px);
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
       overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
     }
 
     .cell {
-      background: rgba(15, 23, 42, 0.9);
+      background: rgba(15, 23, 42, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: clamp(16px, 4vw, 28px);
+      font-size: calc(var(--board-size) / 13);
       font-weight: 800;
       cursor: pointer;
       transition: background 0.15s;
@@ -103,19 +171,25 @@
     }
 
     .cell:active {
-      background: rgba(30, 41, 59, 0.9);
+      background: rgba(51, 65, 85, 0.55);
+    }
+
+    .glyph {
+      display: inline-block;
     }
 
     .cell.x {
-      color: #3b82f6;
+      color: var(--x-color);
+      text-shadow: 0 0 8px rgba(96, 165, 250, 0.8);
     }
 
     .cell.o {
-      color: #ef4444;
+      color: var(--o-color);
+      text-shadow: 0 0 8px rgba(248, 113, 113, 0.8);
     }
 
     .cell.last-move {
-      background: rgba(59, 130, 246, 0.25);
+      box-shadow: inset 0 0 0 2px rgba(251, 191, 36, 0.85);
     }
 
     .cell.win {
@@ -136,11 +210,8 @@
     #winner-overlay {
       display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.7);
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
       z-index: 200;
       flex-direction: column;
       align-items: center;
@@ -175,16 +246,29 @@
 
 <body>
   <div id="game-container">
+    <div id="video-gap"></div>
     <div id="game-header">
-      <h2>🎮 Caro 9×9</h2>
       <div id="status-bar">
-        <span class="score-item" id="score-x">X: 0</span>
-        <span class="score-item" id="score-o">O: 0</span>
-        <button id="header-new-game-btn" onclick="requestNewGame()" style="padding: 4px 12px; border-radius: 12px; background: rgba(59, 130, 246, 0.8); color: white; border: none; cursor: pointer; font-weight: bold; margin-left: auto;">Ván mới</button>
+        <div class="score-pill" id="pill-me">
+          <span class="pill-symbol x" id="me-symbol">X</span>
+          <span class="pill-label">Bạn</span>
+          <span class="pill-score" id="me-score">0</span>
+        </div>
+        <span class="vs">vs</span>
+        <div class="score-pill" id="pill-opp">
+          <span class="pill-score" id="opp-score">0</span>
+          <span class="pill-label">Đối thủ</span>
+          <span class="pill-symbol o" id="opp-symbol">O</span>
+        </div>
+        <button id="header-new-game-btn" onclick="requestNewGame()">Ván mới</button>
       </div>
-      <div id="turn-indicator">Đang chờ kết nối...</div>
+      <div id="turn-indicator"><span id="turn-text">Đang chờ kết nối...</span><span id="turn-timer"></span></div>
     </div>
-    <div id="board"></div>
+    <div id="panel">
+      <div id="board-wrap">
+        <div id="board"></div>
+      </div>
+    </div>
   </div>
 
   <div id="winner-overlay">
@@ -203,6 +287,23 @@
     let myScore = 0;
     let opponentScore = 0;
 
+    // Last state confirmed by DCAS, used to roll back optimistic moves the server rejects.
+    let lastServerBoard = null;
+    let lastServerMove = null;
+    let lastServerTurn = null;
+
+    function sendToServer(payload) {
+      if (window.IMSDataChannelBridge) {
+        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
+      } else if (window.AndroidBridge) {
+        window.AndroidBridge.sendData(JSON.stringify(payload));
+      }
+    }
+
+    function cellAt(row, col) {
+      return document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+    }
+
     // Initialize empty board
     function initBoard() {
       const board = document.getElementById('board');
@@ -219,91 +320,94 @@
       }
     }
 
+    function setCell(cell, val) {
+      cell.innerHTML = val ? '<span class="glyph">' + val + '</span>' : '';
+      cell.className = 'cell';
+      if (val === 'X') cell.classList.add('x');
+      if (val === 'O') cell.classList.add('o');
+    }
+
     function onCellClick(row, col) {
       if (!gameActive || currentTurn !== mySymbol) return;
       if (boardState[row] && boardState[row][col] !== '') return;
 
       // Optimistic UI Update: Make it feel instant and hide network latency!
       boardState[row][col] = mySymbol;
-      
-      const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+
+      const cell = cellAt(row, col);
       if (cell) {
-        cell.textContent = mySymbol;
-        cell.classList.add(mySymbol.toLowerCase());
+        setCell(cell, mySymbol);
         // Remove last-move from other cells, add to this one optimistically
         document.querySelectorAll('.cell.last-move').forEach(c => c.classList.remove('last-move'));
         cell.classList.add('last-move');
       }
-      
+
       updateTurn(mySymbol === 'X' ? 'O' : 'X');
 
-      const payload = {
+      sendToServer({
         service: 'caro',
         action: 'move',
         row: row,
         col: col
-      };
-
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      });
     }
 
     function requestNewGame() {
       document.getElementById('winner-overlay').classList.remove('show');
-      const payload = {
+      sendToServer({
         service: 'caro',
         action: 'new_game'
-      };
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      });
     }
 
-    function renderBoard(board, lastMove) {
-      boardState = board;
-      const cells = document.querySelectorAll('.cell');
-      cells.forEach(cell => {
+    function renderBoard(board, lastMove, popMove) {
+      boardState = board.map(row => row.slice());
+      document.querySelectorAll('.cell').forEach(cell => {
         const r = parseInt(cell.dataset.row);
         const c = parseInt(cell.dataset.col);
-        const val = board[r] ? board[r][c] : '';
-        cell.textContent = val;
-        cell.className = 'cell';
-        if (val === 'X') cell.classList.add('x');
-        if (val === 'O') cell.classList.add('o');
+        setCell(cell, board[r] ? board[r][c] : '');
         if (lastMove && lastMove.row === r && lastMove.col === c) {
           cell.classList.add('last-move');
+          if (popMove) cell.classList.add('pop');
         }
       });
     }
 
     function updateScores() {
-      const sx = document.getElementById('score-x');
-      const so = document.getElementById('score-o');
-      sx.textContent = 'Bạn: ' + myScore;
-      so.textContent = 'Đối thủ: ' + opponentScore;
-      sx.className = 'score-item active';
-      so.className = 'score-item';
+      const oppSymbol = mySymbol === 'X' ? 'O' : 'X';
+      document.getElementById('me-score').textContent = myScore;
+      document.getElementById('opp-score').textContent = opponentScore;
+      const meSym = document.getElementById('me-symbol');
+      meSym.textContent = mySymbol;
+      meSym.className = 'pill-symbol ' + mySymbol.toLowerCase();
+      const oppSym = document.getElementById('opp-symbol');
+      oppSym.textContent = oppSymbol;
+      oppSym.className = 'pill-symbol ' + oppSymbol.toLowerCase();
+    }
+
+    // Highlights the pill of the player whose turn it is (null = nobody).
+    function setActivePill(symbol) {
+      document.getElementById('pill-me').classList.toggle('active', symbol !== null && symbol === mySymbol);
+      document.getElementById('pill-opp').classList.toggle('active', symbol !== null && symbol !== mySymbol);
     }
 
     function updateTurn(nextTurn) {
       currentTurn = nextTurn;
       const indicator = document.getElementById('turn-indicator');
+      const text = document.getElementById('turn-text');
       if (nextTurn === mySymbol) {
-        indicator.textContent = '👉 Lượt của bạn (' + mySymbol + ')';
+        text.textContent = '👉 Lượt của bạn';
         indicator.style.color = '#22c55e';
       } else {
-        indicator.textContent = '⏳ Đợi đối thủ (' + nextTurn + ')...';
+        text.textContent = '⏳ Đợi đối thủ...';
         indicator.style.color = '#fbbf24';
       }
+      setActivePill(gameActive ? nextTurn : null);
     }
 
-    function showWinner(winner, isDraw) {
+    function showWinner(winner, isDraw, winCells) {
       gameActive = false;
+      setActivePill(null);
       const overlay = document.getElementById('winner-overlay');
       const text = document.getElementById('winner-text');
       if (isDraw) {
@@ -319,6 +423,23 @@
       overlay.classList.add('show');
     }
 
+    function rememberServerState(data) {
+      lastServerBoard = data.board;
+      lastServerMove = data.last_move || null;
+      lastServerTurn = data.next_turn;
+    }
+
+    function applyScores(data) {
+      if (data.score_x === undefined || data.score_o === undefined) return;
+      if (mySymbol === 'X') {
+        myScore = data.score_x;
+        opponentScore = data.score_o;
+      } else {
+        myScore = data.score_o;
+        opponentScore = data.score_x;
+      }
+    }
+
     // Called by native Android when ADC data arrives
     window.receiveData = function (dataStr) {
       console.log('[Caro] Received: ' + dataStr);
@@ -330,14 +451,9 @@
           mySymbol = data.your_symbol || 'X';
           initialized = true;
           gameActive = true;
-          if (mySymbol === 'X') {
-            myScore = data.score_x || 0;
-            opponentScore = data.score_o || 0;
-          } else {
-            myScore = data.score_o || 0;
-            opponentScore = data.score_x || 0;
-          }
-          renderBoard(data.board, null);
+          applyScores(data);
+          rememberServerState(data);
+          renderBoard(data.board, null, false);
           updateScores();
           updateTurn(data.next_turn);
           document.getElementById('winner-overlay').classList.remove('show');
@@ -346,21 +462,14 @@
             console.log('[Caro] Ignoring update_board because not initialized yet.');
             return;
           }
-          renderBoard(data.board, data.last_move);
-          if (data.score_x !== undefined && data.score_o !== undefined) {
-            if (mySymbol === 'X') {
-              myScore = data.score_x;
-              opponentScore = data.score_o;
-            } else {
-              myScore = data.score_o;
-              opponentScore = data.score_x;
-            }
-          }
+          rememberServerState(data);
+          renderBoard(data.board, data.last_move, false);
+          applyScores(data);
+          updateScores();
           if (data.winner && data.winner !== '') {
-            showWinner(data.winner, false);
-            updateScores();
+            showWinner(data.winner, false, data.win_cells);
           } else if (data.draw) {
-            showWinner('', true);
+            showWinner('', true, null);
           } else {
             gameActive = true;
             updateTurn(data.next_turn);
@@ -378,18 +487,13 @@
     const MAX_SYNC_RETRIES = 15;
 
     function sendSyncState() {
-      const payload = { service: 'caro', action: 'sync_state' };
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      sendToServer({ service: 'caro', action: 'sync_state' });
       console.log('[Caro] sync_state sent (attempt ' + (syncRetries + 1) + '/' + MAX_SYNC_RETRIES + ')');
     }
 
     window.onload = function () {
       initBoard();
-      
+
       // Request GSMA Data Channel creation (Triggers re-INVITE natively)
       if (window.ImsDcBridge) {
         window.ImsDcBridge.createDataChannel("caro");
@@ -397,7 +501,6 @@
         // Fallback for some JS bridges
         window._dsbridge.call("createDataChannel", "caro");
       }
-
 
       // Send initial sync_state immediately (may arrive before re-INVITE completes — harmless, will be retried)
       sendSyncState();

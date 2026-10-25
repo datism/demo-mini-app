@@ -106,4 +106,11 @@ __pycache__/
 !go-mf/vendor/modules.txt
 
 # Preserve static assets zip files
-!go-mf/static/assets/*.zip.superpowers/
+!go-mf/static/assets/*.zip
+
+# Subagent-driven-development workspace
+.superpowers/
+
+# Caro headless UI check
+go-mf/test/caro_ui/node_modules/
+go-mf/test/caro_ui/out/
