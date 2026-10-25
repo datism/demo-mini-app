@@ -2,6 +2,7 @@ package dcas
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -139,16 +140,18 @@ func TestArmCaroTimerFiresWithSeq(t *testing.T) {
 
 func TestArmCaroTimerReplacesPrevious(t *testing.T) {
 	s := newTestCaroServer()
-	fired := make(chan int, 2)
-	s.caroTimeoutFn = func(callID string, seq int) { fired <- seq }
+	var mu sync.Mutex
+	var got []int
+	s.caroTimeoutFn = func(callID string, seq int) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, seq)
+	}
 	s.armCaroTimer("call1", 1, 30*time.Millisecond)
 	s.armCaroTimer("call1", 2, 10*time.Millisecond)
 	time.Sleep(100 * time.Millisecond)
-	close(fired)
-	var got []int
-	for seq := range fired {
-		got = append(got, seq)
-	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(got) != 1 || got[0] != 2 {
 		t.Fatalf("fired %v, want only [2]", got)
 	}
