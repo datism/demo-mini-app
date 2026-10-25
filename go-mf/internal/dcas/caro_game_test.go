@@ -3,6 +3,7 @@ package dcas
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -53,5 +54,66 @@ func TestCaroErrorMessagesAreCleanUTF8(t *testing.T) {
 				t.Errorf("message %q contains mojibake sequence %q", m, bad)
 			}
 		}
+	}
+}
+
+func TestStartCaroTurn(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	g := &CaroGame{TurnSeq: 3}
+	startCaroTurn(g, now)
+	if g.TurnSeq != 4 || g.TurnStartedAt != now.UnixMilli() {
+		t.Fatalf("got seq=%d startedAt=%d", g.TurnSeq, g.TurnStartedAt)
+	}
+}
+
+func TestApplyCaroTimeout(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+
+	g := &CaroGame{Status: "playing", Turn: "X", TurnSeq: 5}
+	if !applyCaroTimeout(g, 5, now) {
+		t.Fatal("expected timeout to apply")
+	}
+	if g.Turn != "O" || g.TurnSeq != 6 || g.TurnStartedAt != now.UnixMilli() {
+		t.Fatalf("after timeout: turn=%s seq=%d startedAt=%d", g.Turn, g.TurnSeq, g.TurnStartedAt)
+	}
+
+	stale := &CaroGame{Status: "playing", Turn: "X", TurnSeq: 6}
+	if applyCaroTimeout(stale, 5, now) || stale.Turn != "X" || stale.TurnSeq != 6 {
+		t.Fatal("stale seq must not change the game")
+	}
+
+	for _, status := range []string{"win_X", "win_O", "draw"} {
+		over := &CaroGame{Status: status, Turn: "X", TurnSeq: 5}
+		if applyCaroTimeout(over, 5, now) || over.Turn != "X" {
+			t.Fatalf("status %s must not change the game", status)
+		}
+	}
+}
+
+func TestCaroRemaining(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	g := &CaroGame{TurnStartedAt: now.Add(-5 * time.Second).UnixMilli()}
+	if got := caroRemaining(g, now); got != 15*time.Second {
+		t.Fatalf("normal: got %v want 15s", got)
+	}
+	g.TurnStartedAt = now.Add(-60 * time.Second).UnixMilli()
+	if got := caroRemaining(g, now); got != time.Second {
+		t.Fatalf("expired: got %v want 1s", got)
+	}
+	g.TurnStartedAt = now.Add(30 * time.Second).UnixMilli()
+	if got := caroRemaining(g, now); got != CaroTurnTimeout {
+		t.Fatalf("future start: got %v want %v", got, CaroTurnTimeout)
+	}
+}
+
+func TestCaroTurnMsLeft(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	g := &CaroGame{Status: "playing", TurnStartedAt: now.Add(-2 * time.Second).UnixMilli()}
+	if got := caroTurnMsLeft(g, now); got != 18000 {
+		t.Fatalf("playing: got %d want 18000", got)
+	}
+	g.Status = "win_X"
+	if got := caroTurnMsLeft(g, now); got != 0 {
+		t.Fatalf("game over: got %d want 0", got)
 	}
 }

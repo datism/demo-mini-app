@@ -23,6 +23,10 @@ const (
 
 var caroErrorMessages = []string{caroErrGameOver, caroErrBoardFull, caroErrNotYourTurn, caroErrInvalidPos, caroErrOccupied}
 
+// CaroTurnTimeout is how long a player has to move before the turn passes
+// to the opponent. A var so tests can shorten it.
+var CaroTurnTimeout = 20 * time.Second
+
 type CaroGame struct {
 	Board     [CaroBoardSize][CaroBoardSize]string
 	Turn      string // "X" or "O"
@@ -36,6 +40,8 @@ type CaroGame struct {
 	PlayerO   string
 	MoveCount int
 	WinCells  [][2]int
+	TurnSeq       int   // incremented on every turn change; guards stale timers
+	TurnStartedAt int64 // unix ms when the current turn began
 }
 
 func (s *DCASServer) handleCaroMessage(sessionID string, data []byte, conn *websocket.Conn) {
@@ -411,6 +417,48 @@ func (s *DCASServer) checkCaroWin(board *[CaroBoardSize][CaroBoardSize]string, r
 
 func (s *DCASServer) boardToSlice(board *[CaroBoardSize][CaroBoardSize]string) [CaroBoardSize][CaroBoardSize]string {
 	return *board
+}
+
+// startCaroTurn marks the beginning of a new turn.
+func startCaroTurn(game *CaroGame, now time.Time) {
+	game.TurnSeq++
+	game.TurnStartedAt = now.UnixMilli()
+}
+
+// applyCaroTimeout passes the turn to the opponent if seq still matches the
+// current turn and the game is in progress. Returns false when nothing changed.
+func applyCaroTimeout(game *CaroGame, seq int, now time.Time) bool {
+	if game.Status != "playing" || game.TurnSeq != seq {
+		return false
+	}
+	if game.Turn == "X" {
+		game.Turn = "O"
+	} else {
+		game.Turn = "X"
+	}
+	startCaroTurn(game, now)
+	return true
+}
+
+// caroRemaining returns the time left in the current turn, clamped to
+// [1s, CaroTurnTimeout] so a recovered timer never fires instantly or late.
+func caroRemaining(game *CaroGame, now time.Time) time.Duration {
+	left := CaroTurnTimeout - now.Sub(time.UnixMilli(game.TurnStartedAt))
+	if left < time.Second {
+		return time.Second
+	}
+	if left > CaroTurnTimeout {
+		return CaroTurnTimeout
+	}
+	return left
+}
+
+// caroTurnMsLeft is the turn_ms_left value sent to clients (0 when the game is over).
+func caroTurnMsLeft(game *CaroGame, now time.Time) int64 {
+	if game.Status != "playing" {
+		return 0
+	}
+	return caroRemaining(game, now).Milliseconds()
 }
 
 func (s *DCASServer) sendCaroError(sessionID, message string) {
