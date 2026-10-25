@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-sentinel-config
+  namespace: demo-mini-app
+data:
+  redis.conf: |
+    port 6379
+    dir /data
+    protected-mode no
+    # Persistence settings
+    save 3600 1
+    save 300 100
+    save 60 10000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: demo-mini-app
+spec:
+  clusterIP: None
+  ports:
+  - name: redis
+    port: 6379
+  selector:
+    app: redis
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel-service
+  namespace: demo-mini-app
+spec:
+  ports:
+  - name: sentinel
+    port: 26379
+    targetPort: 26379
+  selector:
+    app: redis
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: demo-mini-app
+spec:
+  serviceName: redis-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.2.15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          echo "[redis] Starting redis-0 as STANDALONE MASTER..."
+          # Always overwrite config from template to prevent stale replicaof entries
+          cp /readonly-config/redis.conf /data/redis.conf
+          # Safety: strip any leftover replicaof lines (from Sentinel CONFIG REWRITE or old configs)
+          sed -i '/^replicaof/d' /data/redis.conf
+          sed -i '/^slaveof/d' /data/redis.conf
+          echo "[redis] Config cleaned. Launching redis-server as master..."
+          exec redis-server /data/redis.conf
+        ports:
+        - containerPort: 6379
+          name: redis
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        - name: config-volume
+          mountPath: /readonly-config
+      # Sentinel removed: not needed for single-replica deployment.
+      # With only 1 node, Sentinel cannot form a quorum (needs 2+)
+      # and causes false failovers that demote redis-0 to slave.
+      volumes:
+      - name: config-volume
+        configMap:
+          name: redis-sentinel-config
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+      storageClassName: standard

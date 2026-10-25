@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="request_nc_permission_dialog_content">5G增强通话是指基于运营商IMS网络进行系统增强和业务创新，使得个人及企业行业的用户体验获得提升的一系列业务统称。其最显著的技术特征是在基于IMS音频、视频通道的基础上增加数据通道和融入AR等技术，依赖终端上的5G增强通话终端SDK，实现用户在通话时的交互式信息传递和互动，带来用户通话体验升级。\n使用增强通话功能需要显示在其他应用上层和读取通话的权限</string>
+    <string name="request_nc_permission_dialog_privacy">隐私政策</string>
+    <string name="request_nc_permission_dialog_user">用户协议</string>
+    <string name="request_nc_permission_dialog_title">需要授予5G增强通话权限</string>
+    <string name="request_nc_permission_dialog_click">点击阅读</string>
+    <string name="request_nc_permission_dialog_privacy_change_title">5G增强通话隐私协议变更</string>
+
+    <string name="cancel_btn">取消</string>
+    <string name="ok_btn">确定</string>
+    <string name="accept_btn">接收</string>
+    <string name="later_btn">稍后</string>
+    <string name="permission_request_title">“%s”需要使用以下权限</string>
+    <string name="permission_allowed">允许</string>
+    <string name="permission_denied">拒绝</string>
+
+    <string name="camera_title">摄像头</string>
+    <string name="vibrate_title">振动提醒</string>
+    <string name="read_contact_title">读取联系人</string>
+    <string name="record_audio_title">麦克风</string>
+    <string name="external_storage_title">读取外置存储</string>
+    <string name="location_title">定位</string>
+    <string name="call_state_title">通话状态</string>
+    <string name="contacts">联系人</string>
+    <string name="wifi">Wi-Fi</string>
+
+    <string name="camera_usage">摄像头权限</string>
+    <string name="vibrate_usage">马达权限</string>
+    <string name="read_contact_usage">联系人信息</string>
+    <string name="record_audio_usage">麦克风权限</string>
+    <string name="external_storage_usage">外置存储信息</string>
+    <string name="location_usage">位置信息</string>
+    <string name="call_state_usage">通话状态信息</string>
+    <string name="contacts_usage">联系人信息</string>
+    <string name="wifi_usage">Wi-Fi信息</string>
+    <string name="blue_tooth_usage">蓝牙权限</string>
+
+    <string name="bluetooth">附近的设备</string>
+    <string name="camera_description">用于拍照或录像</string>
+    <string name="vibrate_description">用于提醒用户实时消息与实时状态</string>
+    <string name="read_contact_description">用于读取与保存联系人</string>
+    <string name="record_audio_description">用于语音通话</string>
+    <string name="external_storage_description">用于存储文件</string>
+    <string name="location_description">用于提供定位服务</string>
+    <string name="call_state_description">用于提供增强通话服务</string>
+    <string name="contact_description">用于获取联系人信息</string>
+    <string name="wifi_description">用于获取Wi-Fi信息</string>
+
+    <string name="bluetooth_description">用于蓝牙连接（包括扫描设备，被设备发现，连接设备）</string>
+    <string name="permission_preference_title">权限设置</string>
+    <string name="version_preference_title">版本号</string>
+    <string name="setting_preference_title">设置</string>
+    <string name="permission_usage_title">个人信息与权限使用记录</string>
+    <string name="setting_permission_tips">该小程序未使用系统权限，无法进行权限设置</string>
+
+    <string name="open_permission_title">开启权限</string>
+    <string name="open_permission_tips">使用%s需要开启以下权限：</string>
+    <string name="open_permission_setting">设置</string>
+    <string name="open_permission_exit">退出</string>
+    <string name="permission_not_grant_tips">未授予小程序需要的全部权限，小程序退出</string>
+
+    <string name="setting">设置</string>
+    <string name="back_text">返回</string>
+    <string name="style_text">皮肤</string>
+
+    <string name="style_text_title">皮肤设置</string>
+
+    <string name="style_black">经典风格</string>
+    <string name="style_white">白色风格</string>
+    <string name="request_dialog_title">信息申请</string>
+    <string name="request_dialog_message">小程序想要获取对端手机号码以提供相关服务，是否同意？</string>
+
+    <string name="btn_agree">同意</string>
+    <string name="btn_refuse">拒绝</string>
+    <string name="holder_call_state_tips">相关通话被保持，待通话恢复后，小程序可继续使用。</string>
+    <string name="save">保存至相册</string>
+    <string name="start_miniapp_tips">对方邀请您使用%s小程序</string>
+
+    <string name="expanded_menu_title">我的小程序</string>
+
+    <string name="toast_download_mini_app_failed">小程序下载失败</string>
+    <string name="recently_used_mini_app">本次通话中使用的小程序</string>
+
+    <string name="open_tips">5G增强通话是指基于运营商IMS网络进行系统增强和业务创新，使得个人及企业行业的用户体验获得提升的一系列业务统称。\n其最显著的技术特征是在基于IMS音频、视频通道的基础上增加数据通道和融入AR等技术，依赖终端上的5G增强通话终端SDK，实现用户在通话时的交互式信息传递和互动，带来用户通话体验升级。</string>
+    <string name="main_activity_title">增强通话</string>
+    <string name="used_miniapp_title">最近使用过的小程序</string>
+    <string name="open_btn_title">前往开启</string>
+
+    <string name="open_switch_title">开启/关闭5G增强通话</string>
+    <string name="local_debug_entry">本地调试入口</string>
+    <string name="net_debug_entry">互联网模拟入口</string>
+    <string name="local_debug_entry_summary">点击后进入调试页面，可进行本地调试</string>
+    <string name="net_debug_entry_summary">点击后进入调试页面，可进行互联网模拟调试</string>
+    <string name="please_open">请先开启5G增强通话</string>
+    <string name="open_switch_tips">开启表明您已经同意《隐私政策》和《用户协议》</string>
+    <string name="close_switch_tips">关闭表明您不同意或撤回同意《隐私政策》和《用户协议》</string>
+    <string name="authorize_and_enable">授权开启</string>
+    <string name="after_call_use">此入口仅通话后可用</string>
+    <string name="authorize_tips">请先阅读并勾选同意《隐私政策》和《用户协议》</string>
+    <string name="miss_permission_tips">缺少权限增强通话功能将无法使用</string>
+    <string name="download_model_title">正在下载模型</string>
+    <string name="download_model_description">正在下载模型</string>
+    <string name="download_file_title">正在下载文件</string>
+    <string name="download_file_description">正在下载文件</string>
+    <string name="screen_share_tips">已开启屏幕共享，可通过右侧的控制按钮开启或关闭涂鸦画板</string>
+    <string name="fellow_dialer">悬浮球跟随系统通话APP</string>
+
+    <string name="permission_usage_tips_recently">仅展示过去7天的使用记录</string>
+    <string name="permission_usage_tips_none">暂无个人信息与权限使用记录</string>
+    <string name="main_page_title_close">暂未开启增强通话</string>
+    <string name="main_page_description_close">5G增强通话可以为您提供更优秀的通话服务</string>
+    <string name="main_page_title_no_history">暂无小程序使用记录</string>
+    <string name="main_page_description_no_history">通话中使用的小程序将展示在这里</string>
+    <string name="delete_string">删除</string>
+    <string name="delete_string_ensure">松手即可删除</string>
+    <string name="mic_mute">静音</string>
+    <string name="speaker_on">扬声器</string>
+    <string name="new_call_close_tips">已关闭，将在下次通话时生效</string>
+    <string name="screen_share_not_in_top_tips">将通话应用拉到前台后,您可继续观看涂鸦轨迹</string>
+</resources>

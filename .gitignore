@@ -1,0 +1,109 @@
+# Android build outputs and caches
+android-client/app/build/
+android-client/.gradle/
+android-client/local.properties
+android-client/.idea/
+android-client/build/
+android-client/build-logic/.gradle/
+android-client/build-logic/.kotlin/
+android-client/build-logic/convention/build/
+app-debug.apk
+
+# SDK zips and extracted SDK folders
+*release-26.2.0.zip
+*release-26.2.0/
+*unzipped/
+ims-dc-sdk-extracted/
+
+# Erlang build outputs and dependencies cache
+erlang-sip/_build/
+erlang-sip/.rebar3/
+
+# Large capture files and traces
+capture.pcap
+*.pcap
+
+# Kubernetes images bundle folder (offline save target)
+offline-images/
+deploy/offline-images/
+
+# Executables and compiled binaries
+*.exe
+*.tar
+ue-simulator-new
+ims-udp-relay-linux
+/mf
+go-mf/mf
+
+# Debug dumps, screenshots, and temp files
+/*.xml
+/*.png
+/*.log
+log*.txt
+*_logs*.txt
+full_test_log.txt
+sip_sdp.txt
+deploy/config/sslkeylog.txt
+go-mf/static/assets/temp_tuya/
+
+# Windows local test environment override files
+config/sys_config_win.json
+deploy/docker-compose.win.yml
+deploy/start-win.ps1
+deploy/stop-win.ps1
+deploy/.env
+
+android-client/.jbr/
+android-client/jdk21.zip
+android-client/jdk21/
+logcat*.txt
+pods.json
+scratch/
+*.beam
+
+# Local JDK directories (use system JAVA_HOME)
+jdk-17/
+jdk-17-temurin/
+jdk17/
+jdk17.zip
+openjdk.zip
+jdk*
+
+# Compiled Go binaries (should never be committed)
+go-mf/dc-test-tool
+go-mf/test_tool
+
+# Development scratch files
+go-mf/scratch/
+go-mf/refactor*.py
+test.go
+test_*.erl
+scratch_test.erl
+temp_*.html
+scscf_launcher.sh
+patch.py
+
+# Sensitive files
+config/sslkeylog.txt
+go-mf/config/bdc_ssl_keys.log
+
+# Android debug logs
+android-client/*.log
+
+# Empty/abandoned directories
+IMS-DC-SDK-Open-Source/
+operator-menu-extracted/
+
+# YAML root scratch files that should be in deploy/
+coredns-cm.yaml
+dcsf-svc.yaml
+patch-coredns.yaml
+__pycache__/
+*.pyc
+
+# Root text/log artifacts
+/*.txt
+!go-mf/vendor/modules.txt
+
+# Preserve static assets zip files
+!go-mf/static/assets/*.zip

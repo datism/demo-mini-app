@@ -1,0 +1,376 @@
+{
+  "scenarios": [
+    {
+      "name": "Scenario 1: Whiteboard Draw & FunCalling & Exit Mini-App (2003 calling 2004)",
+      "caller": {
+        "username": "2003",
+        "password": "password2003"
+      },
+      "callee": {
+        "username": "2004",
+        "password": "password2004"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 30000
+        },
+        {
+          "action": "http_get_bdc",
+          "payload": "/",
+          "delay_ms": 1000
+        },
+        {
+          "action": "request_app",
+          "payload": "sketch-sync-app",
+          "delay_ms": 7000
+        },
+        {
+          "action": "wait_webrtc_connect",
+          "stream_id": 1000,
+          "timeout_ms": 30000
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"type\":\"draw\",\"action\":\"start\",\"x\":150,\"y\":300,\"color\":\"#ff0000\"}",
+          "delay_ms": 500
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"type\":\"draw\",\"action\":\"move\",\"x\":170,\"y\":310,\"color\":\"#ff0000\"}",
+          "delay_ms": 500
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1001,
+          "payload": "{\"service\":\"fun-calling\",\"action\":\"send_emoji\",\"type\":\"heart\"}",
+          "delay_ms": 1000
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "close_app",
+          "payload": "sketch-sync-app",
+          "delay_ms": 2000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 2000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 2: Short Call Session (Voice/Video Only) (2005 calling 2006)",
+      "caller": {
+        "username": "2005",
+        "password": "password2005"
+      },
+      "callee": {
+        "username": "2006",
+        "password": "password2006"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 30000
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 1000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 3: Caro Game Interaction - Caller Initiated & Exit App (1005 calling 1006)",
+      "caller": {
+        "username": "1005",
+        "password": "password1005"
+      },
+      "callee": {
+        "username": "1006",
+        "password": "password1006"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 30000
+        },
+        {
+          "action": "request_app",
+          "payload": "caro",
+          "delay_ms": 5000
+        },
+        {
+          "action": "wait_webrtc_connect",
+          "stream_id": 1000,
+          "timeout_ms": 30000
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"service\":\"caro\",\"action\":\"new_game\"}",
+          "delay_ms": 500
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"service\":\"caro\",\"action\":\"move\",\"row\":4,\"col\":4}",
+          "delay_ms": 1000
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "close_app",
+          "payload": "caro",
+          "delay_ms": 2000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 2000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 4: A calls B, A cancels call setup (Early Dialog CANCEL) (2007 calling 2008)",
+      "caller": {
+        "username": "2007",
+        "password": "password2007"
+      },
+      "callee": {
+        "username": "2008",
+        "password": "password2008"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "payload": "no_wait",
+          "delay_ms": 2000
+        },
+        {
+          "action": "cancel",
+          "delay_ms": 1000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 5: A calls B, B rejects incoming call (486 Busy / 603 Decline) (2007 calling 2008)",
+      "caller": {
+        "username": "2007",
+        "password": "password2007"
+      },
+      "callee": {
+        "username": "2008",
+        "password": "password2008"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "payload": "no_wait",
+          "delay_ms": 2000
+        },
+        {
+          "action": "reject",
+          "delay_ms": 1000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 6: Whiteboard Draw - A calls B, B answers, B terminates (2001 calling 2002)",
+      "caller": {
+        "username": "2001",
+        "password": "password2001"
+      },
+      "callee": {
+        "username": "2002",
+        "password": "password2002"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 30000
+        },
+        {
+          "action": "request_app",
+          "payload": "sketch-sync-app",
+          "delay_ms": 5000
+        },
+        {
+          "action": "wait_webrtc_connect",
+          "stream_id": 1000,
+          "timeout_ms": 30000
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"type\":\"draw\",\"action\":\"start\",\"x\":100,\"y\":200,\"color\":\"#00ff00\"}",
+          "delay_ms": 500
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "hangup",
+          "payload": "callee",
+          "delay_ms": 2000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 7: Callee-Initiated Caro App (1007 calling 1008)",
+      "caller": {
+        "username": "1007",
+        "password": "password1007"
+      },
+      "callee": {
+        "username": "1008",
+        "password": "password1008"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 10000
+        },
+        {
+          "action": "request_app",
+          "payload": "caro",
+          "role": "callee",
+          "delay_ms": 5000
+        },
+        {
+          "action": "wait_webrtc_connect",
+          "stream_id": 1000,
+          "timeout_ms": 30000
+        },
+        {
+          "action": "send_data",
+          "stream_id": 1000,
+          "payload": "{\"service\":\"caro\",\"action\":\"move\",\"row\":4,\"col\":5}",
+          "delay_ms": 1000
+        },
+        {
+          "action": "close_app",
+          "payload": "caro",
+          "role": "callee",
+          "delay_ms": 2000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 2000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 8: Hotline 198 CSKH Smart-Menu (A2P UAS Interaction) (2009 calling 198)",
+      "caller": {
+        "username": "2009",
+        "password": "password2009"
+      },
+      "callee": {
+        "username": "198",
+        "password": ""
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "http_get_bdc",
+          "payload": "/",
+          "delay_ms": 2000
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 2000
+        }
+      ]
+    },
+    {
+      "name": "Scenario 9: Enterprise Caller ID & Promotion (1001 calling 1002)",
+      "caller": {
+        "username": "1001",
+        "password": "password1001"
+      },
+      "callee": {
+        "username": "1002",
+        "password": "password1002"
+      },
+      "steps": [
+        {
+          "action": "wait_register",
+          "timeout_ms": 15000
+        },
+        {
+          "action": "dial",
+          "timeout_ms": 30000
+        },
+        {
+          "action": "http_get_bdc",
+          "payload": "/enterprise-callerid",
+          "delay_ms": 2000
+        },
+        {
+          "action": "assert_rtp",
+          "delay_ms": 3000
+        },
+        {
+          "action": "hangup",
+          "payload": "caller",
+          "delay_ms": 2000
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "appId": "fun-calling-app",
+  "qosHint": {
+    "latencyMs": 100,
+    "packetLossRate": 0.01
+  }
+}

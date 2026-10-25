@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Enterprise Verified Caller ID & Ads</title>
+  <style>
+    :root {
+      --primary: #00E676;
+      --primary-dark: #00B248;
+      --accent-gold: #FFD700;
+      --promo-red: #FF1744;
+      --card-bg: rgba(15, 23, 42, 0.90);
+      --card-border: rgba(255, 255, 255, 0.18);
+      --text-main: #FFFFFF;
+      --text-muted: rgba(248, 250, 252, 0.75);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: transparent;
+      color: var(--text-main);
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      overflow-y: auto;
+      overflow-x: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      padding: 10px 14px 16px 14px;
+    }
+
+    /* ─── 1. Header Định Danh Doanh Nghiệp ─── */
+    .verified-header {
+      width: 100%;
+      max-width: 360px;
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 12px rgba(0, 230, 118, 0.15);
+      animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      margin-bottom: 8px;
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .logo-wrapper {
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 2px solid var(--primary);
+      object-fit: cover;
+      background: #ffffff;
+      box-shadow: 0 0 10px rgba(0, 230, 118, 0.35);
+    }
+
+    .logo-badge-icon {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      background: var(--primary);
+      color: #000000;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+      border: 2px solid #0f172a;
+    }
+
+    .brand-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .brand-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .brand-name {
+      font-size: 15.5px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      color: #FFFFFF;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cert-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: rgba(0, 230, 118, 0.16);
+      border: 1px solid rgba(0, 230, 118, 0.4);
+      color: var(--primary);
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .intent-text {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ─── 2. Hộp Khuyến Mãi & QR Code ─── */
+    .promo-container {
+      width: 100%;
+      max-width: 360px;
+      background: rgba(255, 255, 255, 0.97);
+      color: #1e293b;
+      padding: 12px 14px;
+      border-radius: 20px;
+      text-align: center;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 24px rgba(255, 23, 68, 0.2);
+      border: 2px solid rgba(255, 255, 255, 0.85);
+      animation: popUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    @keyframes popUp {
+      from { opacity: 0; transform: scale(0.9); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .promo-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, #FF1744, #D50000);
+      color: #FFFFFF;
+      padding: 3px 10px;
+      border-radius: 14px;
+      font-size: 10.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      box-shadow: 0 3px 8px rgba(255, 23, 68, 0.35);
+      margin-bottom: 6px;
+      animation: pulseGlow 1.8s infinite alternate;
+    }
+
+    @keyframes pulseGlow {
+      from { transform: scale(1); }
+      to { transform: scale(1.03); }
+    }
+
+    .promo-title {
+      font-size: 14.5px;
+      font-weight: 900;
+      color: #D50000;
+      line-height: 1.3;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+    }
+
+    .qr-frame {
+      position: relative;
+      margin: 8px 0 6px 0;
+      padding: 6px;
+      background: #FFFFFF;
+      border-radius: 14px;
+      border: 2px dashed #00E676;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+      display: inline-block;
+    }
+
+    .qr-image {
+      width: 130px;
+      height: 130px;
+      display: block;
+      object-fit: contain;
+    }
+
+    .promo-subtext {
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.3;
+      max-width: 280px;
+    }
+
+    .status-pill {
+      margin-top: 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 8px;
+      background: #f1f5f9;
+      color: #334155;
+      display: inline-block;
+    }
+
+    /* ─── 3. Thanh Nút Tương Tác (Action Bar) ─── */
+    .action-bar {
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: none;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: transform 0.15s ease;
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+    }
+
+    .btn:active {
+      transform: scale(0.96);
+    }
+
+    .btn-skip {
+      background: rgba(30, 41, 59, 0.90);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .btn-claim {
+      background: linear-gradient(135deg, #00E676 0%, #00C853 100%);
+      color: #052e16;
+      box-shadow: 0 6px 18px rgba(0, 230, 118, 0.45);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. Header Doanh Nghiệp Đã Xác Thực -->
+  <div class="verified-header" id="headerBox">
+    <div class="logo-wrapper">
+      <img id="logoImg" src="assets/logo.png" class="logo" alt="Logo">
+      <div class="logo-badge-icon">✔</div>
+    </div>
+    <div class="brand-info">
+      <div class="brand-name-row">
+        <span id="brandName" class="brand-name">VIETTEL TELECOM</span>
+        <span class="cert-badge">✔ Certified</span>
+      </div>
+      <div id="callIntent" class="intent-text">Cuộc gọi chăm sóc khách hàng doanh nghiệp</div>
+    </div>
+  </div>
+
+  <!-- 2. Hộp Quảng Cáo Tương Tác & QR Code -->
+  <div class="promo-container" id="promoBox">
+    <div class="promo-tag">🎁 Quà tặng tri ân</div>
+    <div id="promoTitle" class="promo-title">QUÉT MÃ TRÚNG THẺ 500K!</div>
+    <div class="qr-frame">
+      <img id="qrImg" src="assets/qr-coupon.png" class="qr-image" alt="QR Code">
+    </div>
+    <div id="promoSubtext" class="promo-subtext">Quét mã QR hoặc bấm <b>"Nhận ngay"</b> để mở quà tặng</div>
+    <div id="statusPill" class="status-pill">📡 Kênh 5G New Calling đã kết nối</div>
+  </div>
+
+  <!-- 3. Thanh Nút Tương Tác -->
+  <div class="action-bar">
+    <button class="btn btn-skip" id="btnSkip" onclick="handleSkip()">
+      <span>✕</span>
+      <span>Bỏ qua</span>
+    </button>
+    <button class="btn btn-claim" id="btnClaim" onclick="handleClaim()">
+      <span>🎁</span>
+      <span>Nhận ngay</span>
+    </button>
+  </div>
+
+  <script>
+    const PROMO_URL = "https://viettel.vn/khuyen-mai";
+
+    // ─── Gửi bản tin qua ADC (Stream 1000) ───
+    function sendAdcMessage(payload) {
+      const jsonStr = JSON.stringify(payload);
+      console.log("[EnterpriseCallerID] Sending ADC payload:", jsonStr);
+
+      let sent = false;
+      if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
+        window.AndroidBridge.sendData(jsonStr);
+        sent = true;
+      } else if (window.AndroidBridge && typeof window.AndroidBridge.send === 'function') {
+        window.AndroidBridge.send(1000, jsonStr);
+        sent = true;
+      } else if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function') {
+        window.IMSDataChannelBridge.send(1000, jsonStr);
+        sent = true;
+      }
+      return sent;
+    }
+
+    // ─── Nhận dữ liệu từ Native Android / DCAS ───
+    function onDataReceived(data) {
+      console.log("[EnterpriseCallerID] onDataReceived:", data);
+      let parsed = data;
+      if (typeof data === 'string') {
+        try {
+          parsed = JSON.parse(data);
+        } catch (e) {
+          parsed = { response: data };
+        }
+      }
+
+      if (parsed.enterprise_name) {
+        document.getElementById('brandName').innerText = parsed.enterprise_name;
+      }
+      if (parsed.call_intent) {
+        document.getElementById('callIntent').innerText = parsed.call_intent;
+      }
+      if (parsed.promo_text) {
+        document.getElementById('promoTitle').innerText = parsed.promo_text;
+      }
+      if (parsed.logo_url) {
+        document.getElementById('logoImg').src = parsed.logo_url;
+      }
+      if (parsed.qr_url) {
+        document.getElementById('qrImg').src = parsed.qr_url;
+      }
+      if (parsed.status_msg) {
+        document.getElementById('statusPill').innerText = parsed.status_msg;
+      }
+      if (parsed.status === "claimed") {
+        document.getElementById('statusPill').innerText = "✅ Đã nhận quà tặng thành công!";
+        document.getElementById('statusPill').style.background = "#dcfce7";
+        document.getElementById('statusPill').style.color = "#15803d";
+      }
+    }
+
+    window.receiveData = function(jsonStr) { onDataReceived(jsonStr); };
+    window.onDataChannelMessage = function(jsonStr) { onDataReceived(jsonStr); };
+
+    // ─── Xử lý nút "Nhận ngay" ───
+    function handleClaim() {
+      console.log("[EnterpriseCallerID] User clicked Claim button");
+      document.getElementById('statusPill').innerText = "⏳ Đang mở liên kết khuyến mãi...";
+
+      // 1. Báo cáo action lên server DCAS qua ADC Stream 1000
+      sendAdcMessage({
+        service: "enterprise-callerid",
+        action: "claim"
+      });
+
+      // 2. Chuyển hướng bảo mật ra trình duyệt ngoài qua AndroidBridge
+      if (window.AndroidBridge && typeof window.AndroidBridge.openUrl === 'function') {
+        window.AndroidBridge.openUrl(PROMO_URL);
+      } else {
+        window.open(PROMO_URL, '_blank');
+      }
+    }
+
+    // ─── Xử lý nút "Bỏ qua" ───
+    function handleSkip() {
+      console.log("[EnterpriseCallerID] User clicked Skip button");
+
+      // 1. Gửi action skip lên DCAS qua ADC Stream 1000
+      sendAdcMessage({
+        service: "enterprise-callerid",
+        action: "skip"
+      });
+
+      // 2. Quay về menu chính
+      if (window.AndroidBridge && typeof window.AndroidBridge.startMiniApp === 'function') {
+        window.AndroidBridge.startMiniApp("operator-menu");
+      }
+    }
+
+    // Tự động yêu cầu thông tin ban đầu khi mini-app được nạp
+    window.addEventListener('DOMContentLoaded', function() {
+      setTimeout(function() {
+        sendAdcMessage({
+          service: "enterprise-callerid",
+          action: "get_info"
+        });
+      }, 300);
+    });
+  </script>
+</body>
+</html>

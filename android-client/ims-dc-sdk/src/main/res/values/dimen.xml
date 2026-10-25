@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="request_panel_max_height">800dp</dimen>
+
+    <dimen name="common_margin_start_end">16dp</dimen>
+
+    <dimen name="pop_up_window_width">120dp</dimen>
+
+    <dimen name= "toolbar_height">60dp</dimen>
+
+    <dimen name="mini_app_setting_margin_top_full_screen">36dp</dimen>
+
+    <dimen name="mini_app_setting_margin_top_normal">8dp</dimen>
+
+    <dimen name="permission_pop_up_window_height">60dp</dimen>
+
+    <dimen name="common_card_radius">16dp</dimen>
+
+    <dimen name="dialog_bottom_margin">20dp</dimen>
+
+    <dimen name="common_divider_height">0.33dp</dimen>
+    <dimen name="setting_layout_full_screen_margin_top">8dp</dimen>
+    <dimen name="common_button_width">220dp</dimen>
+
+    <dimen name="common_sheet_dialog_start_end">16dp</dimen>
+
+    <dimen name="common_preference_start">48dp</dimen>
+    <dimen name="common_preference_end">32dp</dimen>
+
+    <dimen name="common_preference_start_end">32dp</dimen>
+
+    <dimen name="common_preference_top">20dp</dimen>
+    <dimen name="common_preference_bottom">20dp</dimen>
+    <dimen name="common_text_preference_top">16dp</dimen>
+    <dimen name="common_text_preference_bottom">16dp</dimen>
+
+    <dimen name="version_preference_top_bottom">16dp</dimen>
+    <dimen name="common_dialog_width">312dp</dimen>
+
+    <dimen name="common_dialog_button_width">100dp</dimen>
+
+    <dimen name="main_5g_switch_height_width">24dp</dimen>
+    <dimen name="main_5g_switch_radius">16dp</dimen>
+
+    <dimen name="expanded_menu_height_width">312dp</dimen>
+
+    <dimen name="expanded_menu_setting_height">48dp</dimen>
+    <dimen name="expanded_divider_width">80dp</dimen>
+    <dimen name="expanded_margin_bottom">4dp</dimen>
+    <integer name="dialog_anim_duration">300</integer>
+
+    <dimen name="screen_share_tips_width">160dp</dimen>
+    <dimen name="screen_share_tips_height">60dp</dimen>
+
+    <dimen name="tips_text_margin_start">24dp</dimen>
+
+    <dimen name="progress_bar_layout_width_height">108dp</dimen>
+    <dimen name="toolbar_layout_padding_start">56dp</dimen>
+
+    <dimen name="permission_usage_item_height">56dp</dimen>
+    <dimen name="delete_layout_height">72dp</dimen>
+    <dimen name="preference_padding_top_bottom">4dp</dimen>
+</resources>

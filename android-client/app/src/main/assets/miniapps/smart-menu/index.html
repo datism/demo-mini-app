@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Tổng Đài 198 - Smart Customer Service</title>
+  <style>
+    :root {
+      --primary: #38bdf8;
+      --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+      --card-bg: rgba(15, 23, 42, 0.94);
+      --card-border: rgba(255, 255, 255, 0.16);
+      --text-main: #f8fafc;
+      --text-muted: rgba(248, 250, 252, 0.7);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: transparent;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .smart-menu-container {
+      width: 92%;
+      max-width: 380px;
+      max-height: 80vh;
+      background: var(--card-bg);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 14px 14px 16px 14px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.96) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* Header */
+    .header-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      background: rgba(56, 189, 248, 0.18);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 14px;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #38bdf8;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .header-badge .dot {
+      width: 5px;
+      height: 5px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 6px #10b981;
+      animation: pulseDot 2s infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      background: var(--primary-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.3px;
+    }
+
+    .subtitle {
+      margin: 0;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      line-height: 1.2;
+    }
+
+    /* Action Grid */
+    .action-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .action-card {
+      display: flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+      text-align: left;
+      position: relative;
+    }
+
+    .action-card:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .action-card:active {
+      transform: scale(0.98);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .action-icon {
+      font-size: 20px;
+      margin-right: 10px;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .icon-agent { background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.35)); }
+    .icon-video { background: linear-gradient(135deg, rgba(236, 72, 153, 0.35), rgba(244, 63, 94, 0.35)); }
+    .icon-time  { background: linear-gradient(135deg, rgba(245, 158, 11, 0.35), rgba(217, 119, 6, 0.35)); }
+
+    .action-details {
+      flex-grow: 1;
+    }
+
+    .action-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 1px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .action-desc {
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.2;
+    }
+
+    .action-arrow {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.35);
+      margin-left: 6px;
+    }
+
+    /* Response / Live Status Panel */
+    .response-panel {
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 14px;
+      padding: 10px 12px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 68px;
+    }
+
+    .response-header {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #38bdf8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .response-content {
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    /* Waveform Animation */
+    .waveform-box {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 18px;
+      margin-top: 2px;
+    }
+
+    .waveform-box.active {
+      display: flex;
+    }
+
+    .wave-bar {
+      width: 3px;
+      height: 5px;
+      background: #38bdf8;
+      border-radius: 2px;
+      animation: waveAnim 0.7s ease-in-out infinite alternate;
+    }
+
+    .wave-bar:nth-child(2) { animation-delay: 0.15s; height: 12px; background: #818cf8; }
+    .wave-bar:nth-child(3) { animation-delay: 0.3s; height: 18px; background: #c084fc; }
+    .wave-bar:nth-child(4) { animation-delay: 0.1s; height: 13px; background: #ec4899; }
+    .wave-bar:nth-child(5) { animation-delay: 0.25s; height: 7px; background: #38bdf8; }
+
+    @keyframes waveAnim {
+      0% { height: 4px; }
+      100% { height: 18px; }
+    }
+
+    /* Video Player Modal (Full Phone Screen Responsive) */
+    .video-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 7, 18, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 12px;
+      animation: fadeIn 0.25s ease;
+    }
+
+    .video-modal.open {
+      display: flex;
+    }
+
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      max-width: 440px;
+      background: #090d16;
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.95), 0 0 35px rgba(236, 72, 153, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      display: flex;
+      flex-direction: column;
+      animation: modalPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes modalPop {
+      0% { transform: scale(0.92); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .video-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .video-modal-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #f1f5f9;
+      letter-spacing: 0.2px;
+    }
+
+    .video-quality-tag {
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      color: #ffffff;
+    }
+
+    .video-close-btn {
+      position: static;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #cbd5e1;
+      font-size: 15px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .video-close-btn:hover, .video-close-btn:active {
+      background: rgba(239, 68, 68, 0.8);
+      color: white;
+      transform: scale(1.05);
+    }
+
+    .video-container-inner {
+      position: relative;
+      width: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    video {
+      width: 100%;
+      height: auto;
+      max-height: 65vh;
+      display: block;
+      background: #000;
+      object-fit: contain;
+    }
+
+    .video-modal-footer {
+      padding: 10px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.5px;
+      color: #94a3b8;
+    }
+
+    /* Footer / Back Button */
+    .btn-back {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 6px 12px;
+      color: #94a3b8;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="smart-menu-container">
+    <!-- Header -->
+    <div class="header-box">
+      <div class="header-badge">
+        <span class="dot"></span>
+        <span>Tổng đài 198 (5G DC)</span>
+      </div>
+      <h1>CSKH Thông Minh</h1>
+      <p class="subtitle">Tương tác trực tiếp với tổng đài qua 5G Data Channel</p>
+    </div>
+
+    <!-- 3 Core Action Cards -->
+    <div class="action-grid">
+      <!-- 1. Gặp tổng đài viên -->
+      <div id="btn-agent" class="action-card" onclick="requestAgentGreeting()">
+        <div class="action-icon icon-agent">🎧</div>
+        <div class="action-details">
+          <div class="action-title">Gặp tổng đài viên</div>
+          <div class="action-desc">Lời chào tự động & giọng nói hỗ trợ</div>
+        </div>
+        <div class="action-arrow">›</div>
+      </div>
+
+      <!-- 2. Video hoạt hình vui nhộn -->
+      <div id="btn-video" class="action-card" onclick="requestVideoPlayback()">
+        <div class="action-icon icon-video">🍿</div>
+        <div class="action-details">
+          <div class="action-title">Video hoạt hình vui nhộn</div>
+          <div class="action-desc">Phát video hoạt hình giải trí vui nhộn</div>
+        </div>
+        <div class="action-arrow">›</div>
+      </div>
+
+      <!-- 3. Thời gian hệ thống -->
+      <div id="btn-time" class="action-card" onclick="requestSystemTime()">
+        <div class="action-icon icon-time">⏰</div>
+        <div class="action-details">
+          <div class="action-title">Thời gian hệ thống</div>
+          <div class="action-desc">Truy vấn giờ thực từ máy chủ DCAS</div>
+        </div>
+        <div class="action-arrow">›</div>
+      </div>
+    </div>
+
+    <!-- Live Response / Status Panel -->
+    <div class="response-panel">
+      <div class="response-header">
+        <span>Phản hồi từ Tổng đài DCAS</span>
+        <span id="resp-status" style="color: #10b981;">ADC Sẵn sàng</span>
+      </div>
+      <div id="resp-text" class="response-content">
+        Chào mừng bạn đến với Tổng đài 198. Vui lòng chọn dịch vụ phía trên.
+      </div>
+      <div id="waveform" class="waveform-box">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+      </div>
+    </div>
+
+    <!-- Refresh / Reset 198 Menu -->
+    <div>
+      <button class="btn-back" onclick="resetSmartMenu()">
+        <span>🔄</span>
+        <span>Làm mới Menu Tổng đài 198</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- HTML5 Video Player Modal (Phone Screen Optimized) -->
+  <div id="videoModal" class="video-modal" onclick="closeVideoModal()">
+    <div class="video-wrapper" onclick="event.stopPropagation()">
+      <div class="video-modal-header">
+        <div class="video-modal-title">
+          <span>🍿 Video Hoạt hình Hài hước</span>
+          <span class="video-quality-tag">1080p HD</span>
+        </div>
+        <button class="video-close-btn" onclick="closeVideoModal()" title="Đóng video">✕</button>
+      </div>
+      <div class="video-container-inner">
+        <video id="hotlineVideo" controls playsinline preload="auto">
+          <source src="cartoon_video.mp4" type="video/mp4">
+          <source src="sample_video.mp4" type="video/mp4">
+          Trình duyệt không hỗ trợ phát video.
+        </video>
+      </div>
+      <div class="video-modal-footer">
+        <span>🎬 Hoạt hình giải trí • 5G Data Channel</span>
+        <span style="color: #ec4899; font-weight: 600;">Tổng đài 198</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Element for Agent Greeting Voice -->
+  <audio id="agentAudio" src="agent_greeting.mp3" preload="auto"></audio>
+
+  <script>
+    const sampleVideos = [
+      "cartoon_video.mp4",
+      "sample_video.mp4"
+    ];
+
+    function sendAdcMessage(payload) {
+      const jsonStr = JSON.stringify(payload);
+      console.log("[SmartMenu] Sending via ADC:", jsonStr);
+      
+      let sent = false;
+      if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
+        window.AndroidBridge.sendData(jsonStr);
+        sent = true;
+      } else if (window.AndroidBridge && typeof window.AndroidBridge.send === 'function') {
+        window.AndroidBridge.send(1000, jsonStr);
+        sent = true;
+      } else if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function') {
+        window.IMSDataChannelBridge.send(1000, jsonStr);
+        sent = true;
+      }
+      
+      // Immediate local rendering to ensure responsive visual feedback
+      handleLocalAction(payload);
+    }
+
+    // 1. Gặp tổng đài viên
+    function requestAgentGreeting() {
+      sendAdcMessage({ service: "smart-menu", action: "agent" });
+    }
+
+    // 2. Xem video hoạt hình vui nhộn
+    function requestVideoPlayback() {
+      sendAdcMessage({ service: "smart-menu", action: "video" });
+    }
+
+    // 3. Thời gian hệ thống
+    function requestSystemTime() {
+      sendAdcMessage({ service: "smart-menu", action: "time" });
+    }
+
+    // Handle local action response
+    function handleLocalAction(payload) {
+      if (payload.action === "agent") {
+        const greeting = "Xin chào quý khách! Tôi là tổng đài viên chăm sóc khách hàng 198. Tôi có thể hỗ trợ gì cho quý khách ạ?";
+        setResponseText(greeting, "#38bdf8");
+        playAgentVoice(greeting, "agent_greeting.mp3");
+      } else if (payload.action === "video") {
+        const randomUrl = sampleVideos[Math.floor(Math.random() * sampleVideos.length)];
+        setResponseText("Đang phát video hoạt hình vui nhộn...", "#ec4899");
+        openVideoModal(randomUrl);
+      } else if (payload.action === "time") {
+        const now = new Date();
+        const timeStr = "Thời gian hệ thống: " + now.toLocaleTimeString('vi-VN') + " - " + now.toLocaleDateString('vi-VN') + " (GMT+7)";
+        setResponseText(timeStr, "#f59e0b");
+      }
+    }
+
+    function onDataReceived(data) {
+      console.log("[SmartMenu] onDataReceived:", data);
+      let parsed = data;
+      if (typeof data === 'string') {
+        try { parsed = JSON.parse(data); } catch (e) { parsed = { response: data }; }
+      }
+      const respText = parsed.response || parsed.greeting || parsed.time || JSON.stringify(parsed);
+      const action = parsed.action || "";
+
+      if (action === "agent" || (parsed.response && parsed.response.includes("Xin chào"))) {
+        const greeting = parsed.greeting || parsed.response || "Xin chào quý khách! Tôi là tổng đài viên chăm sóc khách hàng 198. Tôi có thể hỗ trợ gì cho quý khách ạ?";
+        const audioUrl = parsed.audioUrl || "agent_greeting.mp3";
+        setResponseText(greeting, "#38bdf8");
+        playAgentVoice(greeting, audioUrl);
+      } else if (action === "video" || parsed.videoUrl) {
+        setResponseText(parsed.response || "Đang phát video hoạt hình vui nhộn...", "#ec4899");
+        const videoUrl = parsed.videoUrl || sampleVideos[Math.floor(Math.random() * sampleVideos.length)];
+        openVideoModal(videoUrl);
+      } else if (action === "time" || parsed.time) {
+        const timeStr = parsed.time || parsed.response;
+        setResponseText(timeStr, "#f59e0b");
+      } else {
+        setResponseText(respText, "#38bdf8");
+      }
+    }
+
+    window.receiveData = function(jsonStr) { onDataReceived(jsonStr); };
+    window.onDataChannelMessage = function(jsonStr) { onDataReceived(jsonStr); };
+
+    function playAgentVoice(text, audioUrl) {
+      const wave = document.getElementById("waveform");
+      wave.classList.add("active");
+
+      // 1. Native Android Bridge MediaPlayer call
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge.playAgentAudio === 'function') {
+          window.AndroidBridge.playAgentAudio();
+        }
+      } catch (e) {
+        console.log("Native AndroidBridge playAgentAudio error:", e);
+      }
+
+      // 2. HTML5 Audio Element playback
+      const audio = document.getElementById("agentAudio");
+      if (audio) {
+        if (audioUrl) {
+          audio.src = audioUrl;
+        }
+        audio.currentTime = 0;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log("HTML5 audio playback started");
+          }).catch(err => {
+            console.log("HTML5 audio play error:", err);
+          });
+        }
+        audio.onended = () => wave.classList.remove("active");
+        audio.onerror = () => wave.classList.remove("active");
+      }
+
+      // 3. Fallback Web Speech Synthesis if available
+      if ('speechSynthesis' in window && !audio) {
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = "vi-VN";
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
+          utterance.onend = () => wave.classList.remove("active");
+          utterance.onerror = () => wave.classList.remove("active");
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.log("SpeechSynthesis error:", e);
+        }
+      }
+
+      setTimeout(() => wave.classList.remove("active"), 5000);
+    }
+
+    function openVideoModal(url) {
+      const modal = document.getElementById("videoModal");
+      const video = document.getElementById("hotlineVideo");
+      video.src = url;
+      modal.classList.add("open");
+      video.play().catch(e => console.log("Autoplay:", e));
+    }
+
+    function closeVideoModal() {
+      const modal = document.getElementById("videoModal");
+      const video = document.getElementById("hotlineVideo");
+      video.pause();
+      video.currentTime = 0;
+      modal.classList.remove("open");
+    }
+
+    function setResponseText(text, statusColor = "#38bdf8") {
+      const el = document.getElementById("resp-text");
+      const statusEl = document.getElementById("resp-status");
+      el.innerText = text;
+      if (statusColor) statusEl.style.color = statusColor;
+    }
+
+    function resetSmartMenu() {
+      closeVideoModal();
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      const wave = document.getElementById("waveform");
+      if (wave) wave.classList.remove("active");
+      setResponseText("Chào mừng bạn đến với Tổng đài 198. Vui lòng chọn dịch vụ phía trên.", "#10b981");
+      const statusEl = document.getElementById("resp-status");
+      if (statusEl) statusEl.innerText = "ADC Sẵn sàng";
+    }
+
+    function goBackToMenu() {
+      resetSmartMenu();
+    }
+  </script>
+</body>
+</html>

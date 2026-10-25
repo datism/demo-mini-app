@@ -1,0 +1,214 @@
+/*
+ *   Copyright 2025-China Telecom Research Institute.
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *        https://www.apache.org/licenses/LICENSE-2.0
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ */
+
+package com.ct.ertclib.dc.core.usecase.miniapp
+
+import com.ct.ertclib.dc.core.utils.logger.Logger
+import com.ct.ertclib.dc.core.utils.common.JsonUtil
+import com.ct.ertclib.dc.core.utils.common.DCUtils
+import com.ct.ertclib.dc.core.constants.CommonConstants.DC_SEND_DATA_OK
+import com.ct.ertclib.dc.core.constants.MiniAppConstants.IS_PEER_SUPPORT_DC_PARAMS
+import com.ct.ertclib.dc.core.data.bridge.JSResponse
+import com.ct.ertclib.dc.core.data.miniapp.DataChannel
+import com.ct.ertclib.dc.core.data.miniapp.DataChannelApp
+import com.ct.ertclib.dc.core.data.miniapp.DataChannelAppInfo
+import com.ct.ertclib.dc.core.miniapp.MiniAppManager
+import com.ct.ertclib.dc.core.port.usecase.mini.IDCMiniEventUseCase
+import com.ct.ertclib.dc.core.utils.common.FileUtils
+import com.ct.ertclib.dc.core.utils.common.XmlUtils
+import com.newcalllib.datachannel.V1_0.IDCSendDataCallback
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.ct.ertclib.dc.core.miniapp.ui.webview.CompletionHandler
+import com.ct.ertclib.dc.core.miniapp.ui.widget.MiniAppView
+
+class DCMiniUseCase() : IDCMiniEventUseCase {
+
+    companion object {
+        private const val TAG = "DCMiniUseCase"
+    }
+
+    private val logger = Logger.getLogger(TAG)
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    override fun createAppDataChannel(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>,
+        handler: CompletionHandler<String?>
+    ) {
+        logger.info("createAppDataChannel")
+        if (params["dcLabels"] == null || (params["DataChannelAppInfoXml"] == null && params["DataChannelAppInfoJson"] == null)) {
+            val response = JSResponse("1", "dcLabels or description is null", "")
+            handler.complete(JsonUtil.toJson(response))
+            logger.info("JSApi asyn dcLabels or description is null")
+            return
+        }
+        val dcLabels = params["dcLabels"] as List<String>
+        val xmlInfo = params["DataChannelAppInfoXml"] as? String
+        val jsonInfo = params["DataChannelAppInfoJson"] as? String
+
+        var description = ""
+
+        if (!jsonInfo.isNullOrEmpty()){
+            val classes = arrayOf<Class<*>>(
+                DataChannelAppInfo::class.java,
+                DataChannelApp::class.java,
+                DataChannel::class.java
+            )
+            val dataChannelAppInfo = JsonUtil.fromJson(jsonInfo, DataChannelAppInfo::class.java)
+            description = XmlUtils.toXml(dataChannelAppInfo, classes)
+        } else if (!xmlInfo.isNullOrEmpty()) {
+            description = xmlInfo
+        }
+
+        dcLabels.forEach {
+            // 校验小程序ID
+            if (!miniAppView.viewModel.miniAppInfo?.let { it1 -> it.contains("_${it1.appId}_") }!!) {
+                val response = JSResponse("1", "$it appId error", "")
+                handler.complete(JsonUtil.toJson(response))
+                logger.info("JSApi asyn dcLabel$it appId error")
+                return
+            }
+            if (miniAppView.viewModel.createDCLabelList.contains(it)) {
+                val response = JSResponse("1", "dcLabel:$it is already created", "")
+                handler.complete(JsonUtil.toJson(response))
+                logger.info("JSApi asyn dcLabel$it already created")
+                return
+            }
+        }
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                // 补全streamId
+                if (!description.contains("StreamId")){
+                    description = description.replace("</DcLabel>","</DcLabel><StreamId></StreamId>")
+                }
+                val result = miniAppView.viewModel.createDC(dcLabels, description)
+                logger.info("JSApi asyn ,dcIds:$result")
+                val response = JSResponse("0", "${result?.toString()}", "")
+                handler.complete(JsonUtil.toJson(response))
+            }
+        }
+    }
+
+    override fun sendData(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>,
+        handler: CompletionHandler<String?>
+    ) {
+        val dcLabel = params["dcLabel"]
+        val data = params["data"]
+        if (dcLabel == null || data == null) {
+            val response = JSResponse("1", "dcLabel or data is null", "")
+            handler.complete(JsonUtil.toJson(response))
+            logger.info("JSApi asyn dcLabel or data is null")
+            return
+        }
+        val dataByteArray = FileUtils.base64ToByteArray(data as String)
+
+        val dcLabelStr = dcLabel as String
+        scope.launch(Dispatchers.IO) {
+            logger.info("JSApi asyn ,sendData dcLabel:$dcLabelStr, data:$data")
+            val dc = miniAppView.viewModel.openDCList.firstOrNull { DCUtils.compareDCLabel(it.dcLabel, dcLabelStr) }
+            dc?.send(dataByteArray, dataByteArray.size, object : IDCSendDataCallback.Stub() {
+                override fun onSendDataResult(state: Int) {
+                    logger.debug("onSendDataResult state:$state")
+                    val response = JSResponse(if(state == DC_SEND_DATA_OK) "0" else state.toString(), if(state == DC_SEND_DATA_OK) "success" else "fail", "")
+                    handler.complete(JsonUtil.toJson(response))
+                }
+            })
+        }
+    }
+
+    override fun closeAppDataChannel(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>,
+        handler: CompletionHandler<String?>
+    ) {
+        val dcLabel = params["dcLabel"]
+        if (dcLabel == null) {
+            logger.info("JSApi asyn closeDC dcLabel is null")
+            val response = JSResponse("1", "dcLabel is null", "")
+            handler.complete(JsonUtil.toJson(response))
+            return
+        }
+        val dcLabels = dcLabel as ArrayList<*>
+        for (dcLabelItem in dcLabels){
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    val dcLabelItemStr = dcLabelItem as String
+                    miniAppView.viewModel.closeDC(dcLabelItemStr)
+                }
+            }
+        }
+        val response = JSResponse("0", "success", "")
+        handler.complete(JsonUtil.toJson(response))
+    }
+
+    override fun isPeerSupportDC(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>,
+        handler: CompletionHandler<String?>
+    ) {
+        logger.info("JSApi asyn ,isPeerSupportDC")
+        val response = JSResponse("0", "success", mutableMapOf(IS_PEER_SUPPORT_DC_PARAMS to (MiniAppManager.getAppPackageManager(miniAppView.viewModel.callInfo?.telecomCallId)?.isPeerSupportDc() == true)))
+        scope.launch(Dispatchers.Main) {
+            handler.complete(JsonUtil.toJson(response))
+        }
+    }
+
+    override fun getBufferedAmountAsync(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>,
+        handler: CompletionHandler<String?>
+    ) {
+        handler.complete(getBufferedAmount(miniAppView, params))
+    }
+
+    override fun getBufferedAmount(
+        miniAppView: MiniAppView,
+        params: Map<String, Any>
+    ) : String {
+        val dcLabel = params["dcLabel"] as String?
+        if (dcLabel == null) {
+            logger.info("JSApi sync getBufferedAmount dcLabel is null")
+            val response = JSResponse("1", "getBufferedAmount dcLabel is null", mutableMapOf<String, Long>())
+            return JsonUtil.toJson(response)
+        }
+        val dc = miniAppView.viewModel.openDCList.firstOrNull { DCUtils.compareDCLabel(it.dcLabel, dcLabel) }
+        val bufferedAmount = dc?.let {
+            try {
+                it.bufferedAmount()
+            } catch (e: Exception) {
+                logger.error("getBufferedAmount dcLabel:$dcLabel failed, error:${e.message}")
+                -1
+            }
+        } ?: run {
+            -1
+        }
+        logger.info("JSApi sync ,getBufferedAmount dcLabel:$dcLabel bufferedAmount:$bufferedAmount")
+        if (bufferedAmount == -1L){
+            val response = JSResponse("1", "getBufferedAmount fail", mutableMapOf<String, Long>())
+            return JsonUtil.toJson(response)
+        }
+        val bufferedAmountMap = mutableMapOf<String, Long>()
+        bufferedAmountMap["bufferedAmount"] = bufferedAmount
+        val response = JSResponse("0", "success", bufferedAmountMap)
+        return JsonUtil.toJson(response)
+    }
+}

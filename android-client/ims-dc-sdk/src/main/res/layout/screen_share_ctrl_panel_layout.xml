@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:id="@+id/control_layout"
+        android:layout_width="wrap_content"
+        android:layout_height="80dp"
+        android:background="@drawable/sketch_ctrl_bg_shape"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <RelativeLayout
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_margin="20dp">
+
+            <ImageView
+                android:id="@+id/sketch_drawing_btn"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:src="@drawable/sketch_ctrl_drawing_selector"
+                tools:visibility="visible" />
+
+            <ImageView
+                android:id="@+id/sketch_red"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:layout_alignParentTop="true"
+                android:layout_alignParentEnd="true"
+                android:background="@drawable/red_point"
+                android:visibility="gone"
+                tools:visibility="visible" />
+        </RelativeLayout>
+
+        <ImageView
+            android:id="@+id/exit_board_btn"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_margin="20dp"
+            android:src="@drawable/close_board"
+            android:visibility="visible"
+            tools:visibility="visible" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tips_layout"
+        android:layout_width="wrap_content"
+        android:layout_height="80dp"
+        android:background="@drawable/sketch_ctrl_bg_shape"
+        android:gravity="center"
+        android:visibility="gone"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/control_tips"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:textColor="@color/white_alpha_80"
+            android:gravity="center"
+            android:maxWidth="160dp"
+            android:textSize="12sp"
+            android:layout_gravity="center"
+            android:text="@string/screen_share_not_in_top_tips"
+            android:layout_marginStart="@dimen/common_margin_start_end"
+            android:layout_marginEnd="@dimen/common_margin_start_end"
+            />
+
+    </LinearLayout>
+
+</FrameLayout>

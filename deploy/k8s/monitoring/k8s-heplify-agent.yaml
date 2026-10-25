@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: heplify-agent-config
+  namespace: demo-mini-app
+data:
+  # Cấu hình card mạng cần bắt gói tin (any = tất cả, hoặc chỉ định cụ thể eth0, eth1...)
+  HEPLIFY_INTERFACE: "any"
+
+  # Địa chỉ của cụm heplify-server thu thập tập trung (IP:Port hoặc DNS_Name:Port)
+  HEPLIFY_HEP_SERVER: "heplify-server:9060"
+
+  # Chế độ bắt gói tin (SIP, SIPRTCP, v.v...)
+  HEPLIFY_CAPTURE_MODE: "SIP"
+
+  # Bộ lọc BPF Filter để lọc dải IP hoặc cổng cụ thể (Tránh bắt rác mạng làm đơ DB)
+  HEPLIFY_BPF_FILTER: "((udp and port 5060) or (tcp and port 5060)) and not dst port 9060"
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: heplify-agent
+  namespace: demo-mini-app
+  labels:
+    app: heplify-agent
+spec:
+  selector:
+    matchLabels:
+      app: heplify-agent
+  template:
+    metadata:
+      labels:
+        app: heplify-agent
+    spec:
+      # hostNetwork: true là bắt buộc để container có thể nhìn thấy card mạng vật lý của host worker
+      hostNetwork: true
+      
+      # Đảm bảo phân giải tên miền nội bộ K8s (CoreDNS) bình thường kể cả khi dùng hostNetwork
+      dnsPolicy: ClusterFirstWithHostNet
+      
+      containers:
+        - name: heplify-agent
+          image: sipcapture/heplify:2.0.24
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            # Cấp quyền thao tác mạng thô cho Container bắt gói tin
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          env:
+            - name: HEPLIFY_CONFIG
+              value: ""
+            - name: HEPLIFY_INTERFACE
+              valueFrom:
+                configMapKeyRef:
+                  name: heplify-agent-config
+                  key: HEPLIFY_INTERFACE
+            - name: HEPLIFY_HEP_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: heplify-agent-config
+                  key: HEPLIFY_HEP_SERVER
+            - name: HEPLIFY_CAPTURE_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: heplify-agent-config
+                  key: HEPLIFY_CAPTURE_MODE
+            - name: HEPLIFY_BPF_FILTER
+              valueFrom:
+                configMapKeyRef:
+                  name: heplify-agent-config
+                  key: HEPLIFY_BPF_FILTER
+          # Khởi động Heplify client dùng các tham số được mount từ ConfigMap
+          command:
+            - "heplify"
+            - "-i"
+            - "$(HEPLIFY_INTERFACE)"
+            - "-hs"
+            - "$(HEPLIFY_HEP_SERVER)"
+            - "-m"
+            - "$(HEPLIFY_CAPTURE_MODE)"
+            - "-bpf"
+            - "$(HEPLIFY_BPF_FILTER)"

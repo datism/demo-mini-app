@@ -1,0 +1,1760 @@
+package com.demo.imsdc.ui
+
+import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.Context
+import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.demo.imsdc.R
+import com.demo.imsdc.databinding.ActivityCallBinding
+import com.demo.imsdc.notification.IncomingCallNotificationManager
+import com.demo.imsdc.sip.SipManager
+import com.demo.imsdc.webrtc.AndroidBridgeInterface
+import com.demo.imsdc.webrtc.DataChannelManager
+import com.demo.imsdc.webrtc.WebRtcManager
+import com.demo.imsdc.media.RtpMediaManager
+import android.app.KeyguardManager
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.view.SurfaceHolder
+import android.view.WindowManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import org.json.JSONArray
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
+import org.webrtc.PeerConnection
+import java.net.InetAddress
+
+private const val TAG = "CallActivity"
+
+/**
+ * CallActivity � M�n h�nh g?i di?n
+ *
+ * Layout: SurfaceView (video background) + WebView transparent (Mini-app overlay)
+ *
+ * Lu?ng kh?i t?o khi Activity b?t d?u:
+ *   1. L?y th�ng tin t? Intent (sipServer, localUser, remoteUser, mode)
+ *   2. Kh?i t?o WebRtcManager ? t?o PeerConnection ? t?o placeholder DC
+ *   3. createOffer() ? l?y SDP
+ *   4. SipManager.invite() ? g?i SIP INVITE v?i SDP
+ *   5. Nh?n 200 OK ? setRemoteAnswer() v?i SDP d� anchor v�o MF
+ *   6. ICE connected ? openDataChannels()
+ *   7. BDC: g?i HTTP GET ? nh?n HTML ? loadWebView()
+ *   8. ADC: ready for heart events
+ *   9. WebView: inject AndroidBridge, set transparent background
+ */
+class CallActivity : AppCompatActivity() {
+
+    companion object {
+        @Volatile
+        var activeInstance: CallActivity? = null
+        val isCallActive: Boolean
+            get() = activeInstance?.let { !it.isFinishing && !it.isDestroyed && !it.isEndingCall } ?: false
+
+        const val EXTRA_SIP_SERVER  = "sip_server"
+        const val EXTRA_LOCAL_USER  = "local_user"
+        const val EXTRA_REMOTE_USER = "remote_user"
+        const val EXTRA_LOCAL_IP    = "local_ip"
+        const val EXTRA_LOCAL_PORT  = "local_port"
+        const val EXTRA_SIP_PORT    = "sip_port"
+        const val EXTRA_INCOMING_INVITE  = "incoming_invite"
+        const val EXTRA_INCOMING_SDP     = "incoming_sdp"
+        const val EXTRA_INCOMING_CALL_ID = "incoming_call_id"
+        const val EXTRA_INCOMING_RAW_SDP = "incoming_raw_sdp"
+        const val EXTRA_AUTO_ANSWER      = "auto_answer"
+
+        fun launch(
+            activity: androidx.appcompat.app.AppCompatActivity,
+            sipServer: String,
+            localUser: String,
+            remoteUser: String,
+            localIp: String,
+            localPort: Int = 15060,
+            sipPort: Int = 5060
+        ) {
+            val intent = Intent(activity, CallActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(EXTRA_SIP_SERVER,  sipServer)
+                putExtra(EXTRA_LOCAL_USER,  localUser)
+                putExtra(EXTRA_REMOTE_USER, remoteUser)
+                putExtra(EXTRA_LOCAL_IP,    localIp)
+                putExtra(EXTRA_LOCAL_PORT,  localPort)
+                putExtra(EXTRA_SIP_PORT,    sipPort)
+            }
+            activity.startActivity(intent)
+        }
+
+        fun launchIncoming(
+            context: Context,
+            sipServer: String,
+            localUser: String,
+            remoteUser: String,
+            localIp: String,
+            localPort: Int,
+            sipPort: Int,
+            incomingInvite: String,
+            incomingSdp: String,
+            incomingCallId: String,
+            incomingRawSdp: String?
+        ) {
+            IncomingCallNotificationManager.show(
+                context = context,
+                sipServer = sipServer,
+                localUser = localUser,
+                remoteUser = remoteUser,
+                localIp = localIp,
+                localPort = localPort,
+                sipPort = sipPort,
+                incomingInvite = incomingInvite,
+                incomingSdp = incomingSdp,
+                incomingCallId = incomingCallId,
+                incomingRawSdp = incomingRawSdp
+            )
+        }
+    }
+
+    // --- ViewBinding ---------------------------------------------------------
+    lateinit var binding: ActivityCallBinding
+    lateinit var miniAppManager: MiniAppManager
+
+    // --- Dependencies --------------------------------------------------------
+    lateinit var sipManager: SipManager
+    lateinit var webRtcManager: WebRtcManager
+    lateinit var dcManager: DataChannelManager
+    private lateinit var androidBridge: AndroidBridgeInterface
+    lateinit var imsDcSdk: com.demo.imsdc.webrtc.ImsDcSdk
+
+    // --- Intent extras -------------------------------------------------------
+    private lateinit var sipServer:  String
+    private lateinit var localUser:  String
+    lateinit var remoteUser: String
+    private lateinit var localIp:    String
+    private var localPort = 15060
+    private var sipPort   = 5060
+
+    // --- State ---------------------------------------------------------------
+    var callId: String? = null
+    var isMiniAppInitiator = false
+    private var pendingInviteMsg: String? = null  // B-side: luu INVITE g?c d? g?i 200 OK
+    private var eglBase: org.webrtc.EglBase? = null
+    private var rtpMediaManager: RtpMediaManager? = null
+    private var timerJob: kotlinx.coroutines.Job? = null
+    private var elapsedSeconds = 0
+    private var isDataChannelsOpened = false
+    private var isRendererInitialized = false
+    private var isSpeakerMode = false
+    var currentAppId: String = "operator-menu"
+    private var isCallActiveUiShown = false
+    private var isVideoEnabled = false
+    internal var isEndingCall = false
+    private var ringtone: Ringtone? = null
+
+    private val debugReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_WHITEBOARD") {
+                Log.i(TAG, "Debug broadcast received! Launching whiteboard app...")
+                miniAppManager.launchMiniApp("sketch-sync-app")
+            } else if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_CARO") {
+                Log.i(TAG, "Debug broadcast received! Launching caro app...")
+                miniAppManager.launchMiniApp("caro")
+            } else if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_FUNCALL") {
+                Log.i(TAG, "Debug broadcast received! Launching fun-calling app...")
+                miniAppManager.launchMiniApp("fun-calling-app")
+            } else if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_SMARTMENU") {
+                Log.i(TAG, "Debug broadcast received! Launching smart-menu app...")
+                miniAppManager.launchMiniApp("smart-menu")
+            } else if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_ENTERPRISE" || (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_APP" && intent.getStringExtra("appId") == "enterprise-callerid")) {
+                Log.i(TAG, "Debug broadcast received! Launching enterprise-callerid app...")
+                miniAppManager.launchMiniApp("enterprise-callerid")
+            } else if (intent?.action == "com.demo.imsdc.ACTION_LAUNCH_APP") {
+                val appId = intent.getStringExtra("appId") ?: "operator-menu"
+                Log.i(TAG, "Debug broadcast received! Launching generic app: $appId...")
+                miniAppManager.launchMiniApp(appId)
+            } else if (intent?.action == "com.demo.imsdc.ACTION_TEST_DRAW") {
+                Log.i(TAG, "Debug broadcast received! Testing real-time stroke sync over ADC...")
+                val isCross = intent.getBooleanExtra("cross", false)
+                val rawColor = intent.getStringExtra("color") ?: if (isCross) "#00E676" else "#FF0000"
+                val color = when (rawColor.lowercase()) {
+                    "red" -> "#FF0000"
+                    "green" -> "#00E676"
+                    "blue" -> "#2196F3"
+                    "yellow" -> "#FFEB3B"
+                    else -> if (rawColor.startsWith("#")) rawColor else "#$rawColor"
+                }
+                val points = if (isCross) {
+                    listOf(Pair(750, 400), Pair(650, 500), Pair(550, 600), Pair(450, 700), Pair(350, 800), Pair(250, 900))
+                } else {
+                    listOf(Pair(250, 400), Pair(350, 500), Pair(450, 600), Pair(550, 700), Pair(650, 800), Pair(750, 900))
+                }
+                for (i in 0 until points.size - 1) {
+                    val p1 = points[i]
+                    val p2 = points[i + 1]
+                    val segJson = JSONObject().apply {
+                        put("type", "draw")
+                        put("fromX", p1.first)
+                        put("fromY", p1.second)
+                        put("toX", p2.first)
+                        put("toY", p2.second)
+                        put("color", color)
+                        put("size", 14)
+                        put("brushType", "pen")
+                    }.toString()
+                    imsDcSdk.sendOrQueueAdc(segJson.toByteArray(Charsets.UTF_8))
+                }
+                // Render on local Canvas immediately
+                binding.webviewMiniapp.post {
+                    val js = """
+                        (function() {
+                            const c = document.querySelector('canvas.whiteboard') || document.querySelector('canvas');
+                            if (!c) return;
+                            const ctx = c.getContext('2d');
+                            if (!ctx) return;
+                            const w = c.width || c.clientWidth || 300;
+                            const h = c.height || c.clientHeight || 150;
+                            ctx.strokeStyle = '$color';
+                            ctx.lineWidth = 12;
+                            ctx.lineCap = 'round';
+                            ctx.beginPath();
+                            ${if (isCross) "ctx.moveTo(w * 0.8, h * 0.25); ctx.lineTo(w * 0.2, h * 0.75);" else "ctx.moveTo(w * 0.2, h * 0.25); ctx.lineTo(w * 0.8, h * 0.75);"}
+                            ctx.stroke();
+                        })();
+                    """.trimIndent()
+                    binding.webviewMiniapp.evaluateJavascript(js, null)
+                }
+            } else if (intent?.action == "com.demo.imsdc.ACTION_EVAL_JS") {
+                val js = intent.getStringExtra("js") ?: ""
+                Log.i(TAG, "Evaluating JS: $js")
+                binding.webviewMiniapp.post {
+                    binding.webviewMiniapp.evaluateJavascript(js) { res ->
+                        Log.i(TAG, "JS eval result: $res")
+                    }
+                }
+            } else if (intent?.action == "com.demo.imsdc.ACTION_TEST_CARO_MOVE") {
+                val row = intent.getIntExtra("row", 4)
+                val col = intent.getIntExtra("col", 4)
+                val symbol = intent.getStringExtra("symbol") ?: "X"
+                Log.i(TAG, "Debug broadcast: Caro move at ($row, $col) symbol: $symbol")
+                val moveJson = JSONObject().apply {
+                    put("service", "caro")
+                    put("action", "move")
+                    put("row", row)
+                    put("col", col)
+                    put("symbol", symbol)
+                }.toString()
+                imsDcSdk.sendOrQueueAdc(moveJson.toByteArray(Charsets.UTF_8))
+                binding.webviewMiniapp.post {
+                    val js = """
+                        (function() {
+                            if (typeof initialized !== 'undefined') {
+                                initialized = true;
+                                gameActive = true;
+                            }
+                            const cell = document.querySelector('.cell[data-row="$row"][data-col="$col"]');
+                            if (cell) {
+                                document.querySelectorAll('.cell.last-move').forEach(c => c.classList.remove('last-move'));
+                                cell.textContent = '$symbol';
+                                cell.className = 'cell ${symbol.lowercase()} last-move';
+                            }
+                            const turnEl = document.getElementById('turn-indicator');
+                            if (turnEl) {
+                                turnEl.textContent = '${if (symbol == "X") "⏳ Đợi đối thủ (O)..." else "👉 Lượt của bạn (X)"}';
+                                turnEl.style.color = '${if (symbol == "X") "#fbbf24" else "#22c55e"}';
+                            }
+                        })();
+                    """.trimIndent()
+                    binding.webviewMiniapp.evaluateJavascript(js, null)
+                }
+            } else if (intent?.action == "com.demo.imsdc.ACTION_SEND_EMOJI") {
+                val emojiType = intent.getStringExtra("emoji") ?: "heart"
+                Log.i(TAG, "Debug broadcast: Send emoji $emojiType")
+                val emojiJson = JSONObject().apply {
+                    put("service", "fun-calling")
+                    put("action", "send_emoji")
+                    put("type", emojiType)
+                }.toString()
+                imsDcSdk.sendOrQueueAdc(emojiJson.toByteArray(Charsets.UTF_8))
+                binding.webviewMiniapp.post {
+                    val js = """
+                        (function() {
+                            if (typeof renderEmoji === 'function') {
+                                renderEmoji('$emojiType');
+                            }
+                        })();
+                    """.trimIndent()
+                    binding.webviewMiniapp.evaluateJavascript(js, null)
+                }
+            } else if (intent?.action == "com.demo.imsdc.ANSWER") {
+                Log.d(TAG, "Simulating ANSWER button click & bringing CallActivity to front")
+                val bringToFrontIntent = Intent(this@CallActivity, CallActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                try {
+                    startActivity(bringToFrontIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error bringing CallActivity to front: ${e.message}")
+                }
+                answerIncomingCall()
+            } else if (intent?.action == "com.demo.imsdc.END_CALL") {
+                Log.d(TAG, "Simulating END_CALL button click")
+                binding.btnEndCall.performClick()
+            } else if (intent?.action == "com.demo.imsdc.ACTION_EXIT_MINIAPP") {
+                Log.d(TAG, "Simulating Exit Mini-app click")
+                binding.btnExitMiniapp.performClick()
+            }
+        }
+    }
+
+    private var incomingRemoteSdp: String? = null
+    private var incomingCallIdStr: String? = null
+    private var incomingRawSdpStr: String? = null
+
+    private var ringbackToneGenerator: ToneGenerator? = null
+
+    private fun startRingbackTone() {
+        try {
+            if (ringbackToneGenerator == null) {
+                ringbackToneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
+            }
+            ringbackToneGenerator?.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            Log.i(TAG, "🎶 Ringback tone started (TONE_SUP_RINGTONE)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start ringback tone: ${e.message}")
+        }
+    }
+
+    private fun stopRingbackTone() {
+        try {
+            ringbackToneGenerator?.stopTone()
+            ringbackToneGenerator?.release()
+            ringbackToneGenerator = null
+            Log.i(TAG, "🎶 Ringback tone stopped and released")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop ringback tone: ${e.message}")
+        }
+    }
+
+    private fun configureWindowAndLockScreen() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            km?.requestDismissKeyguard(this, null)
+        }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+    }
+
+    private val requiredPermissions = arrayOf(
+        android.Manifest.permission.RECORD_AUDIO,
+        android.Manifest.permission.CAMERA
+    )
+    private val permissionRequestCode = 101
+
+    // --- Lifecycle -----------------------------------------------------------
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent == null) return
+        configureWindowAndLockScreen()
+        setIntent(intent)
+        val autoAnswer = intent.getBooleanExtra(EXTRA_AUTO_ANSWER, false)
+        val isIncoming = intent.getStringExtra(EXTRA_INCOMING_INVITE) != null
+        if (!isIncoming || autoAnswer) {
+            IncomingCallNotificationManager.dismiss(this)
+        }
+        Log.i(TAG, "onNewIntent received in CallActivity: ${intent.extras}")
+
+        sipServer  = intent.getStringExtra(EXTRA_SIP_SERVER)  ?: sipServer
+        localUser  = intent.getStringExtra(EXTRA_LOCAL_USER)  ?: localUser
+        var resolvedNewIp = SipManager.shared?.getLocalIp()
+            ?: intent.getStringExtra(EXTRA_LOCAL_IP)
+            ?: localIp
+        if (resolvedNewIp.isNullOrBlank() || resolvedNewIp == "0.0.0.0" || resolvedNewIp == "::" || resolvedNewIp.contains(":")) {
+            resolvedNewIp = com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)
+        }
+        localIp    = resolvedNewIp
+        sipPort    = intent.getIntExtra(EXTRA_SIP_PORT,   sipPort)
+
+        isDataChannelsOpened = false
+        isMiniAppInitiator = false
+
+        val incomingInvite = intent.getStringExtra(EXTRA_INCOMING_INVITE)?.replace("\\n", "\n")
+        val incomingSdp = intent.getStringExtra(EXTRA_INCOMING_SDP)?.replace("\\n", "\n")
+        val incomingCallId = intent.getStringExtra(EXTRA_INCOMING_CALL_ID)
+        val incomingRawSdp = intent.getStringExtra(EXTRA_INCOMING_RAW_SDP)?.replace("\\n", "\n")
+
+        if (incomingInvite != null && incomingSdp != null && incomingCallId != null) {
+            pendingInviteMsg = incomingInvite
+            callId = incomingCallId
+            incomingRemoteSdp = incomingSdp
+            incomingCallIdStr = incomingCallId
+            incomingRawSdpStr = incomingRawSdp ?: ""
+
+            setupUI()
+            initializeSipManager()
+            initializeWebRtcManager()
+
+            if (autoAnswer) {
+                Log.i(TAG, "onNewIntent: autoAnswer requested — answering immediately")
+                binding.slideToAnswerView.visibility = View.GONE
+                binding.layoutBottomControls.visibility = View.VISIBLE
+                handleIncomingCall(incomingSdp, incomingCallId, incomingRawSdp ?: "")
+            } else {
+                binding.tvCallStatus.visibility = View.GONE
+                binding.layoutMiddleDetails.visibility = View.GONE
+                binding.layoutBottomControls.visibility = View.GONE
+                binding.slideToAnswerView.visibility = View.VISIBLE
+                binding.localVideoView.visibility = View.GONE
+                binding.remoteVideoView.visibility = View.GONE
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        activeInstance = this
+        configureWindowAndLockScreen()
+
+        val isIncoming = intent.getStringExtra(EXTRA_INCOMING_INVITE) != null
+        if (!isIncoming) {
+            IncomingCallNotificationManager.dismiss(this)
+        }
+        
+        // Prevent accidental Back button from killing CallActivity (and the call)
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (remoteUser == "198" || currentAppId == "smart-menu") {
+                    Log.i(TAG, "Back button pressed in Hotline 198: resetting smart-menu without opening operator-menu")
+                    binding.webviewMiniapp.evaluateJavascript("if (typeof resetSmartMenu === 'function') resetSmartMenu();", null)
+                } else if (binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != "operator-menu") {
+                    Log.i(TAG, "Back button pressed: returning to operator-menu instead of finishing CallActivity")
+                    miniAppManager.launchMiniApp("operator-menu")
+                } else {
+                    Toast.makeText(this@CallActivity, "Vui lòng bấm nút Kết thúc để dừng cuộc gọi", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+
+        miniAppManager = MiniAppManager(this)
+
+        // Wake screen + show on lockscreen for incoming calls
+        if (isIncoming) {
+            // Play default ringtone
+            try {
+                val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ringtone = RingtoneManager.getRingtone(applicationContext, ringtoneUri)
+                ringtone?.play()
+                Log.i(TAG, "🔔 Incoming call - ringtone playing")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play ringtone: ${e.message}")
+            }
+        }
+
+        binding = ActivityCallBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // Lấy params từ Intent
+        val isIncomingCall = intent.getStringExtra(EXTRA_INCOMING_INVITE) != null
+        val targetRemoteUser = intent.getStringExtra(EXTRA_REMOTE_USER)
+        if (!isIncomingCall && targetRemoteUser.isNullOrBlank()) {
+            Log.e(TAG, "CallActivity launched without remoteUser, finishing immediately to avoid unwanted call")
+            finish()
+            return
+        }
+        sipServer  = intent.getStringExtra(EXTRA_SIP_SERVER)  ?: ""
+        localUser  = intent.getStringExtra(EXTRA_LOCAL_USER)  ?: ""
+        remoteUser = targetRemoteUser ?: ""
+        var resolvedLocalIp = SipManager.shared?.getLocalIp()
+            ?: intent.getStringExtra(EXTRA_LOCAL_IP)
+            ?: com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)
+        if (resolvedLocalIp.isNullOrBlank() || resolvedLocalIp == "0.0.0.0" || resolvedLocalIp == "::" || resolvedLocalIp.contains(":")) {
+            resolvedLocalIp = com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)
+        }
+        localIp    = resolvedLocalIp
+        localPort  = intent.getIntExtra(EXTRA_LOCAL_PORT, 15060)
+        sipPort    = intent.getIntExtra(EXTRA_SIP_PORT,   5060)
+
+        Log.i(TAG, "CallActivity: $localUser -> $remoteUser via $sipServer:$sipPort")
+
+        if (checkPermissions()) {
+            initAndStart()
+        } else {
+            androidx.core.app.ActivityCompat.requestPermissions(this, requiredPermissions, permissionRequestCode)
+        }
+    }
+
+    private fun checkPermissions(): Boolean {
+        return requiredPermissions.all {
+            androidx.core.content.ContextCompat.checkSelfPermission(this, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == permissionRequestCode) {
+            if (grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
+                initAndStart()
+            } else {
+                Toast.makeText(this, "Quy\u1ec1n \u00e2m thanh v\u00e0 camera l\u00e0 b\u1eaft bu\u1ed9c \u0111\u1ec3 th\u1ef1c hi\u1ec7n cu\u1ed9c g\u1ecdi PoC!", Toast.LENGTH_LONG).show()
+                finish()
+            }
+        }
+    }
+
+    private fun initAndStart() {
+        setupUI()
+        initializeSipManager()
+        initializeWebRtcManager()
+
+        val incomingInvite = intent.getStringExtra(EXTRA_INCOMING_INVITE)?.replace("\\n", "\n")
+        val incomingSdp = intent.getStringExtra(EXTRA_INCOMING_SDP)?.replace("\\n", "\n")
+        val incomingCallId = intent.getStringExtra(EXTRA_INCOMING_CALL_ID)
+        val incomingRawSdp = intent.getStringExtra(EXTRA_INCOMING_RAW_SDP)?.replace("\\n", "\n")
+        val autoAnswer = intent.getBooleanExtra(EXTRA_AUTO_ANSWER, false)
+
+        if (incomingInvite != null && incomingSdp != null && incomingCallId != null) {
+            pendingInviteMsg = incomingInvite
+            callId = incomingCallId
+            incomingRemoteSdp = incomingSdp
+            incomingCallIdStr = incomingCallId
+            incomingRawSdpStr = incomingRawSdp ?: ""
+
+            if (autoAnswer) {
+                Log.i(TAG, "initAndStart: autoAnswer requested — answering immediately")
+                binding.slideToAnswerView.visibility = View.GONE
+                binding.layoutBottomControls.visibility = View.VISIBLE
+                handleIncomingCall(incomingSdp, incomingCallId, incomingRawSdp ?: "")
+            } else {
+                binding.tvCallStatus.visibility = View.GONE
+                binding.layoutMiddleDetails.visibility = View.GONE
+                binding.layoutBottomControls.visibility = View.GONE
+                binding.slideToAnswerView.visibility = View.VISIBLE
+                binding.localVideoView.visibility = View.GONE
+                binding.remoteVideoView.visibility = View.GONE
+            }
+        } else {
+            binding.tvCallStatus.visibility = View.VISIBLE
+            binding.layoutMiddleDetails.visibility = View.VISIBLE
+            binding.layoutBottomControls.visibility = View.VISIBLE
+            binding.slideToAnswerView.visibility = View.GONE
+            startCall()
+        }
+
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.demo.imsdc.ACTION_LAUNCH_WHITEBOARD")
+            addAction("com.demo.imsdc.ACTION_LAUNCH_CARO")
+            addAction("com.demo.imsdc.ACTION_LAUNCH_FUNCALL")
+            addAction("com.demo.imsdc.ACTION_LAUNCH_SMARTMENU")
+            addAction("com.demo.imsdc.ACTION_LAUNCH_ENTERPRISE")
+            addAction("com.demo.imsdc.ACTION_LAUNCH_APP")
+            addAction("com.demo.imsdc.ACTION_TEST_DRAW")
+            addAction("com.demo.imsdc.ACTION_EVAL_JS")
+            addAction("com.demo.imsdc.ACTION_TEST_CARO_MOVE")
+            addAction("com.demo.imsdc.ACTION_SEND_EMOJI")
+            addAction("com.demo.imsdc.ANSWER")
+            addAction("com.demo.imsdc.END_CALL")
+            addAction("com.demo.imsdc.ACTION_EXIT_MINIAPP")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(debugReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(debugReceiver, filter)
+        }
+    }
+
+
+    // --- UI Setup ------------------------------------------------------------
+
+    private fun setupUI() {
+        binding.tvRemoteUser.text = remoteUser
+        binding.tvLocation.text = "+84 900 00$remoteUser Vietnam"
+        
+        // Setup background placeholder & details defaults
+        binding.viewBackgroundPlaceholder.visibility = View.VISIBLE
+        binding.layoutMiddleDetails.visibility = View.GONE
+        binding.localVideoView.visibility = View.GONE
+        binding.remoteVideoView.visibility = View.GONE
+
+        binding.tvCallStatus.text = "Đang kết nối..."
+
+        // Mute button click listener
+        binding.btnMute.setOnClickListener {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            audioManager.isMicrophoneMute = !audioManager.isMicrophoneMute
+            val isMuted = audioManager.isMicrophoneMute
+            binding.btnMute.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.parseColor(if (isMuted) "#FF3B82F6" else "#25FFFFFF")
+            )
+            Toast.makeText(this, if (isMuted) "\u0110\u00e3 t\u1eaft ti\u1ebfng" else "\u0110\u00e3 b\u1eadt ti\u1ebfng", Toast.LENGTH_SHORT).show()
+        }
+
+        // Speaker button click listener
+        binding.btnSpeakerCircle.setOnClickListener {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            setSpeakerphoneOn(audioManager, !isSpeakerMode)
+            binding.btnSpeakerCircle.backgroundTintList = android.content.res.ColorStateList.valueOf(
+                android.graphics.Color.parseColor(if (isSpeakerMode) "#4D3B82F6" else "#25FFFFFF")
+            )
+            Toast.makeText(this, if (isSpeakerMode) "Loa ngo\u00e0i: B\u1eacT" else "Loa ngo\u00e0i: T\u1eaeT", Toast.LENGTH_SHORT).show()
+        }
+
+        // Hold/Resume button click listener (reusing keypad UI)
+        binding.btnKeypadCircle.setOnClickListener {
+            toggleCallHold()
+        }
+
+        // N�t K?t th�c cu?c g?i
+        binding.btnEndCall.setOnClickListener {
+            endCall()
+        }
+
+        // Nút quay lại Menu của mini-app
+        binding.btnExitMiniapp.setOnClickListener {
+            if (remoteUser == "198" || currentAppId == "smart-menu") {
+                Log.i(TAG, "Exit clicked in Hotline 198: resetting smart-menu")
+                binding.webviewMiniapp.evaluateJavascript("if (typeof resetSmartMenu === 'function') resetSmartMenu();", null)
+            } else {
+                Log.i(TAG, "User clicked Exit Mini-app -> returning to operator-menu")
+                miniAppManager.launchMiniApp("operator-menu")
+            }
+        }
+
+        // Slide-to-Answer / Slide-to-Reject listeners (Samsung One UI style)
+        binding.slideToAnswerView.onAnswerListener = {
+            Log.i(TAG, "\uD83D\uDFE2 Slide-to-Answer triggered by user")
+            answerIncomingCall()
+        }
+
+        binding.slideToAnswerView.onRejectListener = {
+            Log.i(TAG, "\uD83D\uDD34 Slide-to-Reject triggered by user")
+            val originalInvite = pendingInviteMsg
+            if (originalInvite != null) {
+                lifecycleScope.launch {
+                    try {
+                        sipManager.sendDecline(originalInvite)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Decline send error: ${e.message}")
+                    }
+                    binding.tvCallStatus.text = "Cu\u1ed9c g\u1ecdi b\u1ecb t\u1eeb ch\u1ed1i"
+                    delay(1000)
+                    finish()
+                }
+            } else {
+                finish()
+            }
+        }
+
+        // Setup OpenGL Renderers for local & remote video
+        if (eglBase == null) {
+            eglBase = org.webrtc.EglBase.create()
+        }
+        val eglContext = eglBase!!.eglBaseContext
+        
+        binding.remoteVideoView.visibility = View.GONE
+
+        if (!isRendererInitialized) {
+            try {
+                binding.localVideoView.init(eglContext, null)
+                binding.localVideoView.setEnableHardwareScaler(true)
+                binding.localVideoView.setMirror(true)
+                binding.localVideoView.setZOrderMediaOverlay(true)
+                isRendererInitialized = true
+            } catch (e: Exception) {
+                Log.w(TAG, "localVideoView init failed or already initialized: ${e.message}")
+            }
+        }
+        binding.localVideoView.visibility = View.GONE
+
+        // Route audio to speakerphone for hands-free PoC demo
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        setSpeakerphoneOn(audioManager, true)
+
+        // Setup WebView
+        miniAppManager.setupWebView()
+
+        // Hiển thị WebView chỉ sau khi Mini-app load xong
+        binding.webviewMiniapp.visibility = View.INVISIBLE
+        
+        setupDraggableLocalVideo()
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupDraggableLocalVideo() {
+        // Đẩy local video view lên trên cùng của View hierarchy để không bị
+        // WebView (transparent, full-screen) nuốt sự kiện touch khi kéo/thả.
+        binding.localVideoView.bringToFront()
+
+        var dX = 0f
+        var dY = 0f
+        var initialX = 0f
+        var initialY = 0f
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        var isDragging = false
+
+        binding.localVideoView.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    // Đảm bảo video view luôn ở trên cùng ngay khi bắt đầu chạm,
+                    // phòng trường hợp WebView được bringToFront lại sau khi load page.
+                    binding.localVideoView.bringToFront()
+                    dX = view.x - event.rawX
+                    dY = view.y - event.rawY
+                    initialX = event.rawX
+                    initialY = event.rawY
+                    isDragging = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (kotlin.math.abs(event.rawX - initialX) > touchSlop ||
+                        kotlin.math.abs(event.rawY - initialY) > touchSlop) {
+                        isDragging = true
+                    }
+                    if (isDragging) {
+                        // Limit dragging within the screen boundaries
+                        val parent = view.parent as? View
+                        val maxX = parent?.width?.toFloat() ?: 0f
+                        val maxY = parent?.height?.toFloat() ?: 0f
+
+                        var newX = event.rawX + dX
+                        var newY = event.rawY + dY
+
+                        if (maxX > 0 && maxY > 0) {
+                            newX = newX.coerceIn(0f, maxX - view.width)
+                            newY = newY.coerceIn(0f, maxY - view.height)
+                        }
+
+                        view.animate()
+                            .x(newX)
+                            .y(newY)
+                            .setDuration(0)
+                            .start()
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    if (!isDragging) {
+                        view.performClick()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+
+    @SuppressLint("SetJavaScriptEnabled")
+
+
+    // --- Init SIP ------------------------------------------------------------
+
+    private fun initializeSipManager() {
+        val sm = SipManager.shared ?: SipManager(
+            sipServerHost = sipServer,
+            sipServerPort = sipPort,
+            localUsername = localUser,
+            localPort = localPort
+        ).also { SipManager.shared = it }
+
+        sipManager = sm
+        if (!sm.isRunning) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    sm.start(this@CallActivity)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start SipManager in CallActivity: ${e.message}")
+                }
+            }
+        }
+
+        // Callback: INVITE responses (180, 183, 200, 4xx, etc.)
+        sipManager.onInviteResponse = { statusCode, sdpAnswer, toHeaderVal, rawSdp ->
+            Log.i(TAG, "SIP INVITE response received: $statusCode, rawSdp len=${rawSdp?.length ?: 0}")
+
+            // 1. Process Early Media (183 Session Progress) IMMEDIATELY on the background thread
+            if (statusCode == 183) {
+                if (rawSdp != null && rawSdp.trim().isNotEmpty()) {
+                    try {
+                        val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
+                        Log.i(TAG, "📢 Early Media (183) active: RTP destination $ip:$aPort")
+                        rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
+                        rtpMediaManager?.start(null, null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start Early Media RTP: ${e.message}", e)
+                    }
+                } else {
+                    Log.w(TAG, "183 Session Progress received but SDP was empty!")
+                }
+            }
+
+            // 2. Update UI on Main Thread
+            runOnUiThread {
+                try {
+                    when (statusCode) {
+                        in 100..199 -> {
+                            if (statusCode == 180) {
+                                binding.tvCallStatus.text = "🔔 Đang đổ chuông..."
+                                startRingbackTone()
+                            } else if (statusCode == 183) {
+                                stopRingbackTone()
+                                binding.tvCallStatus.text = "📢 Đang phát thông báo..."
+                            } else if (statusCode == 100) {
+                                binding.tvCallStatus.text = "Đang kết nối..."
+                            }
+                        }
+                        200 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "✅ Đã kết nối"
+                            sdpAnswer?.let { handleSdpAnswer(it, toHeaderVal, rawSdp ?: "") }
+                        }
+                        487 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "📴 Cuộc gọi kết thúc"
+                            lifecycleScope.launch {
+                                delay(1500)
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        404 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "❌ Không tìm thấy $remoteUser"
+                            lifecycleScope.launch {
+                                delay(2000)
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        480 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "❌ $remoteUser không trực tuyến (Offline)"
+                            lifecycleScope.launch {
+                                delay(2000)
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        486, 603 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "Người dùng từ chối cuộc gọi"
+                            lifecycleScope.launch {
+                                delay(2000)
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        408 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "⏱️ Yêu cầu hết hạn - Không trả lời (408)"
+                            lifecycleScope.launch {
+                                delay(2000)
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        430 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "🔄 Mất đăng ký (Server restart). Đang đăng ký lại..."
+                            SipManager.shared?.let { sm ->
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    try {
+                                        sm.register(localIp)
+                                        Log.i(TAG, "Auto-re-registered successfully after SIP 430")
+                                        withContext(Dispatchers.Main) {
+                                            binding.tvCallStatus.text = "✅ Đã đăng ký lại. Đang gọi lại..."
+                                            delay(1500)
+                                            startCall()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Auto-re-registration failed: ${e.message}")
+                                        withContext(Dispatchers.Main) {
+                                            binding.tvCallStatus.text = "❌ Đăng ký lại thất bại: ${e.message}"
+                                            delay(2000)
+                                            resetAudio()
+                                            releaseVideoViews()
+                                            webRtcManager.close()
+                                            finish()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            if (statusCode >= 300) {
+                                stopRingbackTone()
+                                binding.tvCallStatus.text = "⚠️ Cuộc gọi thất bại ($statusCode)"
+                                lifecycleScope.launch {
+                                    delay(2000)
+                                    resetAudio()
+                                    releaseVideoViews()
+                                    webRtcManager.close()
+                                    finish()
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error updating UI on SIP response $statusCode: ${e.message}", e)
+                }
+            }
+        }
+
+        // Callback: B nhận được INVITE (incoming call)
+        sipManager.onIncomingInvite = { fromUser, sdp, callId, rawMsg, rawSdp ->
+            Log.i(TAG, "← Incoming INVITE from $fromUser (call=$callId)")
+            pendingInviteMsg = rawMsg
+            incomingRemoteSdp = sdp
+            incomingCallIdStr = callId
+            incomingRawSdpStr = rawSdp ?: ""
+            lifecycleScope.launch(Dispatchers.Main) {
+                binding.tvCallStatus.visibility = View.GONE
+                binding.layoutMiddleDetails.visibility = View.GONE
+                binding.layoutBottomControls.visibility = View.GONE
+                binding.slideToAnswerView.visibility = View.VISIBLE
+                binding.localVideoView.visibility = View.GONE
+                binding.remoteVideoView.visibility = View.GONE
+            }
+        }
+
+        sipManager.onCallEnded = {
+            lifecycleScope.launch(Dispatchers.Main) {
+                isEndingCall = true
+                sipManager.markCallEnding()
+                stopRingbackTone()
+                binding.tvCallStatus.text = "Cuộc gọi kết thúc"
+                delay(1500)
+                finish()
+            }
+        }
+
+        sipManager.onReInviteReceived = { sdp, rawMsg ->
+            Log.i(TAG, "Handling incoming Re-INVITE automatically...")
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val rawSdp = com.demo.imsdc.sip.SdpHelper.extractSdpBody(rawMsg) ?: ""
+                    if (rawSdp.trim().isNotEmpty()) {
+                        val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
+                        rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
+                    }
+
+                    var reqApp = com.demo.imsdc.sip.SdpHelper.parseReqApp(rawMsg)
+
+                    // Phân tích các m=application lines trong SDP offer
+                    val appLines = rawSdp.replace("\r", "").split("\n")
+                        .map { it.trim() }
+                        .filter { it.startsWith("m=application ") }
+                    // ADC bị disable chỉ khi có block application port 0
+                    val hasAdcPort0 = appLines.any { it.startsWith("m=application 0") }
+                    // isSingleAppLine: chỉ có 1 block application (không có ADC riêng)
+                    val isSingleAppLine = appLines.size <= 1
+
+                    Log.i(TAG, "Re-INVITE: reqApp(raw)=$reqApp appLines=${appLines.size} hasAdcPort0=$hasAdcPort0 isSingleAppLine=$isSingleAppLine")
+
+                    // Chỉ fallback operator-menu khi KHÔNG có appId thật từ a=3gpp-req-app.
+                    // KHÔNG ép reqApp về operator-menu chỉ vì SDP có 1 block hay ADC port 0,
+                    // vì điều đó làm mất app (ví dụ "fun-calling-app") trên máy đối phương.
+                    val isCloseOrEmpty = (reqApp == null || reqApp == "close")
+                    if (isCloseOrEmpty || (reqApp == "operator-menu" && isSingleAppLine)) {
+                        reqApp = "operator-menu"
+                    } else if (hasAdcPort0) {
+                        Log.i(TAG, "Re-INVITE: ADC port=0 detected but reqApp=$reqApp present, keeping app")
+                    }
+                    sipManager.activeReqAppId = reqApp
+                    
+                    // Always close existing ADC connection first to isolate sessions
+                    webRtcManager.closeADC()
+                    if (reqApp != "operator-menu") {
+                        Log.i(TAG, "Re-creating ADC for requested app: $reqApp")
+                        webRtcManager.createADC()
+                        dcManager.setupADC()
+                        if (reqApp == "fun-calling-app") {
+                            webRtcManager.createADC2()
+                            dcManager.setupADC2()
+                        }
+                    }
+
+                    if (sdp.trim().isNotEmpty()) {
+                        Log.i(TAG, "B (Re-INVITE): Setting remote offer...")
+                        webRtcManager.setRemoteOffer(sdp)
+                    }
+
+                    val sdpAnswer = webRtcManager.createAnswer()
+                    sipManager.sendOkAnswer(rawMsg, sdpAnswer)
+                    
+                    withContext(Dispatchers.Main) {
+                        Log.i(TAG, "? Re-INVITE auto-answered successfully")
+                        Log.i(TAG, "Re-INVITE requested app: $reqApp")
+                        miniAppManager.launchMiniApp(reqApp, sendRemoteTrigger = false)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error auto-answering Re-INVITE: ${e.message}", e)
+                }
+            }
+        }
+
+        sipManager.onReInviteResponse = { sdpAnswer, rawSdp ->
+            Log.i(TAG, "? Re-INVITE 200 OK received (SDP answer)")
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    if (!sdpAnswer.isNullOrEmpty()) {
+                        webRtcManager.setRemoteAnswer(sdpAnswer)
+                        Log.i(TAG, "? Re-INVITE Remote answer set � ICE starting for ADC")
+                        withContext(Dispatchers.Main) {
+                            imsDcSdk.handleRemoteSdp(sdpAnswer, callId = callId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error setting Re-INVITE answer: ${e.message}", e)
+                }
+            }
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                sipManager.start()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting SipManager", e)
+            }
+        }
+    }
+
+    // --- Init WebRTC ---------------------------------------------------------
+
+    private fun initializeWebRtcManager() {
+        if (eglBase == null) {
+            eglBase = org.webrtc.EglBase.create()
+        }
+        val eglCtx = eglBase!!.eglBaseContext
+
+        webRtcManager = WebRtcManager(applicationContext)
+        webRtcManager.initialize(eglCtx)
+
+        // G�n SurfaceViewRenderers cho manager
+        webRtcManager.localVideoView = binding.localVideoView
+        webRtcManager.remoteVideoView = binding.remoteVideoView
+
+        val isCallee = (intent.getStringExtra(EXTRA_INCOMING_INVITE) != null)
+        val localAudioPort = if (isCallee) 40006 else 40002
+        val localVideoPort = if (isCallee) 40008 else 40004
+        var effectiveLocalIp = sipManager.getLocalIp()
+        if (effectiveLocalIp.isNullOrBlank() || effectiveLocalIp == "0.0.0.0" || effectiveLocalIp == "::" || effectiveLocalIp.contains(":")) {
+            effectiveLocalIp = com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)
+        }
+        Log.i(TAG, "Initializing RtpMediaManager: isCallee=$isCallee, localAudioPort=$localAudioPort, localVideoPort=$localVideoPort, effectiveLocalIp=$effectiveLocalIp")
+        if (rtpMediaManager != null) {
+            Log.w(TAG, "RtpMediaManager already exists, stopping old instance before creating a new one")
+            try { rtpMediaManager?.stop() } catch (_: Exception) {}
+            rtpMediaManager = null
+        }
+        rtpMediaManager = RtpMediaManager(applicationContext, localAudioPort, localVideoPort, effectiveLocalIp)
+
+        dcManager = DataChannelManager(webRtcManager, lifecycleScope)
+        dcManager.webView = binding.webviewMiniapp
+        dcManager.sipServerIp = sipManager.sipServerHost
+        dcManager.role = if (intent.getStringExtra(EXTRA_INCOMING_INVITE) != null) "callee" else "caller"
+
+        imsDcSdk = com.demo.imsdc.webrtc.ImsDcSdk(this, binding.webviewMiniapp, webRtcManager, dcManager)
+        dcManager.imsDcSdk = imsDcSdk
+        
+        webRtcManager.onRemoteDataChannelMessage = { data ->
+            dcManager.handleAdcMessage(data)
+        }
+
+        dcManager.onHtmlReceived = { _ ->
+            Log.i(TAG, "Mini-app HTML received")
+            lifecycleScope.launch(Dispatchers.Main) {
+                binding.layoutMiddleDetails.visibility = View.GONE
+                binding.webviewMiniapp.visibility = View.VISIBLE
+            }
+        }
+
+        dcManager.onHeartReceived = {
+            Log.i(TAG, "?? Heart received from peer!")
+            lifecycleScope.launch(Dispatchers.Main) {
+                Toast.makeText(this@CallActivity, "\u2764\ufe0f B\u1ea1n nh\u1eadn \u0111\u01b0\u1ee3c tr\u00e1i tim!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        androidBridge = AndroidBridgeInterface(dcManager) { appId ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                Log.i(TAG, "Launching new mini app requested by JS: $appId")
+                miniAppManager.launchMiniApp(appId)
+            }
+        }
+
+        dcManager.onLaunchAppReceived = { appId ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                Log.i(TAG, "Received remote trigger to launch mini app: $appId")
+                miniAppManager.launchMiniApp(appId, sendRemoteTrigger = false)
+            }
+        }
+
+        // Kh?i t?o v� dang k� GSMA SDK controller
+        imsDcSdk = com.demo.imsdc.webrtc.ImsDcSdk(applicationContext, binding.webviewMiniapp, webRtcManager, dcManager)
+        imsDcSdk.onJsRequestedAdc = { appId ->
+            if (isMiniAppInitiator) {
+                val targetId = when {
+                    appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
+                    appId.contains("operator-menu") -> "operator-menu"
+                    else -> appId
+                }
+                val currentReqApp = when {
+                    sipManager.activeReqAppId?.contains("0003210000000038") == true ||
+                    sipManager.activeReqAppId?.contains("tuyaapp") == true ||
+                    sipManager.activeReqAppId?.contains("sketch-sync-app") == true -> "sketch-sync-app"
+                    sipManager.activeReqAppId?.contains("operator-menu") == true -> "operator-menu"
+                    else -> sipManager.activeReqAppId
+                }
+                if (currentReqApp != targetId || webRtcManager.adcPC == null) {
+                    android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
+                    miniAppManager.triggerAppNegotiationReInvite(targetId)
+                } else {
+                    android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
+                }
+            } else {
+                android.util.Log.i(TAG, "Not initiator for app $appId. Waiting for incoming Re-INVITE.")
+            }
+        }
+        androidBridge.onJsRequestedAdc = imsDcSdk.onJsRequestedAdc
+        val sdkBridge = imsDcSdk.getJavascriptInterface()
+        // Inject AndroidBridge & IMSDataChannelBridge into WebView
+        binding.webviewMiniapp.addJavascriptInterface(androidBridge, "AndroidBridge")
+        binding.webviewMiniapp.addJavascriptInterface(androidBridge, "IMSDataChannelBridge")
+        binding.webviewMiniapp.addJavascriptInterface(androidBridge, "ImsDcBridge")
+        binding.webviewMiniapp.addJavascriptInterface(sdkBridge, "_dsbridge")
+
+        // Callback: PeerConnection connected ? m? DataChannels v� kh?i d?ng Mini-app
+        webRtcManager.onPeerConnected = {
+            Log.i(TAG, "?? PeerConnection CONNECTED to MF!")
+            showCallActiveUi()
+            // Auto-launch whiteboard has been disabled. Menu will be shown.
+        }
+
+        webRtcManager.onPeerDisconnected = {
+            Log.w(TAG, "PeerConnection disconnected from MF")
+        }
+    }
+
+    private fun startCallTimer() {
+        if (timerJob != null) return
+        elapsedSeconds = 0
+        binding.tvCallTimer.visibility = View.VISIBLE
+        timerJob = lifecycleScope.launch(Dispatchers.Main) {
+            while (isActive) {
+                val minutes = elapsedSeconds / 60
+                val seconds = elapsedSeconds % 60
+                binding.tvCallTimer.text = String.format("%02d:%02d", minutes, seconds)
+                kotlinx.coroutines.delay(1000)
+                elapsedSeconds++
+            }
+        }
+    }
+
+    private fun stopCallTimer() {
+        timerJob?.cancel()
+        timerJob = null
+        binding.tvCallTimer.visibility = View.GONE
+    }
+
+
+    // --- Start Call (A-side) -------------------------------------------------
+
+    private fun startCall() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "Đang kết nối..."
+                }
+
+                // 1. T?o PeerConnection
+                webRtcManager.createPeerConnection(isCaller = true) { state ->
+                    Log.d(TAG, "WebRTC(A) ICE state: $state")
+                }
+
+                // B?t d?u capture local camera v� microphone
+                withContext(Dispatchers.Main) {
+                    val enableVideo = (remoteUser != "198")
+                    isVideoEnabled = enableVideo
+                    webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                }
+
+                // 2. T?o placeholder DC d? SDP c m=application
+                webRtcManager.createPlaceholderChannel()
+
+                // 3. T?o BDC (pre-negotiated, chua m?  ch? ICE connected)
+                webRtcManager.createBDC(0)
+
+                // 4. T?o WebRTC offer d? c SDP km INVITE (early offer)
+                val localOffer = webRtcManager.createOffer()
+                Log.i(TAG, "WebRTC offer created, SDP length=${localOffer.length}")
+
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "Đang kết nối..."
+                }
+
+                // 5. Gởi SIP INVITE kèm SDP offer
+                callId = sipManager.invite(remoteUser, localIp, localOffer)
+                Log.i(TAG, "SIP INVITE sent with SDP, call_id=$callId")
+
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "Đang kết nối..."
+                    // Launch a coroutine to handle INVITE response timeout (30 seconds)
+                    lifecycleScope.launch {
+                        delay(30000)
+                        if (!sipManager.isCallActive) {
+                            Log.w(TAG, "Call request timed out - no response from $remoteUser")
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "⏱️ Không trả lời (Timeout)"
+                            delay(2000)
+                            endCall()
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "startCall error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "\u274c L\u1ed7i: ${e.message}"
+                }
+            }
+        }
+    }
+
+    // --- Handle SDP Answer (A-side, sau khi nh?n 200 OK) --------------------
+
+    private fun handleSdpAnswer(sdpAnswer: String, toHeaderVal: String, rawSdp: String) {
+        Log.i(TAG, "Setting remote SDP answer (anchored by Erlang to MF)...")
+        
+        // C?u hnh d?a ch? dch cho RTP t? raw SIP SDP
+        val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
+        rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                webRtcManager.setRemoteAnswer(sdpAnswer)
+                Log.i(TAG, "? Remote answer set  sending ACK (no SDP)")
+                
+                sipManager.sendAck(toHeaderVal)
+                
+                withContext(Dispatchers.Main) {
+                    showCallActiveUi()
+                    imsDcSdk.handleRemoteSdp(sdpAnswer, callId = callId)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "handleSdpAnswer error: ${e.message}", e)
+            }
+        }
+    }
+
+    // --- Answer Incoming Call (shared helper) ---------------------------------
+
+    /**
+     * Trích xuất SDP đã cache và thực hiện nhận cuộc gọi.
+     * Được gọi từ SlideToAnswerView callback và debug broadcast ANSWER.
+     */
+    private fun answerIncomingCall() {
+        val remoteSdp = incomingRemoteSdp
+            ?: intent.getStringExtra(EXTRA_INCOMING_SDP)?.replace("\\n", "\n") ?: ""
+        val cId = incomingCallIdStr
+            ?: intent.getStringExtra(EXTRA_INCOMING_CALL_ID) ?: callId ?: ""
+        val rawSdp = incomingRawSdpStr
+            ?: intent.getStringExtra(EXTRA_INCOMING_RAW_SDP)?.replace("\\n", "\n") ?: ""
+        binding.slideToAnswerView.visibility = View.GONE
+        binding.layoutBottomControls.visibility = View.VISIBLE
+        handleIncomingCall(remoteSdp, cId, rawSdp)
+    }
+
+    // --- Handle Incoming Call (B-side) ---------------------------------------
+
+    /**
+     * u?c g?i khi B nh?n SIP INVITE t? Erlang.
+     * Flow B-side:
+     *   1. T?o PeerConnection
+     *   2. setRemoteOffer(sdpFromMF) ? ICE params c?a MF d anchor
+     *   3. createAnswer() ? SDP Answer c?a B
+     *   4. G?i SIP 200 OK v?i SDP Answer
+     *   Erlang s? anchor SDP Answer ny vo MF-B, r?i g?i v? A
+     */
+    private fun handleIncomingCall(remoteSdp: String, incomingCallId: String, rawSdp: String) {
+        // Stop ringtone when processing incoming call
+        try { ringtone?.stop() } catch (_: Exception) {}
+        IncomingCallNotificationManager.dismiss(this)
+        isDataChannelsOpened = false
+        // Cấu hình địa chỉ đích cho RTP (nếu có SDP Offer ngay)
+        if (rawSdp.trim().isNotEmpty()) {
+            val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
+            rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "\ud83d\udcf2 \u0110ang x\u1eed l\u00fd cu\u1ed9c g\u1ecdi \u0111\u1ebfn..."
+                }
+
+                // 1. T?o PeerConnection cho B
+                webRtcManager.createPeerConnection(isCaller = false) { state ->
+                    Log.d(TAG, "WebRTC(B) ICE state: $state")
+                }
+
+                // 2. T?o BDC (pre-negotiated, ID c? d?nh)
+                webRtcManager.createBDC(100)
+
+                if (remoteSdp.trim().isEmpty()) {
+                    Log.i(TAG, "B (Delayed Offer): Creating local SDP Offer...")
+                    withContext(Dispatchers.Main) {
+                        val enableVideo = (remoteUser != "198")
+                        isVideoEnabled = enableVideo
+                        webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                    }
+                    val localOffer = webRtcManager.createOffer()
+                    
+                    sipManager.onAckWithSdp = { remoteSdpAnswer, rawSdpAnswer ->
+                        Log.i(TAG, "B (Delayed Offer): ACK received, setting remote answer...")
+                        
+                        // C?u h�nh d?a ch? d�ch cho RTP t? raw SIP SDP
+                        val (ip, aPort, vPort) = parseRemoteSdp(rawSdpAnswer)
+                        rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
+
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                webRtcManager.setRemoteAnswer(remoteSdpAnswer)
+                                Log.i(TAG, "B (Delayed Offer): ? Remote answer set � ICE starting")
+                                withContext(Dispatchers.Main) {
+                                    showCallActiveUi()
+                                    imsDcSdk.handleRemoteSdp(remoteSdpAnswer, callId = incomingCallId)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "B (Delayed Offer) setRemoteAnswer error: ${e.message}", e)
+                            }
+                        }
+                    }
+
+                    val originalInvite = pendingInviteMsg?.takeIf { it.contains("Via:") }
+                        ?: sipManager.lastIncomingInviteMsg
+                        ?: pendingInviteMsg
+
+                    if (originalInvite != null && originalInvite.contains("Via:")) {
+                        Log.i(TAG, "B (Delayed Offer): Sending SIP 200 OK with local SDP Offer")
+                        sipManager.sendOkAnswer(originalInvite, localOffer)
+                    } else {
+                        Log.e(TAG, "B: No valid pending invite message stored!")
+                    }
+                } else {
+                    // Regular Offer flow
+                    Log.i(TAG, "B: Setting remote offer (anchored SDP from MF)...")
+                    webRtcManager.setRemoteOffer(remoteSdp)
+                    withContext(Dispatchers.Main) {
+                        // Truy?n callId d? SDK nh?n d?ng session
+                        imsDcSdk.handleRemoteSdp(remoteSdp, callId = incomingCallId)
+                    }
+
+                    // B?t d?u capture local camera v� microphone cho B SAU khi d� set remote offer!
+                    withContext(Dispatchers.Main) {
+                        val enableVideo = (remoteUser != "198")
+                        isVideoEnabled = enableVideo
+                        webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                    }
+
+                    Log.i(TAG, "B: Creating SDP Answer...")
+                    val sdpAnswer = webRtcManager.createAnswer()
+                    Log.i(TAG, "B: SDP Answer created (${sdpAnswer.length} bytes)")
+
+                    val originalInvite = pendingInviteMsg?.takeIf { it.contains("Via:") }
+                        ?: sipManager.lastIncomingInviteMsg
+                        ?: pendingInviteMsg
+
+                    if (originalInvite != null && originalInvite.contains("Via:")) {
+                        Log.i(TAG, "B: Sending SIP 200 OK with SDP Answer")
+                        sipManager.sendOkAnswer(originalInvite, sdpAnswer)
+                    } else {
+                        Log.e(TAG, "B: No valid pending invite message stored! (pending=$pendingInviteMsg, last=${sipManager.lastIncomingInviteMsg != null})")
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "\u2705 \u0110\u00e3 ch\u1ea5p nh\u1eadn cu\u1ed9c g\u1ecdi"
+                    showCallActiveUi()
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "handleIncomingCall error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    binding.tvCallStatus.text = "\u274c L\u1ed7i x\u1eed l\u00fd cu\u1ed9c g\u1ecdi \u0111\u1ebfn"
+                }
+            }
+        }
+    }
+
+    private fun showCallActiveUi() {
+        lifecycleScope.launch(Dispatchers.Main) {
+            binding.tvCallStatus.visibility = View.VISIBLE
+            if (currentAppId == "operator-menu") {
+                binding.tvCallStatus.text = "🟢 Cuộc gọi thoại & video đã kết nối"
+            }
+            startCallTimer()
+            
+            // Hide gradient placeholder & middle avatar details
+            binding.viewBackgroundPlaceholder.visibility = View.GONE
+            binding.layoutMiddleDetails.visibility = View.GONE
+
+            // Open DataChannels (BDC & ADC) for mini-app interaction
+            openDataChannels()
+
+            if (!isCallActiveUiShown) {
+                isCallActiveUiShown = true
+                if (remoteUser == "198") {
+                    binding.localVideoView.visibility = View.GONE
+                    binding.remoteVideoView.visibility = View.GONE
+                    Log.i(TAG, "Hotline 198: auto-launching smart-menu via BDC & ADC")
+                    miniAppManager.launchMiniApp("smart-menu", sendRemoteTrigger = true)
+                } else if (currentAppId == "operator-menu") {
+                    binding.localVideoView.visibility = View.VISIBLE
+                    binding.remoteVideoView.visibility = View.VISIBLE
+                    Log.i(TAG, "Operator menu will load by default via BDC.")
+                    miniAppManager.launchMiniApp("operator-menu", sendRemoteTrigger = false)
+                }
+            } else {
+                Log.i(TAG, "showCallActiveUi already initialized, active app=$currentAppId - preserving active mini-app")
+            }
+            
+            // Start RTP audio/video streaming
+            val surface = binding.remoteVideoView.holder.surface
+            if (surface != null && surface.isValid) {
+                Log.i(TAG, "Starting RTP media stream directly (surface is already valid)")
+                rtpMediaManager?.start(webRtcManager.localVideoTrack, surface)
+            } else {
+                Log.i(TAG, "Starting RTP audio first, waiting for remote video surface callback...")
+                rtpMediaManager?.start(webRtcManager.localVideoTrack, null)
+            }
+            
+            binding.remoteVideoView.holder.addCallback(object : SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: SurfaceHolder) {
+                    Log.i(TAG, "remoteVideoView surface created, updating RTP media decoder surface now")
+                    rtpMediaManager?.updateDecoderSurface(holder.surface)
+                    rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
+                }
+                override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {}
+                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                    Log.i(TAG, "remoteVideoView surface destroyed, releasing decoder safely")
+                    rtpMediaManager?.onSurfaceDestroyed()
+                }
+            })
+        }
+    }
+
+    // --- Open DataChannels (sau khi ICE connected) ---------------------------
+
+    private fun openDataChannels() {
+        Log.i(TAG, "Opening DataChannels (was opened=$isDataChannelsOpened)...")
+        isDataChannelsOpened = true
+
+        // Setup BDC – sẽ tự động gửi HTTP GET khi mở
+        dcManager.setupBDC()
+
+        // Setup ADC – sẽ lắng nghe message từ MF
+        dcManager.setupADC()
+
+        dcManager.onLaunchAppReceived = { appId ->
+            Log.i(TAG, "Remote requested launch app: $appId")
+            lifecycleScope.launch(Dispatchers.Main) {
+                miniAppManager.launchMiniApp(appId, sendRemoteTrigger = false)
+            }
+        }
+
+    }
+
+    // --- End Call ------------------------------------------------------------
+
+    private fun endCall() {
+        if (isEndingCall) return
+        isEndingCall = true
+        sipManager.markCallEnding()
+        Log.i(TAG, "Ending call...")
+        IncomingCallNotificationManager.dismiss(this)
+        stopRingbackTone()
+        isDataChannelsOpened = false
+        stopCallTimer()
+        rtpMediaManager?.stop()
+        imsDcSdk.onCallEnded()
+        val cId = callId ?: sipManager.currentCallId
+        val fTag = sipManager.currentFromTag
+        lifecycleScope.launch(Dispatchers.IO) {
+            sipManager.bye(remoteUser, localIp, overrideCallId = cId, overrideFromTag = fTag)
+        }
+        resetAudio()
+        releaseVideoViews()
+        webRtcManager.close()
+        finish()
+    }
+
+    // --- Lifecycle cleanup ---------------------------------------------------
+
+    override fun onStart() {
+        super.onStart()
+        activeInstance = this
+        if (isVideoEnabled && isCallActiveUiShown) {
+            Log.i(TAG, "onStart: resuming camera capture (app returning to foreground)")
+            webRtcManager.resumeLocalCapture()
+            rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
+            val surface = binding.remoteVideoView.holder.surface
+            if (surface != null && surface.isValid) {
+                rtpMediaManager?.updateDecoderSurface(surface)
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (isVideoEnabled && isCallActiveUiShown) {
+            Log.i(TAG, "onStop: pausing camera capture (app going to background)")
+            webRtcManager.pauseLocalCapture()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isEndingCall = true
+        if (activeInstance === this) {
+            activeInstance = null
+        }
+        IncomingCallNotificationManager.dismiss(this)
+        stopRingbackTone()
+        // Stop ringtone if still playing
+        try { ringtone?.stop() } catch (_: Exception) {}
+        ringtone = null
+        isDataChannelsOpened = false
+        try {
+            unregisterReceiver(debugReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering debugReceiver: ${e.message}")
+        }
+        stopCallTimer()
+        rtpMediaManager?.stop()
+        imsDcSdk.onCallEnded()
+        // Ensure remote peer is released if call was in progress or ringing
+        if (!isEndingCall && (callId != null || SipManager.shared?.currentCallId != null)) {
+            val rUser = remoteUser
+            val lIp = localIp
+            val cId = callId ?: SipManager.shared?.currentCallId
+            val fTag = SipManager.shared?.currentFromTag
+            val established = isCallActiveUiShown || (this::sipManager.isInitialized && sipManager.isCallActive)
+            SipManager.shared?.let { sm ->
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        if (established) {
+                            sm.bye(rUser, lIp, overrideCallId = cId, overrideFromTag = fTag)
+                        } else {
+                            sm.cancel(rUser, lIp, overrideCallId = cId, overrideFromTag = fTag)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+        resetAudio()
+        releaseVideoViews()
+        // NOTE: Redundant sipManager.resetCallState() removed to prevent wiping pendingCallId before sm.bye/sm.cancel sends packet
+        sipManager.onInviteResponse = null
+        sipManager.onCallEnded = null
+        sipManager.onAckWithSdp = null
+        sipManager.onReInviteReceived = null
+        sipManager.onReInviteResponse = null
+        try {
+            (binding.webviewMiniapp.parent as? android.view.ViewGroup)?.removeView(binding.webviewMiniapp)
+            binding.webviewMiniapp.stopLoading()
+            binding.webviewMiniapp.removeJavascriptInterface("AndroidBridge")
+            binding.webviewMiniapp.removeJavascriptInterface("IMSDataChannelBridge")
+            binding.webviewMiniapp.removeJavascriptInterface("ImsDcBridge")
+            binding.webviewMiniapp.removeJavascriptInterface("_dsbridge")
+            binding.webviewMiniapp.removeAllViews()
+            binding.webviewMiniapp.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error destroying WebView: ${e.message}")
+        }
+        webRtcManager.close()
+    }
+
+    private fun releaseVideoViews() {
+        try {
+            if (isRendererInitialized) {
+                binding.localVideoView.release()
+                isRendererInitialized = false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing video views: ${e.message}")
+        }
+        val oldEglBase = eglBase
+        eglBase = null
+        // Delay eglBase release to allow WebRtcManager background thread to safely dispose capturers
+        Thread {
+            try {
+                Thread.sleep(1000)
+                oldEglBase?.release()
+                Log.i(TAG, "EglBase released safely.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing EglBase: ${e.message}")
+            }
+        }.start()
+    }
+
+    private fun resetAudio() {
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            audioManager.mode = android.media.AudioManager.MODE_NORMAL
+            setSpeakerphoneOn(audioManager, false)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error resetting audio: ${e.message}")
+        }
+    }
+
+    private fun parseRemoteSdp(sdp: String): Triple<String, Int, Int> {
+        var ip = sipServer // M?c d?nh l� IP c?a SIP Server
+        var audioPort = 40002
+        var videoPort = 40004
+        
+        val lines = sdp.replace("\r", "").split("\n")
+        var currentMedia = ""
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("m=audio ")) {
+                currentMedia = "audio"
+                val parts = trimmed.split(" ")
+                if (parts.size >= 2) {
+                    audioPort = parts[1].toIntOrNull() ?: 40002
+                }
+            } else if (trimmed.startsWith("m=video ")) {
+                currentMedia = "video"
+                val parts = trimmed.split(" ")
+                if (parts.size >= 2) {
+                    videoPort = parts[1].toIntOrNull() ?: 40004
+                }
+            } else if (trimmed.startsWith("m=application ")) {
+                currentMedia = "application"
+            } else if (trimmed.startsWith("c=IN IP4 ")) {
+                val parts = trimmed.split(" ")
+                if (parts.size >= 3) {
+                    val candidateIp = parts[2]
+                    if (currentMedia == "audio" || currentMedia == "video" || currentMedia == "") {
+                        if (candidateIp != "0.0.0.0" && candidateIp != "127.0.0.1") {
+                            ip = candidateIp
+                        }
+                    }
+                }
+            }
+        }
+        return Triple(ip, audioPort, videoPort)
+    }
+
+
+    // --- Helpers ------------------------------------------------------------
+
+    private fun toggleCallHold() {
+        val nextHoldState = !sipManager.isCallHoldActive
+        sipManager.isCallHoldActive = nextHoldState
+        
+        binding.btnKeypadCircle.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            android.graphics.Color.parseColor(if (nextHoldState) "#FF3B82F6" else "#25FFFFFF")
+        )
+        
+        Toast.makeText(this, if (nextHoldState) "\u0110ang gi\u1eef cu\u1ed9c g\u1ecdi..." else "\u0110ang kh\u00f4i ph\u1ee5c cu\u1ed9c g\u1ecdi...", Toast.LENGTH_SHORT).show()
+        
+        lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                binding.tvCallStatus.text = if (nextHoldState) "\u23f8\ufe0f \u0110ang gi\u1eef" else "\u2705 \u0110\u00e3 k\u1ebft n\u1ed1i"
+                val localOffer = webRtcManager.createOffer()
+                withContext(Dispatchers.IO) {
+                    sipManager.sendReInviteWithSdp(localOffer)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "L?i thay d?i tr?ng th�i Hold/Resume: ${e.message}")
+            }
+        }
+    }
+
+
+    
+    private fun setSpeakerphoneOn(audioManager: android.media.AudioManager, on: Boolean) {
+        isSpeakerMode = on
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (on) {
+                val devices = audioManager.availableCommunicationDevices
+                val speaker = devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (speaker != null) {
+                    audioManager.setCommunicationDevice(speaker)
+                }
+            } else {
+                audioManager.clearCommunicationDevice()
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.isSpeakerphoneOn = on
+        }
+    }
+
+    private var agentMediaPlayer: android.media.MediaPlayer? = null
+
+    fun playAgentVoiceAudio() {
+        try {
+            agentMediaPlayer?.stop()
+            agentMediaPlayer?.release()
+            agentMediaPlayer = null
+
+            val afd = assets.openFd("miniapps/smart-menu/agent_greeting.mp3")
+            agentMediaPlayer = android.media.MediaPlayer().apply {
+                setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .build()
+                )
+                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+                prepare()
+                start()
+                setOnCompletionListener {
+                    it.release()
+                    agentMediaPlayer = null
+                }
+            }
+            Log.i(TAG, "🔊 Native MediaPlayer playing agent_greeting.mp3 successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error playing native agent voice audio: ${e.message}", e)
+        }
+    }
+}
+

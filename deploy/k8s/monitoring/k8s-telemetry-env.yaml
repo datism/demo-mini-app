@@ -1,0 +1,843 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: demo-mini-app
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: qryn-loki
+        type: loki
+        access: proxy
+        url: http://qryn:3100
+        jsonData:
+          maxLines: 1000
+          derivedFields:
+            - matcherRegex: "Call-ID:\\s*([^\\s\\r\\n]+)"
+              name: CallID
+              url: "http://localhost:8095/pcap?callid=$${__value.raw}"
+              urlDisplayLabel: "Download PCAP"
+        isDefault: true
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: demo-mini-app
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'IMS DC Dashboards'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /etc/grafana/provisioning/dashboards
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-json
+  namespace: demo-mini-app
+data:
+  dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "datasource",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": 1,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "type": "text",
+          "title": "Bá»™ CÃ´ng Cá»¥ Xuáº¥t File PCAP (SIP & HTTP)",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "content": "<iframe src=\"http://localhost:8095/?v=2\" width=\"100%\" height=\"240px\" style=\"border:none; border-radius:8px; background:transparent;\"></iframe>",
+            "mode": "html"
+          }
+        },
+        {
+          "type": "logs",
+          "title": "Báº£n Tin BÃ¡o Hiá»‡u Há»‡ Thá»‘ng",
+          "gridPos": {
+            "h": 16,
+            "w": 24,
+            "x": 0,
+            "y": 8
+          },
+          "id": 2,
+          "datasource": {
+            "type": "loki",
+            "uid": "qryn-loki"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "loki",
+                "uid": "qryn-loki"
+              },
+              "editorMode": "code",
+              "expr": "{type=\"sip\"}",
+              "queryType": "range",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "showLabels": false,
+            "wrapLogMessage": true,
+            "enableLogDetails": true,
+            "showCommonLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending"
+          }
+        }
+      ],
+      "refresh": "5s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": [],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "IMS DC Signaling Dashboard",
+      "uid": "ims-dc-dashboard",
+      "version": 3,
+      "weekStart": ""
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-config
+  namespace: demo-mini-app
+data:
+  use-keeper.xml: |
+    <clickhouse>
+        <zookeeper>
+            <node>
+                <host>clickhouse-server-0.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                <port>2181</port>
+            </node>
+            <node>
+                <host>clickhouse-server-1.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                <port>2181</port>
+            </node>
+            <node>
+                <host>clickhouse-server-2.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                <port>2181</port>
+            </node>
+        </zookeeper>
+        <remote_servers>
+            <qryn_cluster>
+                <shard>
+                    <internal_replication>true</internal_replication>
+                    <replica>
+                        <host>clickhouse-server-0.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                    <replica>
+                        <host>clickhouse-server-1.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                    <replica>
+                        <host>clickhouse-server-2.clickhouse-service.demo-mini-app.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </qryn_cluster>
+        </remote_servers>
+        <macros>
+            <cluster>qryn_cluster</cluster>
+            <shard>1</shard>
+            <replica>DYNAMIC_REPLICA</replica>
+        </macros>
+        <default_replica_path>/clickhouse/tables/{cluster}-{shard}/{database}/{table}</default_replica_path>
+        <default_replica_name>{replica}</default_replica_name>
+    </clickhouse>
+
+  keeper-server.xml: |
+    <clickhouse>
+        <keeper_server>
+            <tcp_port>2181</tcp_port>
+            <server_id from_env="SERVER_ID"/>
+            <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+            <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+            <coordination_settings>
+                <operation_timeout_ms>10000</operation_timeout_ms>
+                <session_timeout_ms>30000</session_timeout_ms>
+            </coordination_settings>
+            <raft_configuration>
+                <server>
+                    <id>1</id>
+                    <hostname>clickhouse-server-0.clickhouse-service.demo-mini-app.svc.cluster.local</hostname>
+                    <port>9234</port>
+                </server>
+                <server>
+                    <id>2</id>
+                    <hostname>clickhouse-server-1.clickhouse-service.demo-mini-app.svc.cluster.local</hostname>
+                    <port>9234</port>
+                </server>
+                <server>
+                    <id>3</id>
+                    <hostname>clickhouse-server-2.clickhouse-service.demo-mini-app.svc.cluster.local</hostname>
+                    <port>9234</port>
+                </server>
+            </raft_configuration>
+        </keeper_server>
+    </clickhouse>
+
+---
+# 0. ServiceAccount and RBAC for Patroni
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-pod
+  namespace: demo-mini-app
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: postgres-pod
+  namespace: demo-mini-app
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints", "configmaps", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: postgres-pod
+  namespace: demo-mini-app
+subjects:
+  - kind: ServiceAccount
+    name: postgres-pod
+    namespace: demo-mini-app
+roleRef:
+  kind: Role
+  name: postgres-pod
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 1. Postgres DB HA (StatefulSet using Patroni)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: demo-mini-app
+spec:
+  serviceName: db-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+      cluster-name: db
+  template:
+    metadata:
+      labels:
+        app: db
+        cluster-name: db
+    spec:
+      serviceAccountName: postgres-pod
+      containers:
+      - name: postgres
+        image: postgres-patroni:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5432
+          name: postgres
+        - containerPort: 8008
+          name: patroni
+        env:
+        - name: PATRONI_KUBERNETES_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+          value: "$(PATRONI_KUBERNETES_POD_IP):5432"
+        - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+          value: "$(PATRONI_KUBERNETES_POD_IP):8008"
+        - name: PATRONI_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PATRONI_KUBERNETES_BYPASS_API_SERVICE
+          value: "true"
+        - name: PATRONI_KUBERNETES_USE_ENDPOINTS
+          value: "true"
+        - name: PATRONI_SCOPE
+          value: "db"
+        - name: PATRONI_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PATRONI_KUBERNETES_LABELS
+          value: '{"app": "db", "cluster-name": "db"}'
+        - name: PATRONI_SUPERUSER_PASSWORD
+          value: "homerSeven"
+        - name: PATRONI_REPLICATION_PASSWORD
+          value: "replpassword"
+        - name: PATRONI_LOG_LEVEL
+          value: "DEBUG"
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+  - metadata:
+      name: db-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+      storageClassName: standard
+
+---
+# Headless service for Postgres routing
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-service
+  namespace: demo-mini-app
+spec:
+  clusterIP: None
+  ports:
+  - name: postgres
+    port: 5432
+  - name: patroni
+    port: 8008
+  selector:
+    app: db
+
+---
+# Primary service routing to Master (managed by Patroni)
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: demo-mini-app
+spec:
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+
+---
+# Replica service routing to Standbys (managed by Patroni)
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-replica
+  namespace: demo-mini-app
+spec:
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  selector:
+    app: db
+    role: replica
+
+---
+# 2. ClickHouse Server HA (StatefulSet)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse-server
+  namespace: demo-mini-app
+spec:
+  serviceName: clickhouse-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse-server
+  template:
+    metadata:
+      labels:
+        app: clickhouse-server
+    spec:
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:23.3-alpine
+        command:
+        - sh
+        - -c
+        - |
+          POD_NAME=$(hostname)
+          echo "Checking for ClickHouse cluster mode..."
+          if [ "$CLICKHOUSE_REPLICAS" -gt 1 ]; then
+            echo "Cluster mode detected (replicas=$CLICKHOUSE_REPLICAS). Setting up ClickHouse Keeper and macros..."
+            cp /config-templates/use-keeper.xml /etc/clickhouse-server/config.d/use-keeper.xml
+            sed -i "s/DYNAMIC_REPLICA/$POD_NAME/g" /etc/clickhouse-server/config.d/use-keeper.xml
+            
+            # Calculate KEEPER server_id from hostname index (e.g. clickhouse-server-0 -> server_id 1)
+            INDEX=${POD_NAME##*-}
+            export SERVER_ID=$((INDEX + 1))
+            echo "Enabling ClickHouse Keeper with SERVER_ID=$SERVER_ID..."
+            cp /config-templates/keeper-server.xml /etc/clickhouse-server/config.d/keeper-server.xml
+          else
+            echo "Standalone mode detected (replicas=$CLICKHOUSE_REPLICAS). Skipping Keeper setup."
+            rm -f /etc/clickhouse-server/config.d/use-keeper.xml /etc/clickhouse-server/config.d/keeper-server.xml
+          fi
+          
+          echo "Launching ClickHouse Server..."
+          exec /entrypoint.sh
+        ports:
+        - containerPort: 8123
+          name: http
+        - containerPort: 9000
+          name: native
+        - containerPort: 2181
+          name: keeper
+        env:
+        - name: CLICKHOUSE_USER
+          value: "qryn"
+        - name: CLICKHOUSE_PASSWORD
+          value: "demo"
+        - name: CLICKHOUSE_DB
+          value: "qryn"
+        - name: CLICKHOUSE_REPLICAS
+          value: "3"
+        volumeMounts:
+        - name: clickhouse-data
+          mountPath: /var/lib/clickhouse
+        - name: clickhouse-config-volume
+          mountPath: /config-templates
+      volumes:
+      - name: clickhouse-config-volume
+        configMap:
+          name: clickhouse-config
+  volumeClaimTemplates:
+  - metadata:
+      name: clickhouse-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 2Gi
+      storageClassName: standard
+
+---
+# Headless service for ClickHouse pod resolution
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-service
+  namespace: demo-mini-app
+spec:
+  clusterIP: None
+  ports:
+  - name: http
+    port: 8123
+  - name: native
+    port: 9000
+  - name: keeper
+    port: 2181
+  selector:
+    app: clickhouse-server
+
+---
+# Read/Write balancer service
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-server
+  namespace: demo-mini-app
+spec:
+  ports:
+  - name: http
+    port: 8123
+    targetPort: 8123
+  - name: native
+    port: 9000
+    targetPort: 9000
+  selector:
+    app: clickhouse-server
+
+---
+# 3. Qryn
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qryn
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qryn
+  template:
+    metadata:
+      labels:
+        app: qryn
+    spec:
+      containers:
+      - name: qryn
+        image: qxip/qryn:3.2.38
+        ports:
+        - containerPort: 3100
+        env:
+        - name: CLICKHOUSE_SERVER
+          value: "clickhouse-server"
+        - name: CLICKHOUSE_AUTH
+          value: "qryn:demo"
+        - name: CLICKHOUSE_DB
+          value: "qryn"
+        - name: CLICKHOUSE_CLUSTER
+          value: "qryn_cluster"
+        - name: PORT
+          value: "3100"
+        - name: SAMPLES_DAYS
+          value: "3"
+        - name: LABELS_DAYS
+          value: "3"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qryn
+  namespace: demo-mini-app
+spec:
+  ports:
+  - port: 3100
+    targetPort: 3100
+  selector:
+    app: qryn
+
+---
+# 4. Heplify Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heplify-server
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: heplify-server
+  template:
+    metadata:
+      labels:
+        app: heplify-server
+    spec:
+      containers:
+      - name: heplify-server
+        image: sipcapture/heplify-server:1.30
+        command: ["/root/heplify-server"]
+        ports:
+        - name: hep-udp
+          containerPort: 9060
+          protocol: UDP
+        - name: hep-tcp
+          containerPort: 9060
+          protocol: TCP
+        env:
+        - name: HEPLIFYSERVER_HEPADDR
+          value: ":9060"
+        - name: HEPLIFYSERVER_DBADDR
+          value: "db:5432"
+        - name: HEPLIFYSERVER_DBDRIVER
+          value: "postgres"
+        - name: HEPLIFYSERVER_DBUSER
+          value: "postgres"
+        - name: HEPLIFYSERVER_DBPASS
+          value: "homerSeven"
+        - name: HEPLIFYSERVER_DBSHEMA
+          value: "homer7"
+        - name: HEPLIFYSERVER_DBDATATABLE
+          value: "homer_data"
+        - name: HEPLIFYSERVER_LOKIURL
+          value: "http://qryn:3100/loki/api/v1/push"
+        - name: HEPLIFYSERVER_LOGSTD
+          value: "true"
+        - name: HEPLIFYSERVER_LOGLVL
+          value: "debug"
+        - name: HEPLIFYSERVER_LOKITIMER
+          value: "1"
+        - name: HEPLIFYSERVER_LOKIBULK
+          value: "1"
+        - name: HEPLIFYSERVER_DBROTATE
+          value: "true"
+        - name: HEPLIFYSERVER_DBROTASIZE
+          value: "3"
+        - name: HEPLIFYSERVER_DBROTASTEP
+          value: "1d"
+        - name: HEPLIFYSERVER_DBROTACLEAN
+          value: "true"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: heplify-server
+  namespace: demo-mini-app
+spec:
+  ports:
+  - name: hep-udp
+    port: 9060
+    targetPort: 9060
+    protocol: UDP
+  - name: hep-tcp
+    port: 9060
+    targetPort: 9060
+    protocol: TCP
+  selector:
+    app: heplify-server
+
+---
+# 5. Homer App
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homer-app
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homer-app
+  template:
+    metadata:
+      labels:
+        app: homer-app
+    spec:
+      containers:
+      - name: homer-app
+        image: sipcapture/homer-app:1.1.4
+        ports:
+        - containerPort: 80
+        env:
+        - name: DB_HOST
+          value: "db"
+        - name: DB_USER
+          value: "postgres"
+        - name: DB_PASS
+          value: "homerSeven"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "homer7"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homer-app
+  namespace: demo-mini-app
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30090
+  selector:
+    app: homer-app
+
+---
+# 6. Grafana
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana-oss:10.4.2
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          value: "admin"
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin"
+        volumeMounts:
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources/datasources.yaml
+          subPath: datasources.yaml
+        - name: dashboards
+          mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
+          subPath: dashboards.yaml
+        - name: dashboard-json
+          mountPath: /etc/grafana/provisioning/dashboards/dashboard.json
+          subPath: dashboard.json
+      volumes:
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboards
+        configMap:
+          name: grafana-dashboards
+      - name: dashboard-json
+        configMap:
+          name: grafana-dashboard-json
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: demo-mini-app
+spec:
+  type: NodePort
+  ports:
+  - port: 3000
+    targetPort: 3000
+    nodePort: 30300
+  selector:
+    app: grafana
+
+---
+# 7. PCAP Exporter
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcap-exporter
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pcap-exporter
+  template:
+    metadata:
+      labels:
+        app: pcap-exporter
+    spec:
+      containers:
+      - name: pcap-exporter
+        image: go-mf:local
+        command: ["./pcap-exporter"]
+        ports:
+        - containerPort: 8095
+        env:
+        - name: CLICKHOUSE_USER
+          value: "qryn"
+        - name: CLICKHOUSE_PASSWORD
+          value: "demo"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcap-exporter
+  namespace: demo-mini-app
+spec:
+  type: NodePort
+  ports:
+  - port: 8095
+    targetPort: 8095
+    nodePort: 30095
+  selector:
+    app: pcap-exporter
+
+---
+# 8. PCF (Policy Control Function)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcf
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pcf
+      instance: pcf-1
+  template:
+    metadata:
+      labels:
+        app: pcf
+        instance: pcf-1
+    spec:
+      containers:
+      - name: pcf
+        image: go-mf:local
+        command: ["./pcf"]
+        env:
+        - name: INTERFACE_NAME
+          value: eth0
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+      initContainers:
+      - name: register-dns
+        image: python:3.10-slim
+        command:
+        - python
+        - -c
+        - |
+          import socket, fcntl, struct, urllib.request, time
+          def get_ip(ifname):
+              s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+              try:
+                  return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+              except IOError:
+                  return None
+          ip = None
+          for _ in range(10):
+              ip = get_ip('eth0')
+              if ip: break
+              time.sleep(1)
+          if not ip: raise Exception("No IP on eth0")
+          pod = socket.gethostname()
+          print(f"Registering pcf-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+          urllib.request.urlopen(f"http://dns-server-service:9090/update?host=pcf-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      volumes:
+      - name: config-volume
+        configMap:
+          name: ims-sys-config

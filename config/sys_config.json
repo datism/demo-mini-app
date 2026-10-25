@@ -1,0 +1,31 @@
+{
+  "domains": {
+    "ims": "ims.mnc001.mcc452.3gppnetwork.org"
+  },
+  "ims_core": {
+    "pcscf": { "host": "pcscf", "port": 5060 },
+    "icscf": { "host": "icscf", "port": 5060 },
+    "scscf": { "host": "scscf", "port": 5060 }
+  },
+  "services": {
+    "ims_as": { "host": "ims-as", "port": 5070, "sip_port": 5060 },
+    "dcsf": { "host": "dcsf", "port": 8080 },
+    "mf": { "host": "mf", "port": 8081, "webrtc_port": 40000, "ringing_timeout_sec": 45 },
+    "dcar": { "host": "dcar", "port": 8082 },
+    "dcas": { "host": "dcas", "port": 8083, "ws_port": 8084 },
+    "pcf": { "host": "pcf", "port": 8085 }
+  },
+  "users": [
+    { "impu": "sip:1001@ims.mnc001.mcc452.3gppnetwork.org", "username": "1001", "password": "password1001", "vrbt_enabled": false },
+    { "impu": "sip:1002@ims.mnc001.mcc452.3gppnetwork.org", "username": "1002", "password": "password1002", "vrbt_enabled": true },
+    { "impu": "sip:1003@ims.mnc001.mcc452.3gppnetwork.org", "username": "1003", "password": "password1003", "vrbt_enabled": false },
+    { "impu": "sip:1004@ims.mnc001.mcc452.3gppnetwork.org", "username": "1004", "password": "password1004", "vrbt_enabled": false },
+    { "impu": "sip:1005@ims.mnc001.mcc452.3gppnetwork.org", "username": "1005", "password": "password1005", "vrbt_enabled": false },
+    { "impu": "sip:1006@ims.mnc001.mcc452.3gppnetwork.org", "username": "1006", "password": "password1006", "vrbt_enabled": false },
+    { "impu": "sip:198@ims.mnc001.mcc452.3gppnetwork.org", "username": "198", "password": "password198", "vrbt_enabled": false }
+  ],
+  "ifc": {
+    "trigger_content": "webrtc-datachannel",
+    "as_destination": "sip:ims-as:5060"
+  }
+}

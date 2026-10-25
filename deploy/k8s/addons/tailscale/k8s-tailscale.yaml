@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tailscale-router
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tailscale
+  template:
+    metadata:
+      labels:
+        app: tailscale
+      annotations:
+        k8s.v1.cni.cncf.io/networks: macvlan-conf
+    spec:
+      containers:
+      - name: tailscale
+        image: tailscale/tailscale:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Start tailscale in background
+          /usr/local/bin/containerboot &
+          TS_PID=$!
+          
+          # Wait for tailscale to be up and net1 to get an IP
+          echo "[tailscale-router] Waiting for tailscale0 and net1 interfaces..."
+          for i in $(seq 1 30); do
+            if ip addr show tailscale0 2>/dev/null | grep -q "inet " && ip addr show net1 2>/dev/null | grep -q "inet "; then
+              break
+            fi
+            sleep 2
+          done
+          
+          # Setup iptables forwarding for SIP (UDP 5060) to P-CSCF
+          echo "[tailscale-router] Setting up SIP forwarding rules..."
+          setup_sip_forward() {
+            # Register tailscale-router IP to DNS
+            TS_IP=$(ip addr show net1 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+            wget -qO- "http://dns-server-service:9090/update?host=tailscale-net1.ims.mnc001.mcc452.3gppnetwork.org&ip=${TS_IP}&pod=${HOSTNAME}" >/dev/null 2>&1 || true
+            
+            # Resolve P-CSCF IP from custom DNS
+            PCSCF_IP=$(getent hosts pcscf-net1.ims.mnc001.mcc452.3gppnetwork.org | awk '{print $1}')
+            if [ -z "$PCSCF_IP" ]; then
+              echo "[tailscale-router] Could not resolve P-CSCF IP, retrying..."
+              return 1
+            fi
+            echo "[tailscale-router] P-CSCF IP resolved: $PCSCF_IP"
+            
+            # Flush existing rules to avoid duplicates
+            iptables -t nat -F PREROUTING 2>/dev/null || true
+            iptables -t nat -F POSTROUTING 2>/dev/null || true
+            
+            # Enable IP forwarding
+            echo 1 > /proc/sys/net/ipv4/ip_forward
+            
+            # DNAT: incoming SIP on tailscale0 -> P-CSCF on macvlan
+            iptables -t nat -A PREROUTING -i tailscale0 -p udp --dport 5060 -j DNAT --to-destination ${PCSCF_IP}:5060
+            iptables -t nat -A PREROUTING -i tailscale0 -p tcp --dport 5060 -j DNAT --to-destination ${PCSCF_IP}:5060
+            
+            # Resolve MF IP from custom DNS for WebRTC/RTP port forwarding
+            MF_IP=$(getent hosts mf-headless.ims.mnc001.mcc452.3gppnetwork.org | awk '{print $1}')
+            if [ -n "$MF_IP" ]; then
+              echo "[tailscale-router] MF IP resolved: $MF_IP"
+              # DNAT: incoming WebRTC/DTLS/RTP on tailscale0 -> MF on macvlan
+              iptables -t nat -A PREROUTING -i tailscale0 -p udp --dport 40000:40010 -j DNAT --to-destination ${MF_IP}
+            else
+              echo "[tailscale-router] WARNING: Could not resolve MF IP — WebRTC/RTP DNAT not configured"
+            fi
+            
+            # MASQUERADE all traffic going out on macvlan (net1)
+            # This covers SIP, WebRTC/DTLS, RTP and any future protocols
+            # MF pods on 10.202.0.x cannot route to 100.x.x.x (Tailscale) directly,
+            # so we MASQUERADE to make replies come back through this pod
+            iptables -t nat -A POSTROUTING -o net1 -j MASQUERADE
+            
+            # MASQUERADE traffic going out on tailscale0
+            # Because MF replies directly to Tailscale IPs (due to SDP), they bypass conntrack reply.
+            # We must MASQUERADE them on exit so devices see the tailscale-router IP as source.
+            iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+            
+            # Restore Tailscale's own postrouting chain
+            iptables -t nat -A POSTROUTING -j ts-postrouting
+            
+            echo "[tailscale-router] iptables forwarding configured: SIP DNAT + MF DNAT + full MASQUERADE on net1/tailscale0"
+            return 0
+          }
+          
+          # Retry DNS resolution until P-CSCF is registered
+          for i in $(seq 1 30); do
+            setup_sip_forward && break
+            sleep 5
+          done
+          
+          # Keep container alive by waiting on tailscale process
+          wait $TS_PID
+        env:
+        - name: TS_AUTHKEY
+          value: "tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb"
+        - name: TS_ROUTES
+          value: "10.202.0.0/16,172.16.0.0/12"
+        - name: TS_USERSPACE
+          value: "false"
+        - name: TS_KUBE_SECRET
+          value: ""
+        - name: TS_STATE_DIR
+          value: "/var/lib/tailscale"
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        volumeMounts:
+        - name: tailscale-state
+          mountPath: /var/lib/tailscale
+      volumes:
+      - name: tailscale-state
+        hostPath:
+          path: /var/lib/tailscale-demo-router
+          type: DirectoryOrCreate

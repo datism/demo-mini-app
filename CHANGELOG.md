@@ -1,0 +1,83 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [16.0.0] - 2026-08-20
+
+### Added & Enhanced
+- **Android Native Collapsible Dialpad & Call History Expansion:**
+  - Implemented smooth dynamic layout transition in `MainActivity.kt` and `activity_main.xml`. Tapping the call history automatically collapses the dialpad and shows a floating dialpad button (`fabShowDialpad`), maximizing call history display matching native flagship dialers.
+- **E2E Simulation Test Suite (`dc-test-tool`) 100% Feature Coverage:**
+  - Expanded `cmd/dc-test-tool`, `internal/dctest`, and `deploy/test_scenarios.json` to 9 comprehensive scenarios covering all manual S24 testing flows:
+    1. Whiteboard Draw & FunCalling Emoji & Exit Mini-App (ADC Release).
+    2. Voice/Video Only RTP assertion.
+    3. Caro Game P2P (Turn synchronization & state validation).
+    4. Early Dialog SIP CANCEL.
+    5. Call Rejection (SIP 486 Busy Here).
+    6. Whiteboard Callee Hangup.
+    7. Callee-Initiated Mini-App Launching.
+    8. Hotline 198 CSKH Smart Menu UAS Interaction (BDC Stream 0 payload verification).
+    9. Enterprise Caller ID & Brand Promotion.
+  - Achieved **103/103 Assertions Passed (100% Success Rate)** on Kubernetes.
+- **Golang Microservices Architecture & Developer Guide:**
+  - Created master documentation in `go-mf/README.md` and GoDoc package comments across all 8 microservices and 11 internal packages.
+  - Provided step-by-step developer guides for creating new Mini-Apps, adding game handlers, and configuring test scenarios.
+- **Network Deployment Architecture Clarification (Tailscale vs. Production Telco Core):**
+  - Documented that Tailscale is strictly an optional addon for remote internet testing/lab environments (bypassing NAT/CGNAT).
+  - Clarified that Production Telco environments route directly via 3GPP 5G UPF / N6 interfaces without Tailscale.
+- **Early Media Announcement for Unreachable Subscribers (3GPP TS 24.186):**
+  - Intercepts 480/404 on IMS-AS, emits SIP `183 Session Progress` with `P-Early-Media: sendrecv`, streams `unreachable.pcma` audio from MF, and cleanly tears down call with SIP `487 Request Terminated`.
+
+## [15.0.3] - 2026-08-16
+
+### Added & Enhanced
+- **Smart Customer Service 198 (Hotline UAS / Enterprise 5G New Calling):**
+  - Designed and deployed the interactive Smart Customer Service hotline `198` per GSMA 5G New Calling enterprise specifications.
+  - **Core Network Terminating UAS:** IMS-AS and DCAS act as the terminating hotline UAS automatically answering calls to `198` with `200 OK`, establishing conversational voice/video and Bootstrap Data Channel (BDC).
+  - **P2A Application Data Channel (ADC - Stream 1000):** On-demand ADC negotiation with `UDP_PROXY` policy routed to DCAS.
+  - **3 Core Interactive Features:**
+    1. 🎧 **Gặp tổng đài viên:** Sends `"agent"` action to DCAS, returning greeting *"Xin chào, tôi có thể giúp gì cho bạn"*, activating real-time multi-color soundwave visualizer (Waveform) and Vietnamese Web Speech TTS synthesis.
+    2. 🎬 **Xem 1 video:** Sends `"video"` action to DCAS, dynamically retrieving a random video URL and opening an embedded HTML5 Video Player Modal inside the active call view.
+    3. ⏰ **Thời gian hệ thống:** Sends `"time"` action to DCAS, fetching accurate server timestamp and displaying it dynamically on the UI panel.
+- **Hotline Call UI Optimization:**
+  - `CallActivity` automatically hides local/remote camera preview boxes when calling hotline `198` to provide an uncluttered full-screen interactive service layout.
+- **End-to-End Regression Testing & Visual Verification:**
+  - Automated regression testing across all 4 applications (TuYaApp Whiteboard, Caro 9x9, Fun Calling, Smart Menu 198) on physical Samsung Galaxy S24 devices (`R5CY54VL09X` & `R5CY54VL13Y`), visually verifying 100% two-way synchronization and zero-regression compliance with 3GPP TS 26.114/24.186/29.175/29.176 & GSMA NG.134/TS.66.
+
+## [15.0.2] - 2026-08-15
+
+### Added & Enhanced
+- **Screen-Off Call Handling & Deep Doze Wakeup:**
+  - Implemented `WakeLock`, `setShowWhenLocked(true)`, `setTurnScreenOn(true)`, and `KeyguardManager.requestDismissKeyguard()` in `CallActivity` and `CallNotificationManager`.
+  - Enables incoming calls to instantly wake devices from `DOZE_SUSPEND` state (<1.6s) and display full-screen incoming call UI without requiring user unlock.
+- **Slide-to-Answer UX (Samsung One UI Standard):**
+  - Created `SlideToAnswerView` widget with smooth swipe-to-answer gesture, glowing handle animations, and haptic feedback matching modern Android dialers.
+- **Ringback Tone & Call Progress Signaling:**
+  - Caller screen displays "Đang kết nối..." initially, transitioning to "Đang đổ chuông..." upon receiving SIP `180 Ringing` accompanied by local ringback tone playback (`ToneGenerator.TONE_SUP_RINGTONE`).
+- **2-Way Synchronized Mini-Apps Ecosystem:**
+  - **TuYaApp (Whiteboard / `sketch-sync-app`):** Real-time 2-way stroke synchronization over WebRTC ADC (Stream 1000) on HTML5 canvas with dynamic resolution scaling.
+  - **Game Cờ Caro 9x9 (`caro`):** 9x9 board with full 2-way turn synchronization (X/O) and turn indicators.
+  - **Fun Calling (`fun-calling-app`):** Interactive 5-emoji floating bar (❤️, 👍, 😊, 😡, ✋) and live toast feedback upon receiving emoji animations.
+- **GSMA & 3GPP Architecture Compliance:**
+  - Enforced plain SIP/TCP transport, RTP/UDP media streams (PCMA audio, H264 video), HTTP/2 Cleartext h2c SBA, and WebRTC BDC (Stream 10) / ADC (Stream 1000) isolation.
+
+## [15.0.1] - 2026-08-14
+
+### Added / Fixed
+- **Samsung One UI 6.1 Dialer Integration:** Pixel-perfect dialer icon and incoming call layout adjustments.
+- **BDC Caching Validation:** ETag and If-None-Match HTTP caching mechanism verification over Bootstrap Data Channel.
+
+## [15.0.0] - 2026-08-12
+
+### Added / Fixed
+- **2-Way Video RTP Streaming:** Video call integration with PCMA audio and H264 video.
+- **Callee-Initiated Mini-App Launching:** Support for Callee or Caller to launch Mini-Apps during active calls.
+- **Incoming Call UI Refactoring:** Overhauled incoming banner and full-screen call management.
+
+## [14.0.0] - 2026-08-02
+
+### Added / Fixed
+- **Android WebRTC Tailscale Binding:** Fixed an issue where WebRTC failed to establish ICE connections over the Tailscale VPN. Implemented `PeerConnectionFactory.Options.networkIgnoreMask = 14` in `WebRtcManager.kt` to force the native C++ WebRTC layer to route traffic over the VPN interface rather than Wi-Fi or Cellular networks.
+- **Tailscale Router MASQUERADE:** Updated `k8s-tailscale.yaml` to include an `iptables` rule that masquerades outbound traffic on the `net1` interface. This ensures that Media Function (MF) pods on the macvlan network (10.202.0.x) can successfully route UDP/RTP return traffic back to the Android clients via the Tailscale subnet (100.x.x.x).
+- **Redis Stability Fix:** Resolved an issue where Redis instances occasionally entered a read-only state. Removed the unnecessary `redis-sentinel` sidecar for single-node deployments and updated the startup script in `k8s-redis.yaml` to ensure the pod consistently starts as the `master` node, eliminating replica demotion conflicts.
+- **Android App Persistence:** Fixed SharedPreferences logic in `MainActivity.kt` to properly save and load the customized SIP login information (`username` and `remote_user`), replacing the previous hardcoded defaults (1001 and 1002).

@@ -1,0 +1,1003 @@
+package com.demo.imsdc.media
+
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaRecorder
+import android.os.Process
+import android.util.Log
+import android.view.Surface
+import org.webrtc.VideoFrame
+import org.webrtc.VideoSink
+import org.webrtc.VideoTrack
+import org.webrtc.YuvHelper
+import java.io.ByteArrayOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.nio.ByteBuffer
+import kotlin.experimental.xor
+
+private const val TAG = "RtpMediaManager"
+
+class RtpMediaManager(
+    private val context: Context,
+    private val localAudioPort: Int = 40002,
+    private val localVideoPort: Int = 40004,
+    private val localIp: String? = null
+) {
+    // Media attributes
+    private var remoteIP: String? = null
+    private var remoteAudioPort: Int = 40002
+    private var remoteVideoPort: Int = 40004
+
+    // SSRC values generated randomly per instance to avoid reflection / collision
+    private val localAudioSsrc = kotlin.random.Random.nextInt(100000, 999999)
+    private val localVideoSsrc = kotlin.random.Random.nextInt(100000, 999999)
+
+    // Sockets
+    private var audioSocket: DatagramSocket? = null
+    private var videoSocket: DatagramSocket? = null
+
+    // Threads
+    private var audioSenderThread: Thread? = null
+    private var audioReceiverThread: Thread? = null
+    private var videoReceiverThread: Thread? = null
+
+    // State
+    @Volatile
+    private var isRunning = false
+
+    // Packet counters for PoC validation
+    private var audioPacketsSent = 0
+    private var audioPacketsReceived = 0
+    private var videoPacketsSent = 0
+    private var videoPacketsReceived = 0
+    private var videoFramesDecoded = 0
+
+    // WebRTC connection tracking
+    private var localVideoTrack: VideoTrack? = null
+    private var videoSink: VideoSink? = null
+
+    // Codecs
+    private var videoEncoder: MediaCodec? = null
+    @Volatile
+    private var videoDecoder: MediaCodec? = null
+    private var audioTrack: AudioTrack? = null
+    private var audioRecord: AudioRecord? = null
+
+    // Video output surface
+    private var decoderSurface: Surface? = null
+
+    // Preallocated buffers for YUV rotation and NV12 transformation
+    private val rotatedY = ByteBuffer.allocateDirect(307200)
+    private val rotatedU = ByteBuffer.allocateDirect(76800)
+    private val rotatedV = ByteBuffer.allocateDirect(76800)
+    private val nv12Buffer = ByteBuffer.allocateDirect(460800)
+
+    // G.711 A-law encoding utilities
+    companion object {
+        fun linearToAlaw(sample: Short): Byte {
+            val s = sample.toInt()
+            var sign = 0
+            var temp = s
+            if (temp < 0) {
+                temp = -temp
+                sign = 0x80
+            }
+            val clip = 32635
+            if (temp > clip) temp = clip
+
+            var exponent = 7
+            var expMask = 0x4000
+            while ((temp and expMask) == 0 && exponent > 0) {
+                exponent--
+                expMask = expMask shr 1
+            }
+
+            val mantissa = if (exponent == 0) {
+                (temp ushr 4) and 0x0F
+            } else {
+                (temp ushr (exponent + 3)) and 0x0F
+            }
+
+            val alaw = sign or (exponent shl 4) or mantissa
+            return (alaw xor 0xD5).toByte()
+        }
+
+        fun alawToLinear(alaw: Byte): Short {
+            val a = (alaw.toInt() and 0xFF) xor 0xD5
+            val sign = a and 0x80
+            val exponent = (a and 0x70) ushr 4
+            val mantissa = a and 0x0F
+
+            var sample = if (exponent == 0) {
+                (mantissa shl 4) or 8
+            } else {
+                ((mantissa or 0x10) shl (exponent + 3)) or (1 shl (exponent + 2))
+            }
+
+            if (sign != 0) {
+                sample = -sample
+            }
+            return sample.toShort()
+        }
+
+        fun buildRtpHeader(payloadType: Byte, seqNum: Int, timestamp: Long, ssrc: Int): ByteArray {
+            val header = ByteArray(12)
+            header[0] = 0x80.toByte() // Version 2
+            header[1] = (payloadType.toInt() and 0x7F).toByte()
+            header[2] = (seqNum ushr 8).toByte()
+            header[3] = (seqNum and 0xFF).toByte()
+            header[4] = (timestamp ushr 24).toByte()
+            header[5] = (timestamp ushr 16).toByte()
+            header[6] = (timestamp ushr 8).toByte()
+            header[7] = (timestamp and 0xFF).toByte()
+            header[8] = (ssrc ushr 24).toByte()
+            header[9] = (ssrc ushr 16).toByte()
+            header[10] = (ssrc ushr 8).toByte()
+            header[11] = (ssrc and 0xFF).toByte()
+            return header
+        }
+    }
+
+    /**
+     * Set the remote destination for RTP streams.
+     */
+    fun setRemoteDestination(ip: String, audioPort: Int, videoPort: Int) {
+        this.remoteIP = ip
+        this.remoteAudioPort = audioPort
+        this.remoteVideoPort = videoPort
+        Log.i(TAG, "Remote destination configured: IP=$ip, AudioPort=$audioPort, VideoPort=$videoPort")
+        if (isRunning && audioSocket != null) {
+            sendNatHolePunchPackets()
+        }
+    }
+
+    /**
+     * Send NAT hole-punch packets (silence RTP frames) to help punch through NAT/firewalls immediately.
+     */
+    private fun sendNatHolePunchPackets() {
+        val ipStr = remoteIP ?: return
+        val socket = audioSocket ?: return
+        if (socket.isClosed) return
+
+        Thread {
+            try {
+                val targetAddr = InetAddress.getByName(ipStr)
+                val silencePayload = ByteArray(160) { 0xD5.toByte() } // G.711 A-law silence
+                for (i in 0 until 3) {
+                    val header = buildRtpHeader(8, i, (i * 160).toLong(), localAudioSsrc)
+                    val packetBytes = ByteArray(12 + silencePayload.size)
+                    System.arraycopy(header, 0, packetBytes, 0, 12)
+                    System.arraycopy(silencePayload, 0, packetBytes, 12, silencePayload.size)
+                    val packet = DatagramPacket(packetBytes, packetBytes.size, targetAddr, remoteAudioPort)
+                    socket.send(packet)
+                    Thread.sleep(20)
+                }
+                Log.i(TAG, "Sent 3 NAT hole punching packets to $ipStr:$remoteAudioPort")
+            } catch (e: Exception) {
+                Log.w(TAG, "NAT hole punch error: ${e.message}")
+            }
+        }.start()
+    }
+
+    /**
+     * Start audio and video RTP sender & receiver.
+     */
+    @Synchronized
+    fun start(localVideoTrack: VideoTrack?, surface: Surface?) {
+        if (localVideoTrack != null) {
+            this.localVideoTrack = localVideoTrack
+        }
+        if (surface != null && surface.isValid) {
+            this.decoderSurface = surface
+        }
+
+        if (!isRunning) {
+            Log.i(TAG, "Starting RTP Media Manager (localAudioPort=$localAudioPort, localVideoPort=$localVideoPort, localIp=$localIp)...")
+            try {
+                // Bind local sockets with SO_REUSEADDR to prevent EADDRINUSE
+                // Explicitly bind to localIp if provided to ensure UDP packets use the exact IP announced in SDP
+                val isLocalIpValid = !localIp.isNullOrBlank() &&
+                    !localIp.contains(":") &&
+                    localIp != "0.0.0.0" &&
+                    localIp != "127.0.0.1" &&
+                    localIp != "::"
+
+                val bindAudioAddr = if (isLocalIpValid) {
+                    try {
+                        InetSocketAddress(InetAddress.getByName(localIp), localAudioPort)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to resolve localIp=$localIp for audio, falling back to wildcard: ${e.message}")
+                        InetSocketAddress(localAudioPort)
+                    }
+                } else {
+                    InetSocketAddress(localAudioPort)
+                }
+
+                val bindVideoAddr = if (isLocalIpValid) {
+                    try {
+                        InetSocketAddress(InetAddress.getByName(localIp), localVideoPort)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to resolve localIp=$localIp for video, falling back to wildcard: ${e.message}")
+                        InetSocketAddress(localVideoPort)
+                    }
+                } else {
+                    InetSocketAddress(localVideoPort)
+                }
+
+                audioSocket = DatagramSocket(null).apply {
+                    reuseAddress = true
+                    try {
+                        bind(bindAudioAddr)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to bind audioSocket to $bindAudioAddr, falling back to wildcard: ${e.message}")
+                        bind(InetSocketAddress(localAudioPort))
+                    }
+                }
+                videoSocket = DatagramSocket(null).apply {
+                    reuseAddress = true
+                    try {
+                        bind(bindVideoAddr)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to bind videoSocket to $bindVideoAddr, falling back to wildcard: ${e.message}")
+                        bind(InetSocketAddress(localVideoPort))
+                    }
+                }
+                Log.i(TAG, "RTP Sockets bound successfully: Audio=${audioSocket?.localSocketAddress}, Video=${videoSocket?.localSocketAddress}")
+                isRunning = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to bind RTP sockets: ${e.message}", e)
+                try { audioSocket?.close() } catch (_: Exception) {}
+                try { videoSocket?.close() } catch (_: Exception) {}
+                audioSocket = null
+                videoSocket = null
+                isRunning = false
+                return
+            }
+
+            // Start Audio components
+            startAudioReceiver()
+            startAudioSender()
+            sendNatHolePunchPackets()
+        }
+
+        // Start or update Video components
+        if (videoDecoder == null && decoderSurface != null && decoderSurface?.isValid == true && videoSocket != null) {
+            startVideoReceiver()
+        }
+
+        if (videoEncoder == null && this.localVideoTrack != null && videoSocket != null) {
+            startVideoSender()
+        }
+    }
+
+    @Synchronized
+    fun onSurfaceDestroyed() {
+        Log.i(TAG, "Surface destroyed, releasing video decoder safely")
+        val oldDecoder = videoDecoder
+        videoDecoder = null       // Null first -> feedDecoder() returns immediately
+        decoderSurface = null
+        try {
+            oldDecoder?.stop()
+            oldDecoder?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing decoder on surface destroy: ${e.message}")
+        }
+        // videoReceiverThread remains alive to receive UDP packets
+    }
+
+    @Synchronized
+    fun updateDecoderSurface(surface: Surface?) {
+        Log.i(TAG, "Updating decoder surface: valid=${surface?.isValid}")
+        if (surface != null && surface.isValid) {
+            this.decoderSurface = surface
+            if (isRunning && videoSocket != null) {
+                // Safely release dead/old decoder if present
+                val oldDecoder = videoDecoder
+                videoDecoder = null
+                try {
+                    oldDecoder?.stop()
+                    oldDecoder?.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing old decoder: ${e.message}")
+                }
+
+                if (videoReceiverThread?.isAlive == true) {
+                    reinitDecoder(surface)
+                } else {
+                    startVideoReceiver()
+                }
+            }
+        }
+    }
+
+    private fun reinitDecoder(surface: Surface) {
+        try {
+            val decoder = MediaCodec.createDecoderByType("video/avc")
+            val format = MediaFormat.createVideoFormat("video/avc", 480, 640)
+            decoder.configure(format, surface, null, 0)
+            decoder.start()
+            videoDecoder = decoder
+            Log.i(TAG, "H.264 Video Decoder re-initialized on new surface")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to reinit video decoder: ${e.message}", e)
+        }
+    }
+
+    @Synchronized
+    fun updateLocalVideoTrack(track: VideoTrack?) {
+        Log.i(TAG, "Updating local video track: $track")
+        if (track != null) {
+            this.localVideoTrack = track
+            if (isRunning && videoEncoder == null && videoSocket != null) {
+                startVideoSender()
+            } else if (isRunning && videoSink != null) {
+                track.addSink(videoSink)
+            }
+        }
+    }
+
+    /**
+     * Stop and release all media components.
+     */
+    @Synchronized
+    fun stop() {
+        if (!isRunning) return
+        isRunning = false
+        Log.i(TAG, "Stopping RTP Media Manager...")
+
+        // Remove video sink
+        localVideoTrack?.let { track ->
+            videoSink?.let { sink ->
+                track.removeSink(sink)
+            }
+        }
+        videoSink = null
+
+        // Stop sockets to interrupt blocking reads
+        try { audioSocket?.close() } catch (_: Exception) {}
+        try { videoSocket?.close() } catch (_: Exception) {}
+
+        // Wait for threads
+        try {
+            audioSenderThread?.join(500)
+            audioReceiverThread?.join(500)
+            videoReceiverThread?.join(500)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error waiting for threads to stop", e)
+        }
+
+        // Release components
+        releaseAudio()
+        releaseVideo()
+
+        audioSocket = null
+        videoSocket = null
+        Log.i(TAG, "RTP Media Manager stopped.")
+    }
+
+    // ─── AUDIO SENDER (Microphone -> PCMA -> RTP) ────────────────────────────
+
+    private fun startAudioSender() {
+        audioSenderThread = Thread {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            
+            val minBufSize = AudioRecord.getMinBufferSize(
+                8000,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufferSize = Math.max(minBufSize, 640)
+            
+            try {
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    8000,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize
+                )
+                
+                if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                    Log.e(TAG, "AudioRecord initialization failed.")
+                    return@Thread
+                }
+                
+                audioRecord?.startRecording()
+                Log.i(TAG, "AudioRecord started (VOICE_COMMUNICATION with Hardware AEC).")
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Permission denied for recording audio: ${e.message}")
+                return@Thread
+            } catch (e: Exception) {
+                Log.e(TAG, "AudioRecord start error: ${e.message}", e)
+                return@Thread
+            }
+
+            val pcmBuffer = ShortArray(160) // 20ms frame
+            val rtpPayload = ByteArray(160)
+            var seqNum = 0
+            var timestamp = 0L
+            val ssrc = localAudioSsrc
+
+            val socket = audioSocket
+
+            while (isRunning) {
+                val ipStr = remoteIP
+                val read = audioRecord?.read(pcmBuffer, 0, pcmBuffer.size) ?: -1
+                if (read <= 0) continue
+
+                // Encode to A-law (PCMA)
+                for (i in 0 until read) {
+                    rtpPayload[i] = linearToAlaw(pcmBuffer[i])
+                }
+
+                // Fill silence if read was short
+                if (read < pcmBuffer.size) {
+                    for (i in read until pcmBuffer.size) {
+                        rtpPayload[i] = 0x55.toByte()
+                    }
+                }
+
+                // Send RTP Packet
+                if (socket != null && !socket.isClosed && ipStr != null) {
+                    try {
+                        val header = buildRtpHeader(8, seqNum++, timestamp, ssrc)
+                        val packetBytes = ByteArray(12 + rtpPayload.size)
+                        System.arraycopy(header, 0, packetBytes, 0, 12)
+                        System.arraycopy(rtpPayload, 0, packetBytes, 12, rtpPayload.size)
+
+                        val packet = DatagramPacket(
+                            packetBytes,
+                            packetBytes.size,
+                            InetAddress.getByName(ipStr),
+                            remoteAudioPort
+                        )
+                        socket.send(packet)
+                        audioPacketsSent++
+                        if (audioPacketsSent % 100 == 0) {
+                            Log.d(TAG, "📊 Audio Packets Sent: $audioPacketsSent")
+                        }
+                    } catch (e: Exception) {
+                        // Socket might be closed, ignore
+                    }
+                }
+                timestamp += 160
+            }
+        }.apply { start() }
+    }
+
+    // ─── AUDIO RECEIVER (RTP -> PCMA -> Playback) ────────────────────────────
+
+    private fun startAudioReceiver() {
+        audioReceiverThread = Thread {
+            val minBufSize = AudioTrack.getMinBufferSize(
+                8000,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            
+            try {
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(8000)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(Math.max(minBufSize, 640))
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                audioTrack?.play()
+                Log.i(TAG, "AudioTrack started.")
+            } catch (e: Exception) {
+                Log.e(TAG, "AudioTrack initialization failed: ${e.message}", e)
+                return@Thread
+            }
+
+            val socket = audioSocket
+            val packetBuf = ByteArray(2048)
+            val pcmOutput = ShortArray(2048)
+
+            while (isRunning && socket != null && !socket.isClosed) {
+                try {
+                    val packet = DatagramPacket(packetBuf, packetBuf.size)
+                    socket.receive(packet)
+
+                    val len = packet.length
+                    if (len <= 12) continue // Min RTP length
+
+                    // Verify payload type is PCMA (8)
+                    val pt = packetBuf[1].toInt() and 0x7F
+                    if (pt != 8) continue
+
+                    // Extract SSRC from RTP header (bytes 8..11) to drop loopback packets
+                    val packetSsrc = ((packetBuf[8].toInt() and 0xFF) shl 24) or
+                            ((packetBuf[9].toInt() and 0xFF) shl 16) or
+                            ((packetBuf[10].toInt() and 0xFF) shl 8) or
+                            (packetBuf[11].toInt() and 0xFF)
+                    if (packetSsrc == localAudioSsrc) {
+                        // Drop loopback packet sent by our own sender
+                        continue
+                    }
+
+                    val payloadLen = len - 12
+                    val decodeSamples = minOf(payloadLen, pcmOutput.size)
+                    for (i in 0 until decodeSamples) {
+                        pcmOutput[i] = alawToLinear(packetBuf[12 + i])
+                    }
+
+                    audioTrack?.write(pcmOutput, 0, decodeSamples)
+                    audioPacketsReceived++
+                    if (audioPacketsReceived % 100 == 0) {
+                        Log.d(TAG, "📊 Audio Packets Received: $audioPacketsReceived")
+                    }
+                } catch (e: Exception) {
+                    // Socket closed, exit loop
+                }
+            }
+        }.apply { start() }
+    }
+
+    // ─── VIDEO SENDER (Camera Feed -> H.264 Encoder -> FU-A -> RTP) ──────────
+
+    private fun startVideoSender() {
+        if (videoEncoder != null) return
+        val track = localVideoTrack ?: return
+        try {
+            videoEncoder = MediaCodec.createEncoderByType("video/avc")
+            val format = MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) // NV12
+                setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
+                setInteger(MediaFormat.KEY_FRAME_RATE, 25)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger("prepend-sps-pps-to-idr-frames", 1)
+            }
+            videoEncoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            videoEncoder?.start()
+            Log.i(TAG, "H.264 Video Encoder initialized.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize video encoder: ${e.message}", e)
+            return
+        }
+
+        // Setup loop to read encoded H.264 buffers and send them via RTP
+        val encoderOutputThread = Thread {
+            val bufferInfo = MediaCodec.BufferInfo()
+            var seqNum = 0
+            val ssrc = localVideoSsrc
+            val socket = videoSocket
+
+            while (isRunning && socket != null && !socket.isClosed) {
+                val encoder = videoEncoder ?: break
+                val ipStr = remoteIP
+                try {
+                    val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                    if (outputBufferIndex >= 0) {
+                        val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
+                        if (outputBuffer != null && bufferInfo.size > 0 && ipStr != null) {
+                            val naluBytes = ByteArray(bufferInfo.size)
+                            outputBuffer.position(bufferInfo.offset)
+                            outputBuffer.get(naluBytes)
+
+                            // Find and packetize H.264 NALUs from the byte stream
+                            packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr)
+                            seqNum = (seqNum + (naluBytes.size / 1400) + 1) and 0xFFFF
+                        }
+                        encoder.releaseOutputBuffer(outputBufferIndex, false)
+                    }
+                } catch (e: Exception) {
+                    if (!isRunning) break
+                    Log.w(TAG, "encoderOutputThread exception: ${e.message}")
+                }
+            }
+            Log.i(TAG, "Video encoderOutputThread terminated.")
+        }
+        encoderOutputThread.start()
+
+        // Hook custom VideoSink into WebRTC camera track to feed YUV frames into Encoder
+        videoSink = VideoSink { frame ->
+            if (!isRunning) return@VideoSink
+            val encoder = videoEncoder ?: return@VideoSink
+            
+            val i420 = frame.buffer.toI420() ?: return@VideoSink
+            val rotation = frame.rotation
+
+            try {
+                val outWidth = 480
+                val outHeight = 640
+
+                rotatedY.clear()
+                rotatedU.clear()
+                rotatedV.clear()
+                
+                if (rotation == 90 || rotation == 270) {
+                    YuvHelper.I420Rotate(
+                        i420.dataY, i420.strideY,
+                        i420.dataU, i420.strideU,
+                        i420.dataV, i420.strideV,
+                        rotatedY, outWidth,
+                        rotatedU, outWidth / 2,
+                        rotatedV, outWidth / 2,
+                        i420.width, i420.height,
+                        rotation
+                    )
+                } else {
+                    YuvHelper.I420Rotate(
+                        i420.dataY, i420.strideY,
+                        i420.dataU, i420.strideU,
+                        i420.dataV, i420.strideV,
+                        rotatedY, i420.width,
+                        rotatedU, i420.width / 2,
+                        rotatedV, i420.width / 2,
+                        i420.width, i420.height,
+                        rotation
+                    )
+                }
+                
+                rotatedY.rewind()
+                rotatedU.rewind()
+                rotatedV.rewind()
+
+                nv12Buffer.clear()
+                val nv12Width = if (rotation == 90 || rotation == 270) outWidth else i420.width
+                val nv12Height = if (rotation == 90 || rotation == 270) outHeight else i420.height
+
+                YuvHelper.I420ToNV12(
+                    rotatedY, nv12Width,
+                    rotatedU, nv12Width / 2,
+                    rotatedV, nv12Width / 2,
+                    nv12Buffer,
+                    nv12Width, nv12Height
+                )
+                
+                nv12Buffer.rewind()
+                val dataSize = nv12Width * nv12Height * 3 / 2
+                val nv12Bytes = ByteArray(dataSize)
+                nv12Buffer.get(nv12Bytes)
+
+                val inputBufferIndex = encoder.dequeueInputBuffer(5000)
+                if (inputBufferIndex >= 0) {
+                    val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
+                    if (inputBuffer != null) {
+                        inputBuffer.clear()
+                        inputBuffer.put(nv12Bytes)
+                        encoder.queueInputBuffer(
+                            inputBufferIndex,
+                            0,
+                            nv12Bytes.size,
+                            frame.timestampNs / 1000,
+                            0
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "VideoSink error: ${e.message}", e)
+            } finally {
+                i420.release()
+            }
+        }
+        track.addSink(videoSink)
+        Log.i(TAG, "VideoSink hook added to localVideoTrack.")
+    }
+
+    /**
+     * Packetizes an H.264 byte stream into RTP packets (supporting FU-A fragmentation).
+     */
+    private fun packetizeAndSendH264(
+        stream: ByteArray,
+        ptsMs: Long,
+        startSeqNum: Int,
+        ssrc: Int,
+        socket: DatagramSocket,
+        ipStr: String?
+    ) {
+        if (ipStr == null) return
+        var seqNum = startSeqNum
+        val timestamp = ptsMs * 90 // 90kHz clock for H.264
+
+        // Find NAL units (delimited by 0x00000001 or 0x000001)
+        val nalus = splitNalus(stream)
+        val targetAddr = try { InetAddress.getByName(ipStr) } catch (_: Exception) { return }
+
+        for (nalu in nalus) {
+            if (nalu.isEmpty()) continue
+            val naluHeader = nalu[0]
+
+            if (nalu.size <= 1400) {
+                // Single NAL unit packet
+                try {
+                    val rtpHeader = buildRtpHeader(97, seqNum++, timestamp, ssrc)
+                    val packetBytes = ByteArray(12 + nalu.size)
+                    System.arraycopy(rtpHeader, 0, packetBytes, 0, 12)
+                    System.arraycopy(nalu, 0, packetBytes, 12, nalu.size)
+
+                    val packet = DatagramPacket(
+                        packetBytes,
+                        packetBytes.size,
+                        targetAddr,
+                        remoteVideoPort
+                    )
+                    socket.send(packet)
+                    videoPacketsSent++
+                    if (videoPacketsSent == 1 || videoPacketsSent % 50 == 0) {
+                        Log.d(TAG, "📊 Video Packets Sent (Single NAL): $videoPacketsSent to $ipStr:$remoteVideoPort")
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            } else {
+                // Fragmented using FU-A
+                val payloadSize = 1380
+                var sentBytes = 1 // skip original NALU header
+                val totalPayload = nalu.size - 1
+
+                while (sentBytes <= totalPayload) {
+                    val chunkSize = Math.min(payloadSize, totalPayload - sentBytes + 1)
+                    val isStart = sentBytes == 1
+                    val isEnd = sentBytes + chunkSize - 1 == totalPayload
+
+                    // FU indicator
+                    val fuIndicator = ((naluHeader.toInt() and 0xE0) or 28).toByte()
+                    // FU header
+                    var fuHeaderVal = naluHeader.toInt() and 0x1F
+                    if (isStart) fuHeaderVal = fuHeaderVal or 0x80
+                    if (isEnd) fuHeaderVal = fuHeaderVal or 0x40
+                    val fuHeader = fuHeaderVal.toByte()
+
+                    try {
+                        val rtpHeader = buildRtpHeader(97, seqNum++, timestamp, ssrc)
+                        val packetBytes = ByteArray(12 + 2 + chunkSize)
+                        System.arraycopy(rtpHeader, 0, packetBytes, 0, 12)
+                        packetBytes[12] = fuIndicator
+                        packetBytes[13] = fuHeader
+                        System.arraycopy(nalu, sentBytes, packetBytes, 14, chunkSize)
+
+                        val packet = DatagramPacket(
+                            packetBytes,
+                            packetBytes.size,
+                            targetAddr,
+                            remoteVideoPort
+                        )
+                        socket.send(packet)
+                        videoPacketsSent++
+                        if (videoPacketsSent == 1 || videoPacketsSent % 50 == 0) {
+                            Log.d(TAG, "📊 Video Packets Sent (FU-A): $videoPacketsSent to $ipStr:$remoteVideoPort")
+                        }
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                    sentBytes += chunkSize
+                }
+            }
+        }
+    }
+
+    private fun splitNalus(stream: ByteArray): List<ByteArray> {
+        val list = mutableListOf<ByteArray>()
+        var i = 0
+        val n = stream.size
+        while (i < n) {
+            // Find start code 00 00 00 01 or 00 00 01
+            if (i + 3 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 0.toByte() && stream[i+3] == 1.toByte()) {
+                val start = i + 4
+                i += 4
+                while (i < n) {
+                    if (i + 3 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 0.toByte() && stream[i+3] == 1.toByte()) {
+                        break
+                    }
+                    if (i + 2 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 1.toByte()) {
+                        break
+                    }
+                    i++
+                }
+                list.add(stream.copyOfRange(start, i))
+            } else if (i + 2 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 1.toByte()) {
+                val start = i + 3
+                i += 3
+                while (i < n) {
+                    if (i + 3 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 0.toByte() && stream[i+3] == 1.toByte()) {
+                        break
+                    }
+                    if (i + 2 < n && stream[i] == 0.toByte() && stream[i+1] == 0.toByte() && stream[i+2] == 1.toByte()) {
+                        break
+                    }
+                    i++
+                }
+                list.add(stream.copyOfRange(start, i))
+            } else {
+                i++
+            }
+        }
+        return list
+    }
+
+    // ─── VIDEO RECEIVER (RTP -> H.264 NALUs -> Decoder -> Surface) ──────────
+
+    private fun startVideoReceiver() {
+        if (videoDecoder != null) return
+        val surface = decoderSurface
+        if (surface == null || !surface.isValid) {
+            Log.w(TAG, "Decoder surface is null or invalid. Cannot start video receiver yet.")
+            return
+        }
+
+        try {
+            videoDecoder = MediaCodec.createDecoderByType("video/avc")
+            val format = MediaFormat.createVideoFormat("video/avc", 480, 640)
+            videoDecoder?.configure(format, surface, null, 0)
+            videoDecoder?.start()
+            Log.i(TAG, "H.264 Video Decoder initialized successfully on surface.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize video decoder: ${e.message}", e)
+            return
+        }
+
+        videoReceiverThread = Thread {
+            val socket = videoSocket
+            val packetBuf = ByteArray(2048)
+            val naluStream = ByteArrayOutputStream()
+            var lastFuTimestamp = -1L
+
+            Log.i(TAG, "Video receiver thread started, listening on socket...")
+            while (isRunning && socket != null && !socket.isClosed) {
+                try {
+                    val packet = DatagramPacket(packetBuf, packetBuf.size)
+                    socket.receive(packet)
+                    val len = packet.length
+                    if (len <= 12) continue
+
+                    val pt = packetBuf[1].toInt() and 0x7F
+                    if (pt != 97 && pt != 100) continue // Payload Type is H.264
+
+                    videoPacketsReceived++
+                    if (videoPacketsReceived == 1 || videoPacketsReceived % 50 == 0) {
+                        Log.d(TAG, "📊 Video Packets Received: $videoPacketsReceived (len=$len, from ${packet.address}:${packet.port})")
+                    }
+
+                    val timestamp = ((packetBuf[4].toLong() and 0xFF) shl 24) or
+                            ((packetBuf[5].toLong() and 0xFF) shl 16) or
+                            ((packetBuf[6].toLong() and 0xFF) shl 8) or
+                            (packetBuf[7].toLong() and 0xFF)
+
+                    val payloadHeader = packetBuf[12].toInt() and 0xFF
+                    val naluType = payloadHeader and 0x1F
+
+                    if (naluType == 28) {
+                        // FU-A Fragmentation Unit
+                        val fuHeader = packetBuf[13].toInt() and 0xFF
+                        val isStart = (fuHeader and 0x80) != 0
+                        val isEnd = (fuHeader and 0x40) != 0
+                        val originalType = fuHeader and 0x1F
+
+                        if (isStart) {
+                            naluStream.reset()
+                            // Prepend start code 00 00 00 01
+                            naluStream.write(byteArrayOf(0, 0, 0, 1))
+                            // Reconstruct NALU header
+                            val reconstructedHeader = (payloadHeader and 0xE0) or originalType
+                            naluStream.write(reconstructedHeader)
+                            lastFuTimestamp = timestamp
+                        }
+
+                        if (timestamp == lastFuTimestamp) {
+                            // Append fragment payload
+                            naluStream.write(packetBuf, 14, len - 14)
+                        }
+
+                        if (isEnd && timestamp == lastFuTimestamp) {
+                            val completeNalu = naluStream.toByteArray()
+                            feedDecoder(completeNalu, timestamp / 90) // Convert 90kHz timestamp to milliseconds
+                            naluStream.reset()
+                        }
+                    } else if (naluType in 1..23) {
+                        // Single NAL Unit
+                        naluStream.reset()
+                        // Prepend start code 00 00 00 01
+                        naluStream.write(byteArrayOf(0, 0, 0, 1))
+                        naluStream.write(packetBuf, 12, len - 12)
+                        
+                        feedDecoder(naluStream.toByteArray(), timestamp / 90)
+                        naluStream.reset()
+                    }
+                } catch (e: Exception) {
+                    if (!isRunning) break
+                }
+            }
+            Log.i(TAG, "Video receiver thread terminated.")
+        }.apply { start() }
+    }
+
+    private fun feedDecoder(nalu: ByteArray, ptsMs: Long) {
+        val decoder = videoDecoder ?: return
+        val surface = decoderSurface
+        if (surface == null || !surface.isValid) return  // Surface not valid or destroyed
+
+        try {
+            val inputBufferIndex = decoder.dequeueInputBuffer(2000)
+            if (inputBufferIndex >= 0) {
+                val inputBuffer = decoder.getInputBuffer(inputBufferIndex) ?: return
+                inputBuffer.clear()
+                inputBuffer.put(nalu)
+                decoder.queueInputBuffer(
+                    inputBufferIndex,
+                    0,
+                    nalu.size,
+                    ptsMs * 1000,
+                    0
+                )
+            }
+
+            // Flush decoded buffers to surface immediately
+            val bufferInfo = MediaCodec.BufferInfo()
+            var outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
+            while (outputBufferIndex >= 0) {
+                decoder.releaseOutputBuffer(outputBufferIndex, true) // True: render to configured surface
+                videoFramesDecoded++
+                if (videoFramesDecoded == 1 || videoFramesDecoded % 30 == 0) {
+                    Log.i(TAG, "🎬 Video Frames Rendered to Surface: $videoFramesDecoded")
+                }
+                outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
+            }
+        } catch (e: IllegalStateException) {
+            Log.e(TAG, "feedDecoder codec error (will auto-recover): ${e.message}")
+            videoDecoder = null
+            try { decoder.release() } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e(TAG, "feedDecoder error: ${e.message}", e)
+        }
+    }
+
+    // ─── RELEASE HELPERS ─────────────────────────────────────────────────────
+
+    private fun releaseAudio() {
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        audioRecord = null
+
+        try {
+            audioTrack?.stop()
+            audioTrack?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        audioTrack = null
+    }
+
+    private fun releaseVideo() {
+        try {
+            videoEncoder?.stop()
+            videoEncoder?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        videoEncoder = null
+
+        try {
+            videoDecoder?.stop()
+            videoDecoder?.release()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        videoDecoder = null
+    }
+}

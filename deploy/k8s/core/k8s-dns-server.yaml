@@ -1,0 +1,213 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dns-server-config
+  namespace: demo-mini-app
+data:
+  Corefile: |
+    ims.mnc001.mcc452.3gppnetwork.org:53 {
+        errors
+        hosts /etc/coredns/dynamic_hosts
+        reload 2s
+        cache 30
+        loadbalance
+    }
+    .:53 {
+        errors
+        health
+        reload 2s
+        forward . /etc/resolv.conf
+        cache 30
+        loadbalance
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns-server-service
+  namespace: demo-mini-app
+spec:
+  clusterIP: 10.96.100.9
+  ports:
+    - port: 53
+      protocol: UDP
+      name: dns-udp
+    - port: 53
+      protocol: TCP
+      name: dns-tcp
+    - port: 9090
+      protocol: TCP
+      name: registry-http
+  selector:
+    app: dns-server
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns-server
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dns-server
+  template:
+    metadata:
+      labels:
+        app: dns-server
+    spec:
+      serviceAccountName: dns-server
+      initContainers:
+        - name: init-dns
+          image: python:3.10-slim
+          command:
+            - sh
+            - -c
+            - |
+              cp /config/Corefile /etc/coredns/Corefile
+              touch /etc/coredns/dynamic_hosts
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+            - name: shared-volume
+              mountPath: /etc/coredns
+      containers:
+        - name: dns-server
+          image: registry.k8s.io/coredns/coredns:v1.14.2
+          imagePullPolicy: IfNotPresent
+          args: [ "-conf", "/etc/coredns/Corefile" ]
+          volumeMounts:
+            - name: shared-volume
+              mountPath: /etc/coredns
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - NET_BIND_SERVICE
+              drop:
+                - all
+            readOnlyRootFilesystem: false
+        - name: dns-registry
+          image: python:3.10-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -u
+            - -c
+            - |
+              import http.server, urllib.parse, urllib.request, re, ssl, json, sys
+              
+              ssl_ctx = ssl._create_unverified_context()
+              
+              def get_active_pods():
+                  try:
+                      with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
+                          token = f.read().strip()
+                      with open('/var/run/secrets/kubernetes.io/serviceaccount/namespace', 'r') as f:
+                          ns = f.read().strip()
+                      req = urllib.request.Request(
+                          f"https://kubernetes.default.svc/api/v1/namespaces/{ns}/pods",
+                          headers={"Authorization": f"Bearer {token}"}
+                      )
+                      with urllib.request.urlopen(req, context=ssl_ctx, timeout=2) as r:
+                          data = json.loads(r.read().decode('utf-8'))
+                          return [item['metadata']['name'] for item in data['items']]
+                  except Exception as e:
+                      sys.stderr.write(f"[REGISTRY] Failed to fetch active pods: {e}\n")
+                      return None
+
+              class H(http.server.BaseHTTPRequestHandler):
+                  def do_GET(self):
+                      q = urllib.parse.urlparse(self.path).query
+                      p = urllib.parse.parse_qs(q)
+                      h = p.get('host',[None])[0]
+                      ip = p.get('ip',[None])[0]
+                      pod = p.get('pod',[None])[0]
+                      if h and ip and re.match(r'^\d+(\.\d+){3}$', ip):
+                          pod_id = pod if pod else ip
+                          try:
+                              with open('/etc/coredns/dynamic_hosts', 'r') as f:
+                                  lines = f.readlines()
+                          except FileNotFoundError:
+                              lines = []
+                          
+                          active_pods = get_active_pods()
+                          
+                          new_lines = []
+                          for l in lines:
+                              parts = l.strip().split()
+                              if len(parts) >= 2:
+                                  curr_ip = parts[0]
+                                  curr_host = parts[1]
+                                  curr_pod = parts[2] if len(parts) >= 3 else curr_ip
+                                  
+                                  # Prune stale entry if it is not in the list of active pods and is not a legacy raw IP
+                                  if active_pods is not None and curr_pod not in active_pods and not re.match(r'^\d+(\.\d+){3}$', curr_pod):
+                                      print(f"[REGISTRY] Pruning stale pod entry: {curr_host} -> {curr_ip} (pod: {curr_pod})")
+                                      continue
+                                  
+                                  if curr_host == h and curr_pod == pod_id:
+                                      continue
+                              new_lines.append(l)
+                          
+                          new_lines.append(f"{ip} {h} {pod_id}\n")
+                          with open('/etc/coredns/dynamic_hosts', 'w') as f:
+                              f.writelines(new_lines)
+                          print(f"[REGISTRY] Registered {h} -> {ip} (pod: {pod_id})")
+                          self.send_response(200); self.end_headers(); self.wfile.write(b'OK')
+                      else:
+                          self.send_response(400); self.end_headers(); self.wfile.write(b'Bad Request')
+              print("Starting registry HTTP server on port 9090...")
+              http.server.HTTPServer(('0.0.0.0', 9090), H).serve_forever()
+          volumeMounts:
+            - name: shared-volume
+              mountPath: /etc/coredns
+          ports:
+            - containerPort: 9090
+              name: registry-http
+      volumes:
+        - name: config-volume
+          configMap:
+            name: dns-server-config
+            items:
+              - key: Corefile
+                path: Corefile
+        - name: shared-volume
+          emptyDir: {}
+            
+            
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dns-server
+  namespace: demo-mini-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dns-server-role
+  namespace: demo-mini-app
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dns-server-rolebinding
+  namespace: demo-mini-app
+subjects:
+  - kind: ServiceAccount
+    name: dns-server
+    namespace: demo-mini-app
+roleRef:
+  kind: Role
+  name: dns-server-role
+  apiGroup: rbac.authorization.k8s.io

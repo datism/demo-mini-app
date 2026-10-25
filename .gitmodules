@@ -1,0 +1,3 @@
+[submodule "IMS-DC-SDK-Open-Source"]
+	path = IMS-DC-SDK-Open-Source
+	url = https://github.com/GSMATerminals/IMS-DC-SDK-Open-Source.git

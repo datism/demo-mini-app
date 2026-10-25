@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>New Calling Services</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: transparent;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+    .portal-card {
+      width: 90%;
+      max-width: 380px;
+      max-height: 85vh;
+      overflow-y: auto;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 28px;
+      padding: 28px 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      text-align: center;
+      opacity: 1;
+    }
+    .portal-card::-webkit-scrollbar {
+      display: none;
+    }
+    h2 {
+      margin: 0 0 8px 0;
+      font-size: 22px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.subtitle {
+      margin: 0 0 24px 0;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.4;
+    }
+    .service-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .service-item {
+      display: flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      text-align: left;
+    }
+    .service-item:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    .service-item:active {
+      transform: scale(0.98);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .service-icon {
+      font-size: 28px;
+      margin-right: 16px;
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .service-info {
+      flex-grow: 1;
+    }
+    .service-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 2px;
+    }
+    .service-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.45);
+      line-height: 1.3;
+    }
+    .badge {
+      font-size: 9px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 8px;
+      margin-left: 8px;
+      vertical-align: middle;
+      display: inline-block;
+    }
+    .badge.soon {
+      background: linear-gradient(135deg, #6b7280, #4b5563);
+      color: rgba(255,255,255,0.8);
+    }
+    .toast {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 10px 20px;
+      border-radius: 20px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      z-index: 1000;
+      white-space: nowrap;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="portal-card">
+    <h2>5G New Calling</h2>
+    <p class="subtitle">Khám phá các dịch vụ tương tác dữ liệu thế hệ mới</p>
+    <div class="service-grid">
+      <div class="service-item" onclick="launchApp('sketch-sync-app')">
+        <div class="service-icon" style="background: rgba(99, 102, 241, 0.15);">🎨</div>
+        <div class="service-info">
+          <div class="service-title">Bảng vẽ tương tác <span class="badge">Sẵn sàng</span></div>
+          <div class="service-desc">Cùng vẽ và chia sẻ ý tưởng trực tiếp trên màn hình cuộc gọi.</div>
+        </div>
+      </div>
+      
+      <div class="service-item" onclick="launchApp('fun-calling-app')">
+        <div class="service-icon" style="background: rgba(236, 72, 153, 0.15);">❤️</div>
+        <div class="service-info">
+          <div class="service-title">Thả tim tương tác <span class="badge">Sẵn sàng</span></div>
+          <div class="service-desc">Thả tim và biểu tượng cảm xúc bay bay đồng bộ trên màn hình video.</div>
+        </div>
+      </div>
+
+      <div class="service-item" onclick="launchApp('caro')">
+        <div class="service-icon" style="background: rgba(16, 185, 129, 0.15);">♟️</div>
+        <div class="service-info">
+          <div class="service-title">Game Cờ Caro <span class="badge">Sẵn sàng</span></div>
+          <div class="service-desc">Đối kháng cờ Caro 9x9 trực tiếp trên màn hình cuộc gọi.</div>
+        </div>
+      </div>
+
+      <div class="service-item" onclick="launchApp('smart-menu')">
+        <div class="service-icon" style="background: rgba(56, 189, 248, 0.15);">📞</div>
+        <div class="service-info">
+          <div class="service-title">Tổng đài 198 <span class="badge">Sẵn sàng</span></div>
+          <div class="service-desc">CSKH thông minh: Lời chào, xem video, giờ hệ thống.</div>
+        </div>
+      </div>
+
+      <div class="service-item" onclick="launchApp('enterprise-callerid')">
+        <div class="service-icon" style="background: rgba(0, 230, 118, 0.15);">🏢</div>
+        <div class="service-info">
+          <div class="service-title">Enterprise Caller ID <span class="badge">Sẵn sàng</span></div>
+          <div class="service-desc">Định danh doanh nghiệp xác thực, banner quảng cáo và mã QR.</div>
+        </div>
+      </div>
+      
+      <div class="service-item" onclick="showToast('Dịch vụ Screen Sharing đang được phát triển!')">
+        <div class="service-icon" style="background: rgba(236, 72, 153, 0.15);">📱</div>
+        <div class="service-info">
+          <div class="service-title">Chia sẻ màn hình <span class="badge soon">Soon</span></div>
+          <div class="service-desc">Chia sẻ màn hình điện thoại trực tiếp với chất lượng cao.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">Dịch vụ sắp ra mắt!</div>
+
+  <script>
+    function launchApp(appId) {
+      if (window.AndroidBridge && window.AndroidBridge.startMiniApp) {
+        window.AndroidBridge.startMiniApp(appId);
+      } else {
+        showToast("Không tìm thấy kết nối AndroidBridge!");
+      }
+    }
+    
+    let toastTimeout;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2500);
+    }
+  </script>
+</body>
+</html>
+
+

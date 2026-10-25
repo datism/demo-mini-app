@@ -1,0 +1,18 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  podSubnet: "172.16.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 6443
+        hostPort: 58564
+        protocol: TCP
+      - containerPort: 30060
+        hostPort: 5060
+        protocol: UDP
+      - containerPort: 30040
+        hostPort: 40000
+        protocol: UDP

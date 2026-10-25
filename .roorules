@@ -1,0 +1,230 @@
+# =============================================================================
+# Roo Code Rules for IMS Data Channel (IMS DC) PoC Project
+# Source: .antigravityrules + .agents/AGENTS.md
+# Target AI: DeepSeek (Roo Code)
+# =============================================================================
+
+# =============================================================================
+# PART A: CODING & COMPLETION STANDARDS
+# =============================================================================
+
+## A1. Strict Completion Check — NO FAKE "DONE"
+- CRITICAL: Never claim "Done", "Fixed", "Completed", or "Task finished" unless EVERY requirement in the user prompt has been fully implemented in code.
+- If work is incomplete, explicitly state what was done and what remains.
+- If you hit token/context limits, append: "PARTIAL RESPONSE (Limit reached). Remaining items: [list]"
+
+## A2. No Placeholders or Code Truncation
+- Always provide COMPLETE, runnable code — never use shortcuts like:
+  - "// ... rest of code stays the same"
+  - "TODO: implement remaining logic"
+  - "// keep existing imports"
+- When editing an existing file, show the FULL file content or precise SEARCH/REPLACE blocks.
+
+## A3. Pre-Response Self-Verification
+Before every response, verify:
+  (a) Have I missed any class, function, file, or constraint from the user's prompt?
+  (b) Is the generated code truncated or missing critical logic?
+  (c) Does the code compile with existing imports and dependencies?
+
+## A4. Session Memory — READ & WRITE
+- **Session Start**: ALWAYS read `.antigravity/MEMORY.md` first to understand current state, active bugs, and uncommitted changes.
+- **Session End** (when user requests or session wraps up): Update `.antigravity/MEMORY.md` with what was done, file changes, and any unfinished work.
+- **Handoff Context**: Check `.agents/HANDOFF.md` for device topology, K8s cluster state, and test results.
+
+## A5. No Hardcoding — Dynamic Configuration ONLY
+- NEVER hardcode IP addresses, ports, domains, or environment-specific values.
+- Always read from config files (`sys_config.json`), network interfaces, or environment variables.
+- Use `NetworkUtils.getLocalIpAddress()` on Android (Tailscale 100.x.x.x priority).
+- Use `getContainerLocalIP()` / `resolveAndHashHost()` in Go backend.
+
+## A6. Git Commit Policy
+- NEVER run `git commit` or `git push` unless the user explicitly requests it.
+- You may stage files (`git add`) but must not commit.
+
+# =============================================================================
+# PART B: PROTOCOL SECURITY & ENCRYPTION RULES
+# =============================================================================
+
+## B1. SIP Protocol (Gm Interface)
+- SIP MUST run over plain UDP or TCP — NO TLS/SIPS encryption.
+- Prefer TCP over UDP for registration and calls due to large SIP message sizes (avoids IP fragmentation).
+- Android client: `SipManager.kt` uses raw TCP socket for SIP signaling.
+
+## B2. HTTP/2 Protocol (SBA Interfaces)
+- ALL Service-Based Architecture (SBA) APIs run on HTTP/2 Cleartext (h2c) — NO TLS/HTTPS.
+- Go HTTP clients MUST use: `http2.Transport{ AllowHTTP: true }`
+- SBA operates on internal trusted subnet; no external network access needed.
+
+## B3. RTP Media Protocol
+- Audio: MUST use PCMA codec, plain unencrypted UDP — NO SRTP.
+- Video: MUST use H.264 codec, plain unencrypted UDP — NO SRTP.
+- RTP forwarding in MF (`rtp_relay.go`) is direct packet relay without encryption.
+
+# =============================================================================
+# PART C: 3GPP & GSMA PROTOCOL CONSTRAINTS
+# =============================================================================
+
+## C1. Architecture & Environment Scope
+- System is deployed OFFLINE on RHEL/K8s — NO external network fetches or package installs.
+- Erlang core (`erlang-sip/`) uses ETS tables for in-memory state.
+- Go components (`go-mf/`) ship with vendor dependencies.
+- 1-1 transmission mode only: one SCTP association per `m=application` line. NO `g.3gpp.dc-mux` multiplexing.
+
+## C2. DC1 Interface (TS 29.175: IMS-AS <-> DCSF)
+- Transport: HTTP/2 h2c with `http2.Transport{ AllowHTTP: true }`.
+- Routing: Register BOTH `/session-event-subscriptions` AND `/session-event-subscriptions/` to prevent 301 redirects.
+- Error format: Use `Content-Type: application/problem+json` with 3GPP `ProblemDetails` schema for 4xx/5xx.
+- Session cleanup: On SIP BYE/CANCEL/>=300 response, IMS-AS MUST send `DELETE /session-event-subscriptions/{id}` to DCSF.
+- PS Data Off: Detect `+g.3gpp.ps-data-off` in SIP REGISTER, propagate in `SessionEventNotification` payload.
+
+## C3. DC2 Interface (TS 29.176: IMS-AS <-> MF)
+- Media context updates use HTTP PATCH with `Content-Type: application/json-patch+json` (RFC 6902).
+- Patch operations: "add", "remove", "replace" in JSON Patch array format.
+- Immutable fields after WebRTC handshake: `localMbEndpoint`, `remoteMbEndpoint`, `localDcEndpoint`, `mediaProcessingURL`. Any PATCH attempt → 403 "MEDIA_CONNECTION_CHANGED".
+- BDC Bootstrap: `mediaProxyConfig` = "HTTP_PROXY", must include `mdc1Info` pointing to DCSF.
+- ADC Application: `mediaProxyConfig` can be "UDP_PROXY" (no TLS/crypto attributes) or "HTTP_PROXY".
+- Dynamic termination IDs: Empty `terminationId` "" → MF auto-generates unique ID.
+
+## C4. SDP Rules (TS 26.114 — Gm Interface)
+- Media line order: `m=audio` first → `m=video` (if present) → `m=application` (BDC) → `m=application` (ADC). MUST enforce this order.
+- Prohibited under `m=application`: `a=sendonly`, `a=recvonly`. Only `a=sendrecv` or `a=inactive` allowed.
+- Call HOLD: Set `a=inactive` on `m=application`. Resume: `a=sendrecv`.
+- Stream ID partitioning:
+  - Stream ID < 1000: BDC only (subprotocol "http"). IDs: 0=local NP, 10=local user, 100=remote NP, 110=remote user. NO `a=3gpp-req-app` on BDC.
+  - Stream ID >= 1000: ADC only. MUST include `a=3gpp-req-app:<app-id>;<stream-id>-<UE|Server>`.
+- SBA failure fallback: If DC1 fails, set SCTP port to 0 in outgoing offer BUT continue VoLTE/RTP normally.
+
+## C5. User Plane Protocol Stack (MF Engine)
+- CRC32c (Castagnoli) checksums for SCTP per RFC 4960. Adler32 is PROHIBITED. Discard invalid silently.
+- SCTP Stream Reconfiguration (RFC 6525/8831): On ADC close, perform "Outgoing SSN Reset" — do NOT tear down DTLS association.
+
+## C6. Client WebView & API (GSMA TS.66)
+- Strict MIME type validation for BDC-downloaded resources (.html, .js, .css, .zip must match content types).
+- WebView lifecycle bound to voice session: call termination → JS cleanup via `onCallEnded()`.
+
+# =============================================================================
+# PART D: TRANSPORT ISOLATION & JSEP/SIP SDP GUARDRAILS
+# =============================================================================
+
+## D1. BDC & ADC Isolation
+- BDC and ADC MUST use SEPARATE PeerConnection instances (`bdcPC` and `adcPC`).
+- Each PeerConnection generates its own self-signed certificate → distinct `a=fingerprint` and `a=tls-id`.
+- NO BUNDLE grouping across audio/video/data.
+
+## D2. JSEP vs Over-The-Air SDP Separation
+- **JSEP Local (per-PC)**: `adcPC.createOffer()` or `createAnswer()` returns SINGLE m-line fragment. Do NOT add audio/video/BDC tracks to `adcPC`. Feed only single-m-line to `setLocalDescription()` / `setRemoteDescription()`.
+- **OTA SIP SDP (cumulative)**: SIP INVITE/re-INVITE/UPDATE SDP MUST contain: `m=audio` + `m=video` (if active) + BDC `m=application` + ADC `m=application`. Sending ADC-only SDP over SIP is a CRITICAL VIOLATION.
+
+## D3. SDP Merge/Split Functions
+- **Uplink (Merge)**: Use `MergeAdcOffer(bdcSdp, adcSdp)` in `WebRtcManager.kt` to combine BDC + ADC SDP for SIP re-INVITE.
+- **Downlink (Split)**: Use `SplitAdcAnswer(sdpAnswer)` to extract ADC `m=application` block for `adcPC.setRemoteDescription()`.
+- **MF Side**: Use `splitSDPAnswer()` and `mergeSDPOffers()` in `sdp_utils.go`.
+
+## D4. BDC Persistence
+- BDC port MUST NEVER be set to 0 during active calls.
+- BDC teardown ONLY on SIP BYE/CANCEL.
+- On Mini-App close (ADC release), only set the ADC's `m=application` port to 0 — BDC must remain active.
+
+# =============================================================================
+# PART E: BDC & ADC LIFECYCLE RULES (3GPP/GSMA)
+# =============================================================================
+
+## E1. BDC Persistent Lifecycle (TS 24.186 Clause 9.3.2.1.5)
+- BDC negotiated during initial INVITE/200 OK alongside voice/video.
+- BDC stays active for the ENTIRE IMS session duration.
+- NEVER close/disable/remove BDC m-line during re-INVITE or UPDATE.
+- BDC teardown ONLY on SIP BYE or CANCEL.
+
+## E2. App Selection & Bootstrapping (TS 26.114 Clause 8.1.1)
+- On BDC established: auto HTTP GET "/" over BDC stream → Root Application (service menu).
+- User selects app → HTTP GET over BDC to download Mini-App package (HTML5/JS/CSS/ZIP). NO SIP signaling for download.
+
+## E3. On-Demand ADC Signaling (GSMA NG.134 Clause 4.2.4)
+- JS calls `createDataChannel()` in Mini-App → triggers native SIP re-INVITE.
+- Re-INVITE SDP MUST be cumulative: `m=audio` + BDC `m=application` + new ADC `m=application` (Stream ID >= 1000) with `a=dcmap`, `a=3gpp-req-app`, optional `a=3gpp-qos-hint`.
+- Apply SDP Merge (uplink) and Split (downlink) functions (see D3).
+
+## E4. Mini-App Termination & ADC Release (TS 24.186 Clause 9.3.2.1.4)
+- User exits Mini-App → native bridge notified → SIP re-INVITE to release ADC.
+- Set ADC `m=application` port to 0 in SDP offer. BDC MUST remain untouched.
+- After 200 OK: MF and client release ADC sockets. BDC stays active.
+
+## E5. Initial Standalone Data Channel BAN (GSMA NG.134 & TS.66 Clause 4.3)
+- Initial INVITE MUST contain voice/video — data-channel-only INVITE is PROHIBITED.
+- Client guard: `createOffer()` must block if no speech/video media established.
+- Server guard: Reject data-only initial INVITE with SIP 488 or 606.
+
+# =============================================================================
+# PART F: CODE REFACTORING CONDUCT
+# =============================================================================
+
+## F1. Validate Against All Rules
+- Every change must be validated against Parts B-E (protocol constraints).
+- If a proposed fix violates any 3GPP/GSMA rule, find an alternative compliant implementation.
+- Do NOT replace standard JSON schemas with arbitrary key-value objects.
+
+## F2. Type Safety
+- Keep types strictly mapped: float/number in QoS, exact enum matches for 3GPP enumerations.
+- Use `sba.go` types for all SBA API payloads.
+
+# =============================================================================
+# PART G: PROJECT-SPECIFIC FILE REFERENCE
+# =============================================================================
+
+## G1. Repository Structure
+| Layer | Directory | Description |
+|-------|-----------|-------------|
+| SIP Core | `erlang-sip/` | P-CSCF, I-CSCF, S-CSCF with HEPv3, ETS, Redis |
+| Go Backend | `go-mf/` | IMS-AS, DCSF, DCAR, DCAS, PCF, MF, tools |
+| Android App | `android-client/` | TCP SIP, dual PC WebRTC, GSMA ImsDcSdk bridge |
+| Deploy | `deploy/` | Docker Compose + K8s with Tailscale VPN + Macvlan |
+| Plans | `plans/` | Implementation plans and audit reports |
+
+## G2. Key Files (Android)
+| File | Role |
+|------|------|
+| `android-client/.../sip/SipManager.kt` | TCP-based SIP signaling |
+| `android-client/.../webrtc/WebRtcManager.kt` | BDC+ADC dual PeerConnection |
+| `android-client/.../webrtc/ImsDcSdk.kt` | GSMA JS-Native bridge |
+| `android-client/.../sip/SdpHelper.kt` | SDP merge/split utilities |
+| `android-client/.../util/NetworkUtils.kt` | Dynamic IP, Tailscale priority |
+| `android-client/.../ui/MiniAppManager.kt` | WebView lifecycle |
+| `android-client/.../ui/CallActivity.kt` | Call UI controller |
+| `android-client/.../ui/MainActivity.kt` | Main dialer UI |
+| `android-client/.../media/RtpMediaManager.kt` | Plain RTP audio/video |
+
+## G3. Key Files (Go Backend)
+| File | Role |
+|------|------|
+| `go-mf/internal/mf/media_function.go` | Main MF engine |
+| `go-mf/internal/mf/sdp_utils.go` | SDP transform utilities (14 functions) |
+| `go-mf/internal/mf/rtp_relay.go` | RTP forwarding |
+| `go-mf/internal/mf/sba_handler.go` | DC2 context CRUD |
+| `go-mf/internal/imsas/b2bua.go` | Call FSM core |
+| `go-mf/internal/imsas/b2bua_invite.go` | INVITE handling |
+| `go-mf/internal/imsas/b2bua_response.go` | Response/BYE handling |
+| `go-mf/internal/imsas/network_utils.go` | IP/container utilities |
+| `go-mf/internal/imsas/sdp.go` | SDP anchoring logic |
+| `go-mf/internal/imsas/sip_parser.go` | SIP message parser |
+| `go-mf/internal/dcsf/dcsf.go` | DC1 session event control |
+| `go-mf/internal/dcas/dcas.go` | DC Application Server |
+| `go-mf/internal/dcas/caro_game.go` | Caro game state machine |
+| `go-mf/internal/config/config.go` | Dynamic config loading |
+| `go-mf/internal/config/app_ids.go` | Application ID constants |
+| `go-mf/internal/sba/sba.go` | SBA type definitions |
+
+## G4. Key Files (Erlang SIP Core)
+| File | Role |
+|------|------|
+| `erlang-sip/src/sip_server.erl` | S-CSCF with iFC logic |
+| `erlang-sip/src/sdp_modifier.erl` | SDP anchoring to MF |
+| `erlang-sip/src/sip_parser.erl` | SIP message parsing |
+
+## G5. Active Bugs / State (from MEMORY.md 2026-08-08)
+| Bug | Status |
+|-----|--------|
+| S-CSCF terminating iFC | FIXED + deployed |
+| MF checkUdpProxy | FIXED + deployed |
+| App re-entry ADC failure | FIXED, APK needs rebuild |
+| Caro Game State Sync | FIXED, deployed to K8s, APK needs rebuild |
+| S-CSCF terminating iFC side effect (ADC release triggers unnecessary iFC) | Known, low priority |

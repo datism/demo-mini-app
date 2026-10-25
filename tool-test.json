@@ -1,0 +1,202 @@
+﻿{
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "annotations": {
+            "deployment.kubernetes.io/revision": "21",
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"metadata\":{\"annotations\":{},\"name\":\"tool-test\",\"namespace\":\"demo-mini-app\"},\"spec\":{\"replicas\":1,\"selector\":{\"matchLabels\":{\"app\":\"tool-test\"}},\"strategy\":{\"type\":\"Recreate\"},\"template\":{\"metadata\":{\"labels\":{\"app\":\"tool-test\"}},\"spec\":{\"containers\":[{\"args\":[\"/usr/local/bin/containerboot \\u0026\\nwait\\n\"],\"command\":[\"/bin/sh\",\"-c\"],\"env\":[{\"name\":\"TS_AUTHKEY\",\"value\":\"tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb\"},{\"name\":\"TS_USERSPACE\",\"value\":\"false\"},{\"name\":\"TS_STATE_DIR\",\"value\":\"/var/lib/tailscale\"}],\"image\":\"tailscale/tailscale:latest\",\"name\":\"tailscale\",\"securityContext\":{\"capabilities\":{\"add\":[\"NET_ADMIN\",\"NET_RAW\"]},\"privileged\":true},\"volumeMounts\":[{\"mountPath\":\"/var/lib/tailscale\",\"name\":\"tailscale-state\"}]},{\"command\":[\"/bin/sh\",\"-c\",\"./dc-test-tool -config test_scenarios.json \\u0026\\u0026 echo 'Test passed. Sleeping...' \\u0026\\u0026 sleep infinity || (echo 'Test failed. Exiting.' \\u0026\\u0026 exit 1)\"],\"env\":[{\"name\":\"ENABLE_HEP_SELF_LOGGING\",\"value\":\"true\"},{\"name\":\"HEP_SERVER_HOST\",\"value\":\"heplify-server\"},{\"name\":\"HEP_SERVER_PORT\",\"value\":\"9060\"},{\"name\":\"INTERFACE_NAME\",\"value\":\"eth0\"}],\"image\":\"go-mf:local\",\"imagePullPolicy\":\"IfNotPresent\",\"name\":\"tool-test\",\"securityContext\":{\"capabilities\":{\"add\":[\"NET_ADMIN\"]}},\"volumeMounts\":[{\"mountPath\":\"/app/config\",\"name\":\"config-volume\"},{\"mountPath\":\"/app/test_scenarios.json\",\"name\":\"scenario-volume\",\"subPath\":\"test_scenarios.json\"}],\"workingDir\":\"/app\"}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"echo \\\"Waiting for Redis...\\\"; until nc -z redis-service 6379; do sleep 2; done; echo \\\"Waiting for IMS-AS...\\\"; until nc -z ims-as-cluster-headless 5070; do sleep 2; done; echo \\\"Waiting for PCSCF...\\\"; until nc -u -z pcscf-service 5060; do sleep 2; done; echo \\\"All services are up! Sleeping 5s just in case...\\\"; sleep 5;\"],\"image\":\"busybox:1.28\",\"name\":\"wait-for-services\"}],\"volumes\":[{\"emptyDir\":{},\"name\":\"tailscale-state\"},{\"configMap\":{\"name\":\"ims-sys-config\"},\"name\":\"config-volume\"},{\"configMap\":{\"name\":\"test-scenarios-config\"},\"name\":\"scenario-volume\"}]}}}}\n"
+        },
+        "creationTimestamp": "2026-08-03T01:49:57Z",
+        "generation": 31,
+        "name": "tool-test",
+        "namespace": "demo-mini-app",
+        "resourceVersion": "1638082",
+        "uid": "98ee736a-8bec-464f-864c-96665d235bb3"
+    },
+    "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 1,
+        "revisionHistoryLimit": 10,
+        "selector": {
+            "matchLabels": {
+                "app": "tool-test"
+            }
+        },
+        "strategy": {
+            "type": "Recreate"
+        },
+        "template": {
+            "metadata": {
+                "annotations": {
+                    "kubectl.kubernetes.io/restartedAt": "2026-08-09T21:28:37+07:00"
+                },
+                "creationTimestamp": null,
+                "labels": {
+                    "app": "tool-test"
+                }
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "args": [
+                            "/usr/local/bin/containerboot \u0026\nwait\n"
+                        ],
+                        "command": [
+                            "/bin/sh",
+                            "-c"
+                        ],
+                        "env": [
+                            {
+                                "name": "TS_AUTHKEY",
+                                "value": "tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb"
+                            },
+                            {
+                                "name": "TS_USERSPACE",
+                                "value": "false"
+                            },
+                            {
+                                "name": "TS_STATE_DIR",
+                                "value": "/var/lib/tailscale"
+                            }
+                        ],
+                        "image": "tailscale/tailscale:latest",
+                        "imagePullPolicy": "Always",
+                        "name": "tailscale",
+                        "resources": {},
+                        "securityContext": {
+                            "capabilities": {
+                                "add": [
+                                    "NET_ADMIN",
+                                    "NET_RAW"
+                                ]
+                            },
+                            "privileged": true
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/var/lib/tailscale",
+                                "name": "tailscale-state"
+                            }
+                        ]
+                    },
+                    {
+                        "command": [
+                            "/bin/sh",
+                            "-c",
+                            "./dc-test-tool -config test_scenarios.json \u0026\u0026 echo 'Test passed. Sleeping...' \u0026\u0026 sleep infinity || (echo 'Test failed. Exiting.' \u0026\u0026 exit 1)"
+                        ],
+                        "env": [
+                            {
+                                "name": "ENABLE_HEP_SELF_LOGGING",
+                                "value": "true"
+                            },
+                            {
+                                "name": "HEP_SERVER_HOST",
+                                "value": "heplify-server"
+                            },
+                            {
+                                "name": "HEP_SERVER_PORT",
+                                "value": "9060"
+                            },
+                            {
+                                "name": "INTERFACE_NAME",
+                                "value": "eth0"
+                            }
+                        ],
+                        "image": "go-mf:local",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "tool-test",
+                        "resources": {},
+                        "securityContext": {
+                            "capabilities": {
+                                "add": [
+                                    "NET_ADMIN"
+                                ]
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/app/config",
+                                "name": "config-volume"
+                            },
+                            {
+                                "mountPath": "/app/test_scenarios.json",
+                                "name": "scenario-volume",
+                                "subPath": "test_scenarios.json"
+                            }
+                        ],
+                        "workingDir": "/app"
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "initContainers": [
+                    {
+                        "command": [
+                            "sh",
+                            "-c",
+                            "echo \"Waiting for Redis...\"; until nc -z redis-service 6379; do sleep 2; done; echo \"Waiting for IMS-AS...\"; until nc -z ims-as-cluster-headless 5070; do sleep 2; done; echo \"Waiting for PCSCF...\"; until nc -u -z pcscf-service 5060; do sleep 2; done; echo \"All services are up! Sleeping 5s just in case...\"; sleep 5;"
+                        ],
+                        "image": "busybox:1.28",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "wait-for-services",
+                        "resources": {},
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File"
+                    }
+                ],
+                "restartPolicy": "Always",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "terminationGracePeriodSeconds": 30,
+                "volumes": [
+                    {
+                        "emptyDir": {},
+                        "name": "tailscale-state"
+                    },
+                    {
+                        "configMap": {
+                            "defaultMode": 420,
+                            "name": "ims-sys-config"
+                        },
+                        "name": "config-volume"
+                    },
+                    {
+                        "configMap": {
+                            "defaultMode": 420,
+                            "name": "test-scenarios-config"
+                        },
+                        "name": "scenario-volume"
+                    }
+                ]
+            }
+        }
+    },
+    "status": {
+        "conditions": [
+            {
+                "lastTransitionTime": "2026-08-09T14:26:08Z",
+                "lastUpdateTime": "2026-08-09T14:26:08Z",
+                "message": "Deployment does not have minimum availability.",
+                "reason": "MinimumReplicasUnavailable",
+                "status": "False",
+                "type": "Available"
+            },
+            {
+                "lastTransitionTime": "2026-08-03T01:49:57Z",
+                "lastUpdateTime": "2026-08-09T14:29:01Z",
+                "message": "ReplicaSet \"tool-test-79748b7b6c\" is progressing.",
+                "reason": "ReplicaSetUpdated",
+                "status": "True",
+                "type": "Progressing"
+            }
+        ],
+        "observedGeneration": 31,
+        "replicas": 1,
+        "unavailableReplicas": 1,
+        "updatedReplicas": 1
+    }
+}

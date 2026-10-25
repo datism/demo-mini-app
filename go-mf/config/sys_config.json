@@ -1,0 +1,25 @@
+{
+  "domains": {
+    "ims": "ims.mnc001.mcc452.3gppnetwork.org"
+  },
+  "ims_core": {
+    "pcscf": { "host": "192.168.26.211", "port": 5060 },
+    "icscf": { "host": "192.168.26.212", "port": 5060 },
+    "scscf": { "host": "192.168.26.213", "port": 5060 }
+  },
+  "services": {
+    "ims_as": { "host": "192.168.26.214", "port": 5070, "sip_port": 5060 },
+    "dcsf": { "host": "192.168.26.215", "port": 8080 },
+    "mf": { "host": "192.168.26.216", "port": 8081, "webrtc_port": 40000 },
+    "dcar": { "host": "192.168.26.217", "port": 8082 },
+    "dcas": { "host": "192.168.26.218", "port": 8083, "ws_port": 8084 }
+  },
+  "users": [
+    { "impu": "sip:1001@ims.mnc001.mcc452.3gppnetwork.org", "username": "1001", "password": "password1001", "vrbt_enabled": false },
+    { "impu": "sip:1002@ims.mnc001.mcc452.3gppnetwork.org", "username": "1002", "password": "password1002", "vrbt_enabled": true }
+  ],
+  "ifc": {
+    "trigger_content": "webrtc-datachannel",
+    "as_destination": "sip:192.168.26.214:5060"
+  }
+}

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Caro Game</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #game-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #game-header {
+      color: white;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    #game-header h2 {
+      font-size: 20px;
+      font-weight: 700;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
+    #status-bar {
+      display: flex;
+      gap: 16px;
+      margin-top: 6px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .score-item {
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .score-item.active {
+      background: rgba(59, 130, 246, 0.6);
+      font-weight: 700;
+    }
+
+    #turn-indicator {
+      color: #fbbf24;
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 4px;
+      min-height: 20px;
+    }
+
+    #board {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      grid-template-rows: repeat(9, 1fr);
+      gap: 1px;
+      width: min(85vw, 85vh - 120px);
+      height: min(85vw, 85vh - 120px);
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .cell {
+      background: rgba(15, 23, 42, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(16px, 4vw, 28px);
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .cell:active {
+      background: rgba(30, 41, 59, 0.9);
+    }
+
+    .cell.x {
+      color: #3b82f6;
+    }
+
+    .cell.o {
+      color: #ef4444;
+    }
+
+    .cell.last-move {
+      background: rgba(59, 130, 246, 0.25);
+    }
+
+    .cell.win {
+      background: rgba(34, 197, 94, 0.35);
+      animation: winPulse 0.6s ease infinite alternate;
+    }
+
+    @keyframes winPulse {
+      from {
+        background: rgba(34, 197, 94, 0.25);
+      }
+
+      to {
+        background: rgba(34, 197, 94, 0.5);
+      }
+    }
+
+    #winner-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #winner-overlay.show {
+      display: flex;
+    }
+
+    #winner-text {
+      font-size: 36px;
+      font-weight: 800;
+      color: #fbbf24;
+      text-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      margin-bottom: 16px;
+    }
+
+    #new-game-btn {
+      padding: 12px 32px;
+      border: none;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="game-container">
+    <div id="game-header">
+      <h2>🎮 Caro 9×9</h2>
+      <div id="status-bar">
+        <span class="score-item" id="score-x">X: 0</span>
+        <span class="score-item" id="score-o">O: 0</span>
+        <button id="header-new-game-btn" onclick="requestNewGame()" style="padding: 4px 12px; border-radius: 12px; background: rgba(59, 130, 246, 0.8); color: white; border: none; cursor: pointer; font-weight: bold; margin-left: auto;">Ván mới</button>
+      </div>
+      <div id="turn-indicator">Đang chờ kết nối...</div>
+    </div>
+    <div id="board"></div>
+  </div>
+
+  <div id="winner-overlay">
+    <div id="winner-text"></div>
+    <button id="new-game-btn" onclick="requestNewGame()">Ván mới</button>
+  </div>
+
+  <script>
+    const BOARD_SIZE = 9;
+    let mySymbol = 'X';
+    let currentTurn = 'X';
+    let boardState = [];
+    let gameActive = false;
+    let initialized = false;
+
+    let myScore = 0;
+    let opponentScore = 0;
+
+    // Initialize empty board
+    function initBoard() {
+      const board = document.getElementById('board');
+      board.innerHTML = '';
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.row = r;
+          cell.dataset.col = c;
+          cell.addEventListener('click', () => onCellClick(r, c));
+          board.appendChild(cell);
+        }
+      }
+    }
+
+    function onCellClick(row, col) {
+      if (!gameActive || currentTurn !== mySymbol) return;
+      if (boardState[row] && boardState[row][col] !== '') return;
+
+      // Optimistic UI Update: Make it feel instant and hide network latency!
+      boardState[row][col] = mySymbol;
+      
+      const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+      if (cell) {
+        cell.textContent = mySymbol;
+        cell.classList.add(mySymbol.toLowerCase());
+        // Remove last-move from other cells, add to this one optimistically
+        document.querySelectorAll('.cell.last-move').forEach(c => c.classList.remove('last-move'));
+        cell.classList.add('last-move');
+      }
+      
+      updateTurn(mySymbol === 'X' ? 'O' : 'X');
+
+      const payload = {
+        service: 'caro',
+        action: 'move',
+        row: row,
+        col: col
+      };
+
+      if (window.IMSDataChannelBridge) {
+        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
+      } else if (window.AndroidBridge) {
+        window.AndroidBridge.sendData(JSON.stringify(payload));
+      }
+    }
+
+    function requestNewGame() {
+      document.getElementById('winner-overlay').classList.remove('show');
+      const payload = {
+        service: 'caro',
+        action: 'new_game'
+      };
+      if (window.IMSDataChannelBridge) {
+        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
+      } else if (window.AndroidBridge) {
+        window.AndroidBridge.sendData(JSON.stringify(payload));
+      }
+    }
+
+    function renderBoard(board, lastMove) {
+      boardState = board;
+      const cells = document.querySelectorAll('.cell');
+      cells.forEach(cell => {
+        const r = parseInt(cell.dataset.row);
+        const c = parseInt(cell.dataset.col);
+        const val = board[r] ? board[r][c] : '';
+        cell.textContent = val;
+        cell.className = 'cell';
+        if (val === 'X') cell.classList.add('x');
+        if (val === 'O') cell.classList.add('o');
+        if (lastMove && lastMove.row === r && lastMove.col === c) {
+          cell.classList.add('last-move');
+        }
+      });
+    }
+
+    function updateScores() {
+      const sx = document.getElementById('score-x');
+      const so = document.getElementById('score-o');
+      sx.textContent = 'Bạn: ' + myScore;
+      so.textContent = 'Đối thủ: ' + opponentScore;
+      sx.className = 'score-item active';
+      so.className = 'score-item';
+    }
+
+    function updateTurn(nextTurn) {
+      currentTurn = nextTurn;
+      const indicator = document.getElementById('turn-indicator');
+      if (nextTurn === mySymbol) {
+        indicator.textContent = '👉 Lượt của bạn (' + mySymbol + ')';
+        indicator.style.color = '#22c55e';
+      } else {
+        indicator.textContent = '⏳ Đợi đối thủ (' + nextTurn + ')...';
+        indicator.style.color = '#fbbf24';
+      }
+    }
+
+    function showWinner(winner, isDraw) {
+      gameActive = false;
+      const overlay = document.getElementById('winner-overlay');
+      const text = document.getElementById('winner-text');
+      if (isDraw) {
+        text.textContent = '🤝 Hòa!';
+        text.style.color = '#94a3b8';
+      } else if (winner === mySymbol) {
+        text.textContent = '🎉 Bạn thắng!';
+        text.style.color = '#22c55e';
+      } else {
+        text.textContent = '😢 Bạn thua!';
+        text.style.color = '#ef4444';
+      }
+      overlay.classList.add('show');
+    }
+
+    // Called by native Android when ADC data arrives
+    window.receiveData = function (dataStr) {
+      console.log('[Caro] Received: ' + dataStr);
+      try {
+        const data = JSON.parse(dataStr);
+        if (data.service !== 'caro') return;
+
+        if (data.status === 'game_start' || data.status === 'late_join') {
+          mySymbol = data.your_symbol || 'X';
+          initialized = true;
+          gameActive = true;
+          if (mySymbol === 'X') {
+            myScore = data.score_x || 0;
+            opponentScore = data.score_o || 0;
+          } else {
+            myScore = data.score_o || 0;
+            opponentScore = data.score_x || 0;
+          }
+          renderBoard(data.board, null);
+          updateScores();
+          updateTurn(data.next_turn);
+          document.getElementById('winner-overlay').classList.remove('show');
+        } else if (data.status === 'update_board') {
+          if (!initialized) {
+            console.log('[Caro] Ignoring update_board because not initialized yet.');
+            return;
+          }
+          renderBoard(data.board, data.last_move);
+          if (data.score_x !== undefined && data.score_o !== undefined) {
+            if (mySymbol === 'X') {
+              myScore = data.score_x;
+              opponentScore = data.score_o;
+            } else {
+              myScore = data.score_o;
+              opponentScore = data.score_x;
+            }
+          }
+          if (data.winner && data.winner !== '') {
+            showWinner(data.winner, false);
+            updateScores();
+          } else if (data.draw) {
+            showWinner('', true);
+          } else {
+            gameActive = true;
+            updateTurn(data.next_turn);
+          }
+        }
+      } catch (e) {
+        console.error('[Caro] Parse error: ' + e.message);
+      }
+    };
+
+    // Send sync_state to DCAS to initialize/restore game state
+    // Note: re-INVITE for caro app may take 2-5 seconds to complete (ADC recreation + MF DCAS TCP connect).
+    // We retry with 2s intervals until gameActive becomes true or we exhaust retries.
+    let syncRetries = 0;
+    const MAX_SYNC_RETRIES = 15;
+
+    function sendSyncState() {
+      const payload = { service: 'caro', action: 'sync_state' };
+      if (window.IMSDataChannelBridge) {
+        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
+      } else if (window.AndroidBridge) {
+        window.AndroidBridge.sendData(JSON.stringify(payload));
+      }
+      console.log('[Caro] sync_state sent (attempt ' + (syncRetries + 1) + '/' + MAX_SYNC_RETRIES + ')');
+    }
+
+    window.onload = function () {
+      initBoard();
+      
+      // Request GSMA Data Channel creation (Triggers re-INVITE natively)
+      if (window.ImsDcBridge) {
+        window.ImsDcBridge.createDataChannel("caro");
+      } else if (window._dsbridge) {
+        // Fallback for some JS bridges
+        window._dsbridge.call("createDataChannel", "caro");
+      }
+
+
+      // Send initial sync_state immediately (may arrive before re-INVITE completes — harmless, will be retried)
+      sendSyncState();
+      // Retry periodically until game becomes active or we run out of retries
+      const retryInterval = setInterval(function () {
+        if (initialized) {
+          clearInterval(retryInterval);
+          console.log('[Caro] Game initialized, stopping sync_state retries');
+          return;
+        }
+        syncRetries++;
+        if (syncRetries >= MAX_SYNC_RETRIES) {
+          clearInterval(retryInterval);
+          console.log('[Caro] sync_state failed after ' + MAX_SYNC_RETRIES + ' retries');
+          return;
+        }
+        sendSyncState();
+      }, 2000);
+    };
+  </script>
+</body>
+
+</html>

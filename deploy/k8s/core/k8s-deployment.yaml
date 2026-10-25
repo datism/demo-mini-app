@@ -1,0 +1,1409 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ims-sys-config
+  namespace: demo-mini-app
+data:
+  # File cấu hình dùng chung cho toàn bộ hệ thống
+  sys_config.json: |
+    {
+      "domains": {
+        "ims": "ims.mnc001.mcc452.3gppnetwork.org"
+      },
+      "ims_core": {
+        "pcscf": { "host": "pcscf.ims.mnc001.mcc452.3gppnetwork.org", "port": 5060 },
+        "icscf": { "host": "icscf-service.ims.mnc001.mcc452.3gppnetwork.org", "port": 5060 },
+        "scscf": { "host": "scscf-service.ims.mnc001.mcc452.3gppnetwork.org", "port": 5060 }
+      },
+      "services": {
+        "ims_as": { "host": "ims-as-headless.ims.mnc001.mcc452.3gppnetwork.org", "port": 5070, "sip_port": 5060 },
+        "dcsf": { "host": "dcsf-headless.ims.mnc001.mcc452.3gppnetwork.org", "port": 8080 },
+        "mf": { "host": "mf-headless.ims.mnc001.mcc452.3gppnetwork.org", "port": 8081, "webrtc_port": 40000 },
+        "dcar": { "host": "dcar-service.ims.mnc001.mcc452.3gppnetwork.org", "port": 8082 },
+        "dcas": { "host": "dcas-headless.ims.mnc001.mcc452.3gppnetwork.org", "port": 8083, "ws_port": 8084 },
+        "pcf": { "host": "pcf-service.ims.mnc001.mcc452.3gppnetwork.org", "port": 8085 }
+      },
+      "users": [
+        { "impu": "sip:1001@ims.mnc001.mcc452.3gppnetwork.org", "username": "1001", "password": "password1001", "vrbt_enabled": false },
+        { "impu": "sip:1002@ims.mnc001.mcc452.3gppnetwork.org", "username": "1002", "password": "password1002", "vrbt_enabled": true },
+        { "impu": "sip:1003@ims.mnc001.mcc452.3gppnetwork.org", "username": "1003", "password": "password1003", "vrbt_enabled": false },
+        { "impu": "sip:1004@ims.mnc001.mcc452.3gppnetwork.org", "username": "1004", "password": "password1004", "vrbt_enabled": false },
+        { "impu": "sip:1005@ims.mnc001.mcc452.3gppnetwork.org", "username": "1005", "password": "password1005", "vrbt_enabled": false },
+        { "impu": "sip:1006@ims.mnc001.mcc452.3gppnetwork.org", "username": "1006", "password": "password1006", "vrbt_enabled": false },
+        { "impu": "sip:1007@ims.mnc001.mcc452.3gppnetwork.org", "username": "1007", "password": "password1007", "vrbt_enabled": false },
+        { "impu": "sip:1008@ims.mnc001.mcc452.3gppnetwork.org", "username": "1008", "password": "password1008", "vrbt_enabled": false },
+        { "impu": "sip:2001@ims.mnc001.mcc452.3gppnetwork.org", "username": "2001", "password": "password2001", "vrbt_enabled": false },
+        { "impu": "sip:2002@ims.mnc001.mcc452.3gppnetwork.org", "username": "2002", "password": "password2002", "vrbt_enabled": false },
+        { "impu": "sip:2003@ims.mnc001.mcc452.3gppnetwork.org", "username": "2003", "password": "password2003", "vrbt_enabled": false },
+        { "impu": "sip:2004@ims.mnc001.mcc452.3gppnetwork.org", "username": "2004", "password": "password2004", "vrbt_enabled": false },
+        { "impu": "sip:2005@ims.mnc001.mcc452.3gppnetwork.org", "username": "2005", "password": "password2005", "vrbt_enabled": false },
+        { "impu": "sip:2006@ims.mnc001.mcc452.3gppnetwork.org", "username": "2006", "password": "password2006", "vrbt_enabled": false },
+        { "impu": "sip:2007@ims.mnc001.mcc452.3gppnetwork.org", "username": "2007", "password": "password2007", "vrbt_enabled": false },
+        { "impu": "sip:2008@ims.mnc001.mcc452.3gppnetwork.org", "username": "2008", "password": "password2008", "vrbt_enabled": false },
+        { "impu": "sip:2009@ims.mnc001.mcc452.3gppnetwork.org", "username": "2009", "password": "password2009", "vrbt_enabled": false }
+      ],
+      "ifc": {
+        "trigger_content": "webrtc-datachannel",
+        "as_destination": "sip:ims-as-headless.ims.mnc001.mcc452.3gppnetwork.org:5060"
+      }
+    }
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVICES DEFINITIONS (Định nghĩa Dịch vụ)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Service P-CSCF
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcscf-service
+  namespace: demo-mini-app
+spec:
+  type: NodePort
+  ports:
+    - port: 5060
+      protocol: UDP
+      name: sip-udp
+      nodePort: 30060
+  selector:
+    app: pcscf
+
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mf-nodeport
+  namespace: demo-mini-app
+spec:
+  type: NodePort
+  ports:
+    - port: 40000
+      protocol: UDP
+      name: webrtc-udp
+      nodePort: 30040
+    - port: 40005
+      protocol: UDP
+      name: adc-udp
+      nodePort: 30045
+  selector:
+    app: mf
+
+
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPLOYMENTS DEFINITIONS (Định nghĩa Deployment)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Cấu hình DNS dùng chung cho các Pod để trỏ về dns-server cục bộ (192.168.100.9)
+# dnsPolicy: None
+# dnsConfig: nameservers = [192.168.100.9]
+
+# 1. Proxy Call Session Control Function (Erlang - P-CSCF)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcscf
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pcscf
+  template:
+    metadata:
+      labels:
+        app: pcscf
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip_eth0 = None
+              for _ in range(10):
+                  if not ip_eth0: ip_eth0 = get_ip('eth0')
+                  if ip_eth0: break
+                  time.sleep(1)
+              if not ip_eth0: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering pcscf.ims.mnc001.mcc452.3gppnetwork.org -> {ip_eth0} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=pcscf.ims.mnc001.mcc452.3gppnetwork.org&ip={ip_eth0}&pod={pod}")
+              print(f"Registering pcscf-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip_eth0} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=pcscf-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip_eth0}&pod={pod}")
+      containers:
+        # [OPTIONAL] TAILSCALE SIDECAR
+        # Uncomment or keep this container if you want to expose P-CSCF over Tailscale (Internet environments).
+        # For production/offline environments, simply comment out or delete this whole "tailscale" block.
+        - name: tailscale
+          image: tailscale/tailscale:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              /usr/local/bin/containerboot &
+              wait
+          env:
+            - name: TS_AUTHKEY
+              value: "tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb"
+            - name: TS_USERSPACE
+              value: "false"
+            - name: TS_KUBE_SECRET
+              value: "tailscale-pcscf"
+            - name: TS_STATE_DIR
+              value: "/var/lib/tailscale"
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+        - name: pcscf
+          image: erlang-sip:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export ETH0_IP=$(ip addr show eth0 | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+              export NODE_NAME="$(NODE_ROLE)@${ETH0_IP}"
+              exec /app/bin/ims_dc_sip foreground
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: NODE_ROLE
+              value: "pcscf"
+            - name: INTERFACE_NAME
+              value: "eth0"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              value: "$(NODE_ROLE)@$(POD_IP)"
+            - name: NODE_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: ERLANG_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: REDIS_SENTINEL_HOST
+              value: "redis-sentinel-service.demo-mini-app.svc.cluster.local"
+            - name: REDIS_SENTINEL_PORT
+              value: "26379"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: tailscale-state
+          emptyDir: {}
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# 2. Interrogating Call Session Control Function (Erlang - I-CSCF)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: icscf
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: icscf
+  template:
+    metadata:
+      labels:
+        app: icscf
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering icscf-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=icscf-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: icscf
+          image: erlang-sip:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              
+              export NET1_IP=$(hostname -I | cut -d' ' -f1)
+              export NODE_NAME="$(NODE_ROLE)@${NET1_IP}"
+              exec /app/bin/ims_dc_sip foreground
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: NODE_ROLE
+              value: "icscf"
+            - name: INTERFACE_NAME
+              value: "eth0"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              value: "$(NODE_ROLE)@$(POD_IP)"
+            - name: NODE_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: ERLANG_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: REDIS_SENTINEL_HOST
+              value: "redis-sentinel-service.demo-mini-app.svc.cluster.local"
+            - name: REDIS_SENTINEL_PORT
+              value: "26379"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# 3. Serving Call Session Control Function (Erlang - S-CSCF)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scscf
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: scscf
+  template:
+    metadata:
+      labels:
+        app: scscf
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering scscf-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=scscf-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: scscf
+          image: erlang-sip:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              
+              export NET1_IP=$(hostname -I | cut -d' ' -f1)
+              export NODE_NAME="$(NODE_ROLE)@${NET1_IP}"
+              exec /app/bin/ims_dc_sip foreground
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: NODE_ROLE
+              value: "scscf"
+            - name: INTERFACE_NAME
+              value: "eth0"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              value: "$(NODE_ROLE)@$(POD_IP)"
+            - name: NODE_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: ERLANG_COOKIE
+              value: "ims_dc_sip_cookie"
+            - name: REDIS_SENTINEL_HOST
+              value: "redis-sentinel-service.demo-mini-app.svc.cluster.local"
+            - name: REDIS_SENTINEL_PORT
+              value: "26379"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /app/bin/ims_dc_sip
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# 4. IMS Application Server (Go - ims-as) - Replica 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ims-as-1
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ims-as
+      instance: ims-as-1
+  template:
+    metadata:
+      labels:
+        app: ims-as
+        instance: ims-as-1
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering ims-as-headless.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=ims-as-headless.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: ims-as
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["./ims-as"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - cat
+                - /proc/1/cmdline
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - cat
+                - /proc/1/cmdline
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+
+
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ims-as-cluster-headless
+  namespace: demo-mini-app
+spec:
+  clusterIP: None
+  selector:
+    app: ims-as
+    instance: ims-as-1
+  ports:
+    - name: sip
+      port: 5060
+      protocol: UDP
+    - name: http
+      port: 5070
+      protocol: TCP
+
+---
+# 5. DC Signalling Function (Go - dcsf) - Replica 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dcsf-1
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dcsf
+      instance: dcsf-1
+  template:
+    metadata:
+      labels:
+        app: dcsf
+        instance: dcsf-1
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering dcsf-headless.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=dcsf-headless.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: dcsf
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["./dcsf"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+
+
+
+
+---
+# 6. Media Function (Go - mf) - Replica 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mf-1
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mf
+      instance: mf-1
+  template:
+    metadata:
+      labels:
+        app: mf
+        instance: mf-1
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering mf-headless.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=mf-headless.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        # [OPTIONAL] TAILSCALE SIDECAR
+        # Uncomment or keep this container if you want to expose MF over Tailscale (Internet environments).
+        # For production/offline environments, simply comment out or delete this whole "tailscale" block.
+        - name: tailscale
+          image: tailscale/tailscale:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              /usr/local/bin/containerboot &
+              wait
+          env:
+            - name: TS_AUTHKEY
+              value: "tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb"
+            - name: TS_USERSPACE
+              value: "false"
+            - name: TS_KUBE_SECRET
+              value: "tailscale-mf"
+            - name: TS_STATE_DIR
+              value: "/var/lib/tailscale"
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+        - name: mf
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              exec ./mf
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: tailscale-state
+          emptyDir: {}
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+
+
+---
+# 7. DC App Repository (Go - dcar)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dcar
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dcar
+  template:
+    metadata:
+      labels:
+        app: dcar
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering dcar-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=dcar-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: dcar
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["./dcar"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# 8. DC Application Server (Go - dcas) - Replica 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dcas-1
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dcas
+      instance: dcas-1
+  template:
+    metadata:
+      labels:
+        app: dcas
+        instance: dcas-1
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering dcas-headless.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=dcas-headless.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: dcas
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["./dcas"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# 9. Policy Control Function (Go - pcf)
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcf-service
+  namespace: demo-mini-app
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8085
+      protocol: TCP
+      name: http
+  selector:
+    app: pcf
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcf
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pcf
+  template:
+    metadata:
+      labels:
+        app: pcf
+    spec:
+      initContainers:
+        - name: register-dns
+          image: python:3.10-slim
+          command:
+            - python
+            - -c
+            - |
+              import socket, fcntl, struct, urllib.request, time
+              def get_ip(ifname):
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  try:
+                      return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack('256s', bytes(ifname[:15], 'utf-8')))[20:24])
+                  except IOError:
+                      return None
+              ip = None
+              for _ in range(10):
+                  ip = get_ip('eth0')
+                  if ip: break
+                  time.sleep(1)
+              if not ip: raise Exception("No IP on eth0")
+              pod = socket.gethostname()
+              print(f"Registering pcf-service.ims.mnc001.mcc452.3gppnetwork.org -> {ip} (pod: {pod})")
+              urllib.request.urlopen(f"http://dns-server-service:9090/update?host=pcf-service.ims.mnc001.mcc452.3gppnetwork.org&ip={ip}&pod={pod}")
+      containers:
+        - name: pcf
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["./pcf"]
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exit 0
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST TOOL DEPLOYMENT (Định nghĩa Công cụ kiểm thử độc lập)
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-scenarios-config
+  namespace: demo-mini-app
+data:
+  test_scenarios.json: |
+    {
+      "scenarios": [
+        {
+          "name": "Scenario 1: Whiteboard Draw & FunCalling - A calls B, B answers, A terminates (2003 calling 2004)",
+          "caller": {
+            "username": "2003",
+            "password": "password2003"
+          },
+          "callee": {
+            "username": "2004",
+            "password": "password2004"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "timeout_ms": 30000
+            },
+            {
+              "action": "request_app",
+              "payload": "sketch-sync-app",
+              "delay_ms": 5000
+            },
+            {
+              "action": "wait_webrtc_connect",
+              "stream_id": 1000,
+              "timeout_ms": 30000
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1000,
+              "payload": "{\"type\":\"draw\",\"action\":\"start\",\"x\":150,\"y\":300,\"color\":\"#ff0000\"}",
+              "delay_ms": 500
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1000,
+              "payload": "{\"type\":\"draw\",\"action\":\"move\",\"x\":170,\"y\":310,\"color\":\"#ff0000\"}",
+              "delay_ms": 500
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1001,
+              "payload": "{\"service\":\"fun-calling\",\"action\":\"send_emoji\",\"type\":\"heart\"}",
+              "delay_ms": 1000
+            },
+            {
+              "action": "assert_rtp",
+              "delay_ms": 3000
+            },
+            {
+              "action": "hangup",
+              "payload": "caller",
+              "delay_ms": 2000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 2: Short Call Session (Voice/Video Only)",
+          "caller": {
+            "username": "2005",
+            "password": "password2005"
+          },
+          "callee": {
+            "username": "2006",
+            "password": "password2006"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "timeout_ms": 30000
+            },
+            {
+              "action": "assert_rtp",
+              "delay_ms": 3000
+            },
+            {
+              "action": "hangup",
+              "payload": "caller",
+              "delay_ms": 1000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 3: Caro Game Interaction (1005 calling 1006)",
+          "caller": {
+            "username": "1005",
+            "password": "password1005"
+          },
+          "callee": {
+            "username": "1006",
+            "password": "password1006"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "timeout_ms": 30000
+            },
+            {
+              "action": "request_app",
+              "payload": "caro",
+              "delay_ms": 5000
+            },
+            {
+              "action": "wait_webrtc_connect",
+              "stream_id": 1000,
+              "timeout_ms": 30000
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1000,
+              "payload": "{\"service\":\"caro\",\"action\":\"new_game\"}",
+              "delay_ms": 500
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1000,
+              "payload": "{\"service\":\"caro\",\"action\":\"move\",\"row\":4,\"col\":4}",
+              "delay_ms": 1000
+            },
+            {
+              "action": "assert_rtp",
+              "delay_ms": 3000
+            },
+            {
+              "action": "hangup",
+              "payload": "caller",
+              "delay_ms": 2000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 4: A calls B, A cancels call setup (2007 calling 2008)",
+          "caller": {
+            "username": "2007",
+            "password": "password2007"
+          },
+          "callee": {
+            "username": "2008",
+            "password": "password2008"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "payload": "no_wait",
+              "delay_ms": 2000
+            },
+            {
+              "action": "cancel",
+              "delay_ms": 1000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 5: A calls B, B rejects incoming call (2007 calling 2008)",
+          "caller": {
+            "username": "2007",
+            "password": "password2007"
+          },
+          "callee": {
+            "username": "2008",
+            "password": "password2008"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "payload": "no_wait",
+              "delay_ms": 2000
+            },
+            {
+              "action": "reject",
+              "delay_ms": 1000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 6: Whiteboard Draw - A calls B, B answers, B terminates (2001 calling 2002)",
+          "caller": {
+            "username": "2001",
+            "password": "password2001"
+          },
+          "callee": {
+            "username": "2002",
+            "password": "password2002"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "timeout_ms": 30000
+            },
+            {
+              "action": "request_app",
+              "payload": "sketch-sync-app",
+              "delay_ms": 5000
+            },
+            {
+              "action": "wait_webrtc_connect",
+              "stream_id": 1000,
+              "timeout_ms": 30000
+            },
+            {
+              "action": "send_data",
+              "stream_id": 1000,
+              "payload": "{\"type\":\"draw\",\"action\":\"start\",\"x\":100,\"y\":200,\"color\":\"#00ff00\"}",
+              "delay_ms": 500
+            },
+            {
+              "action": "assert_rtp",
+              "delay_ms": 3000
+            },
+            {
+              "action": "hangup",
+              "payload": "callee",
+              "delay_ms": 2000
+            }
+          ]
+        },
+        {
+          "name": "Scenario 5: Callee-Initiated Caro App (1007 calling 1008)",
+          "caller": {
+            "username": "1007",
+            "password": "password1007"
+          },
+          "callee": {
+            "username": "1008",
+            "password": "password1008"
+          },
+          "steps": [
+            {
+              "action": "wait_register",
+              "timeout_ms": 15000
+            },
+            {
+              "action": "dial",
+              "timeout_ms": 10000
+            },
+            {
+              "action": "request_app",
+              "payload": "caro",
+              "role": "callee",
+              "delay_ms": 5000
+            },
+            {
+              "action": "wait_webrtc_connect",
+              "stream_id": 1000,
+              "timeout_ms": 30000
+            },
+            {
+              "action": "hangup",
+              "payload": "caller",
+              "delay_ms": 2000
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-test
+  namespace: demo-mini-app
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tool-test
+  template:
+    metadata:
+      labels:
+        app: tool-test
+    spec:
+      initContainers:
+        - name: wait-for-services
+          image: busybox:1.28
+          command: ['sh', '-c', 'echo "Waiting for Redis..."; until nc -z redis-service 6379; do sleep 2; done; echo "Waiting for IMS-AS..."; until nc -z ims-as-cluster-headless 5070; do sleep 2; done; echo "Waiting for PCSCF..."; until nc -u -z pcscf-service 5060; do sleep 2; done; echo "All services are up! Sleeping 5s just in case..."; sleep 5;']
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              /usr/local/bin/containerboot &
+              wait
+          env:
+            - name: TS_AUTHKEY
+              value: "tskey-auth-kVUfS3HDFz11CNTRL-mDPskK6r5C6FYaQFSjcBC6L8R59NhCAb"
+            - name: TS_USERSPACE
+              value: "false"
+            - name: TS_KUBE_SECRET
+              value: "tailscale-tool-test"
+            - name: TS_STATE_DIR
+              value: "/var/lib/tailscale"
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          volumeMounts:
+            - name: tailscale-state
+              mountPath: /var/lib/tailscale
+        - name: tool-test
+          image: go-mf:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "sleep 3; ./dc-test-tool -config test_scenarios.json; echo 'Test run finished. Sleeping forever to preserve logs...'; sleep infinity"]
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN"]
+          workingDir: /app
+          env:
+            - name: ENABLE_HEP_SELF_LOGGING
+              value: "true"
+            - name: HEP_SERVER_HOST
+              value: "heplify-server"
+            - name: HEP_SERVER_PORT
+              value: "9060"
+
+            - name: INTERFACE_NAME
+              value: "eth0"
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+            - name: scenario-volume
+              mountPath: /app/test_scenarios.json
+              subPath: test_scenarios.json
+      volumes:
+        - name: tailscale-state
+          emptyDir: {}
+        - name: config-volume
+          configMap:
+            name: ims-sys-config
+        - name: scenario-volume
+          configMap:
+            name: test-scenarios-config
+
+
+
+
+
+

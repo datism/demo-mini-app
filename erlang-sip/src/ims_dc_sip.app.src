@@ -1,0 +1,24 @@
+%% @doc Application resource file (app descriptor).
+{application, ims_dc_sip,
+ [{description,  "IMS DC SIP Signalling Server (S-CSCF / IMS AS PoC)"},
+  {vsn,          "1.0.0"},
+  {registered,   [ims_dc_sip_sup, sip_server]},
+  {mod,          {ims_dc_sip_app, []}},
+  {applications, [
+      kernel,
+      stdlib,
+      inets,      % HTTP client fallback
+      crypto,
+      ssl,
+      hackney,
+      jiffy
+  ]},
+  {env, [
+      %% Cổng lắng nghe SIP (UDP)
+      {sip_port, 5060},
+      %% Địa chỉ Golang MF DCSF REST API
+      {dcsf_url, "http://127.0.0.1:8080"}
+  ]},
+  {maintainers, []},
+  {licenses,    ["MIT"]}
+ ]}.

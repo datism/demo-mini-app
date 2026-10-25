@@ -1,0 +1,10 @@
+{
+  "appId": "smart-menu",
+  "appName": "Smart Menu 198",
+  "version": "1.0.0",
+  "connectionPolicy": "P2A",
+  "qosHint": {
+    "latencyMs": 100,
+    "packetLossRate": 0.01
+  }
+}

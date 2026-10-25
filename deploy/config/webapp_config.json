@@ -1,0 +1,68 @@
+{
+  "api_settings": {
+    "enable_token_auth": false
+  },
+  "auth_settings": {
+    "_comment": "The type param can be internal, ldap",
+    "jwt_secret": "e5c435f3-78c5-4c4f-a816-c9b73ccbb48f",
+    "type": "internal"
+  },
+  "database_config": {
+    "host": "db",
+    "keepalive": false,
+    "name": "homer_config",
+    "pass": "admin",
+    "port": "5432",
+    "user": "postgres"
+  },
+  "database_data": {
+    "local": {
+      "host": "db",
+      "name": "homer_data",
+      "node": "LocalNode",
+      "pass": "admin",
+      "port": "5432",
+      "user": "postgres"
+    }
+  },
+  "decoder_shark": {
+    "_comment": "Here you can do packet decoding using tshark application. Please define uid, gid if you run the app under root",
+    "active": false,
+    "bin": "/usr/bin/tshark",
+    "gid": 0,
+    "protocols": [
+      "1_call",
+      "1_registration",
+      "1_default"
+    ],
+    "uid": 0
+  },
+  "grafana_config": {
+    "host": "http://localhost:3000",
+    "path": "",
+    "token": "grafana_token"
+  },
+  "http_settings": {
+    "debug": false,
+    "gzip": true,
+    "host": "0.0.0.0",
+    "path": "/",
+    "port": 80,
+    "root": "/usr/local/homer/dist"
+  },
+  "loki_config": {
+    "api": "api/prom",
+    "host": "http://qryn:3100",
+    "pass": "demo",
+    "user": "qryn"
+  },
+  "system_settings": {
+    "_comment": "loglevel can be: fatal, error, warn, info, debug, trace",
+    "hostname": "homer-app",
+    "loglevel": "error",
+    "logname": "homer-app.log",
+    "logpath": "/usr/local/homer",
+    "logstdout": false,
+    "uuid": "c68ba07e-11c4-49cc-b359-3195e5073bc8"
+  }
+}

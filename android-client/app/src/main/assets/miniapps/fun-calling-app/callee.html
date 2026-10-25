@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Fun Calling Mini-App</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #app-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      background: transparent;
+    }
+
+    /* Sticker Bar at the bottom */
+    #sticker-bar {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+      background: rgba(15, 23, 42, 0.95);
+      padding: 10px 18px;
+      border-radius: 30px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      z-index: 100;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .sticker-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s;
+    }
+
+    .sticker-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: scale(1.15);
+    }
+
+    .sticker-btn:active {
+      transform: scale(0.9);
+    }
+
+    .sticker-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: none;
+      stroke: white;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Floating Stickers Container */
+    #animation-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    @keyframes floatUp {
+      0% {
+        transform: translateY(0) translateX(0) scale(0.6);
+        opacity: 0;
+      }
+
+      15% {
+        opacity: 1;
+      }
+
+      80% {
+        opacity: 1;
+      }
+
+      100% {
+        transform: translateY(-95vh) translateX(25px) scale(0.8) rotate(15deg);
+        opacity: 0;
+      }
+    }
+
+    .floating-emoji {
+      position: absolute;
+      bottom: 0;
+      width: 60px;
+      height: 60px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      animation: floatUp 2.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    }
+
+    .emoji-icon {
+      font-size: 64px;
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 12px rgba(255, 255, 255, 0.95));
+      display: inline-block;
+      transform: translateZ(0);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="app-container">
+    <div id="animation-area"></div>
+
+    <div id="sticker-bar">
+      <!-- Heart Button -->
+      <button class="sticker-btn" id="btn-heart" onclick="sendSticker('heart')" title="Trái tim">
+        <svg viewBox="0 0 24 24" style="stroke: #ff4757;">
+          <path
+            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z">
+          </path>
+        </svg>
+      </button>
+
+      <!-- Like Button -->
+      <button class="sticker-btn" id="btn-like" onclick="sendSticker('like')" title="Thích">
+        <svg viewBox="0 0 24 24" style="stroke: #1e90ff;">
+          <path
+            d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3">
+          </path>
+        </svg>
+      </button>
+
+      <!-- Smile Button -->
+      <button class="sticker-btn" id="btn-smile" onclick="sendSticker('smile')" title="Mặt cười">
+        <svg viewBox="0 0 24 24" style="stroke: #ffa500;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+          <line x1="9" y1="9" x2="9.01" y2="9"></line>
+          <line x1="15" y1="9" x2="15.01" y2="9"></line>
+        </svg>
+      </button>
+
+      <!-- Angry Button -->
+      <button class="sticker-btn" id="btn-angry" onclick="sendSticker('angry')" title="Tức giận">
+        <svg viewBox="0 0 24 24" style="stroke: #ff3838;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M16 16s-1.5-2-4-2-4 2-4 2"></path>
+          <line x1="7.5" y1="8.5" x2="10.5" y2="10"></line>
+          <line x1="16.5" y1="8.5" x2="13.5" y2="10"></line>
+          <circle cx="9" cy="11.5" r="0.75" fill="#ff3838"></circle>
+          <circle cx="15" cy="11.5" r="0.75" fill="#ff3838"></circle>
+        </svg>
+      </button>
+
+      <!-- Wave Button -->
+      <button class="sticker-btn" id="btn-wave" onclick="sendSticker('wave')" title="Vẫy chào">
+        <svg viewBox="0 0 24 24" style="stroke: #ffb142;">
+          <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"></path>
+          <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7"></path>
+          <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"></path>
+          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Send sticker action to native Go backend via the W3C IMSDataChannelBridge
+    function sendSticker(emojiType) {
+      console.log("[MiniApp] Sending sticker type: " + emojiType);
+
+      const payload = {
+        service: "fun-calling",
+        action: "send_emoji",
+        type: emojiType
+      };
+
+      const payloadStr = JSON.stringify(payload);
+      if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
+        window.AndroidBridge.sendData(payloadStr);
+      } else if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function') {
+        window.IMSDataChannelBridge.send(1000, payloadStr);
+      }
+
+      // Self-render on originating side for quick responsiveness
+      renderEmoji(emojiType);
+    }
+
+    // Standard receive callback called by the container
+    window.receiveData = function (dataStr) {
+      console.log("[MiniApp] Received payload: " + dataStr);
+      try {
+        const payload = typeof dataStr === 'object' ? dataStr : JSON.parse(dataStr);
+        if (payload.action === "render_emoji" || payload.action === "send_emoji") {
+          renderEmoji(payload.type);
+        }
+      } catch (e) {
+        console.error("[MiniApp] Parse failed: " + e.message);
+      }
+    };
+
+    // GSMA bridge may call this callback for every incoming message.
+    window._handleMessageFromNative = function () { };
+
+    // Force the WebView to actually repaint DOM changes made from native.
+    function forceRepaint() {
+      const area = document.getElementById("animation-area");
+      if (!area) return;
+      void area.offsetHeight; // force synchronous reflow
+      area.style.webkitTransform = "translateZ(0)"; // force layer invalidation
+      area.style.webkitTransform = "";
+    }
+
+    // Render floating sticker animation
+    function renderEmoji(emojiType) {
+      const area = document.getElementById("animation-area");
+      if (!area) return;
+
+      const div = document.createElement("div");
+      div.className = "floating-emoji";
+
+      // Randomize initial horizontal position
+      const leftPercent = 10 + Math.random() * 80;
+      div.style.left = leftPercent + "%";
+
+      let emojiIcon = "❤️";
+      if (emojiType === "like") emojiIcon = "👍";
+      if (emojiType === "smile") emojiIcon = "😊";
+      if (emojiType === "angry") emojiIcon = "😡";
+      if (emojiType === "wave") emojiIcon = "👋";
+
+      div.innerHTML = `<span class="emoji-icon">${emojiIcon}</span>`;
+      area.appendChild(div);
+
+      // Force repaint on the next frame (critical for transparent HW-accel WebView)
+      requestAnimationFrame(forceRepaint);
+
+      // Clean up DOM node once animation finishes
+      setTimeout(() => {
+        div.remove();
+        requestAnimationFrame(forceRepaint);
+      }, 2300);
+    }
+
+    // Auto-request Data Channel upon loading
+    window.onload = function () {
+      console.log("[MiniApp] Fun calling initialized, requesting data channel connectivity");
+      if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) {
+        window.ImsDcBridge.createDataChannel("fun-calling-app");
+      } else if (window.AndroidBridge && window.AndroidBridge.createDataChannel) {
+        window.AndroidBridge.createDataChannel("fun-calling-app");
+      } else if (window._dsbridge && window._dsbridge.call) {
+        window._dsbridge.call("dc.createAppDataChannel", JSON.stringify({ dcLabels: ["control_fun-calling-app_0"] }));
+      }
+    };
+  </script>
+</body>
+
+</html>
