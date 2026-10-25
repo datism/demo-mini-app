@@ -534,7 +534,19 @@
       document.getElementById('win-line').classList.remove('show', 'draw');
     }
 
+    let confettiRaf = null;
+
+    function cancelConfetti() {
+      if (confettiRaf !== null) cancelAnimationFrame(confettiRaf);
+      confettiRaf = null;
+      const canvas = document.getElementById('confetti');
+      const c = canvas.getContext && canvas.getContext('2d');
+      if (c) c.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.style.display = 'none';
+    }
+
     function launchConfetti(durationMs) {
+      cancelConfetti();
       fx('confetti');
       const canvas = document.getElementById('confetti');
       const ctx2d = canvas.getContext && canvas.getContext('2d');
@@ -569,13 +581,14 @@
           ctx2d.restore();
         }
         if (now - start < durationMs) {
-          requestAnimationFrame(frame);
+          confettiRaf = requestAnimationFrame(frame);
         } else {
+          confettiRaf = null;
           ctx2d.clearRect(0, 0, canvas.width, canvas.height);
           canvas.style.display = 'none';
         }
       }
-      requestAnimationFrame(frame);
+      confettiRaf = requestAnimationFrame(frame);
     }
 
     function sendToServer(payload) {
@@ -649,6 +662,8 @@
 
     function requestNewGame() {
       document.getElementById('winner-overlay').classList.remove('show');
+      clearTimeout(resultTimeout);
+      cancelConfetti();
       clearWinLine();
       sendToServer({
         service: 'caro',
@@ -773,6 +788,7 @@
           updateScores();
           updateTurn(data.next_turn);
           clearTimeout(resultTimeout);
+          cancelConfetti();
           clearWinLine();
           document.getElementById('winner-overlay').classList.remove('show');
         } else if (data.status === 'update_board') {

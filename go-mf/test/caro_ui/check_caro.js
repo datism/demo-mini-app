@@ -159,6 +159,17 @@ scenario('new-game-clears-win', async (page) => {
     !(await page.$eval('#winner-overlay', (o) => o.classList.contains('show'))));
 });
 
+scenario('new-game-during-delay', async (page) => {
+  await send(page, gameStart('X'));
+  await send(page, winMessage());
+  await page.waitForTimeout(300);
+  await page.click('#header-new-game-btn');
+  await page.waitForTimeout(1200);
+  check('result card stays hidden', !(await page.$eval('#winner-overlay', (o) => o.classList.contains('show'))));
+  const fx = await page.evaluate(() => window.__fx || []);
+  check('no confetti after early new game', !fx.includes('confetti'), fx.join(','));
+});
+
 // ---------------------------------------------------------------- runner
 
 (async () => {
