@@ -64,7 +64,9 @@ type DCASServer struct {
 	games                map[string]*CaroGame       // call_id -> game state
 	interworkingSessions map[string]string          // session_id -> legacy peer CalledIdentity
 	mu                   sync.RWMutex
-	caroMu               sync.Mutex                 // dedicated mutex for caro state race conditions
+	caroMu               sync.Mutex                   // dedicated mutex for caro state race conditions
+	caroTimers           map[string]*time.Timer       // call_id -> pending turn timer, guarded by caroMu
+	caroTimeoutFn        func(callID string, seq int) // nil = s.caroOnTimeout; overridden in tests
 }
 
 func NewDCASServer(httpAddr, tcpAddr, dcsfAddr string) *DCASServer {
@@ -96,6 +98,7 @@ func NewDCASServer(httpAddr, tcpAddr, dcsfAddr string) *DCASServer {
 		callSessions:         make(map[string][]string),
 		games:                make(map[string]*CaroGame),
 		interworkingSessions: make(map[string]string),
+		caroTimers:           make(map[string]*time.Timer),
 	}
 }
 

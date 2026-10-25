@@ -28,18 +28,18 @@ var caroErrorMessages = []string{caroErrGameOver, caroErrBoardFull, caroErrNotYo
 var CaroTurnTimeout = 20 * time.Second
 
 type CaroGame struct {
-	Board     [CaroBoardSize][CaroBoardSize]string
-	Turn      string // "X" or "O"
-	GameOver  bool
-	Winner    string
-	SessionID string
-	ScoreX    int
-	ScoreO    int
-	Status    string
-	PlayerX   string
-	PlayerO   string
-	MoveCount int
-	WinCells  [][2]int
+	Board         [CaroBoardSize][CaroBoardSize]string
+	Turn          string // "X" or "O"
+	GameOver      bool
+	Winner        string
+	SessionID     string
+	ScoreX        int
+	ScoreO        int
+	Status        string
+	PlayerX       string
+	PlayerO       string
+	MoveCount     int
+	WinCells      [][2]int
 	TurnSeq       int   // incremented on every turn change; guards stale timers
 	TurnStartedAt int64 // unix ms when the current turn began
 }
@@ -105,6 +105,7 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 	// Preserve scores and players from previous game
 	var prevScoreX, prevScoreO int
 	var prevPlayerX, prevPlayerO string
+	var prevTurnSeq int
 	prevGameVal, err := getFromRedis("caro:game:" + callID)
 	if err == nil && prevGameVal != "" {
 		var prevGame CaroGame
@@ -113,6 +114,7 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 			prevScoreO = prevGame.ScoreO
 			prevPlayerX = prevGame.PlayerX
 			prevPlayerO = prevGame.PlayerO
+			prevTurnSeq = prevGame.TurnSeq
 		}
 	}
 
@@ -125,6 +127,7 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 
 	game.PlayerX = prevPlayerX
 	game.PlayerO = prevPlayerO
+	game.TurnSeq = prevTurnSeq
 
 	// Clean up stale players
 	if game.PlayerX != "" && !containsString(sessions, game.PlayerX) {
@@ -150,8 +153,10 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 		}
 	}
 
+	startCaroTurn(game, time.Now())
 	gameBytes, _ := json.Marshal(game)
 	setToRedis("caro:game:"+callID, string(gameBytes))
+	s.armCaroTimer(callID, game.TurnSeq, CaroTurnTimeout)
 
 	log.Printf("[DCAS-CARO] New game created in Redis for CallID=%s. PlayerX=%s, PlayerO=%s, Score: X=%d O=%d",
 		callID, game.PlayerX, game.PlayerO, game.ScoreX, game.ScoreO)
@@ -165,13 +170,14 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 			continue // Don't send if not in the game yet
 		}
 		resp := map[string]interface{}{
-			"service":     "caro",
-			"status":      "game_start",
-			"your_symbol": symbol,
-			"next_turn":   "X",
-			"board":       s.boardToSlice(&game.Board),
-			"score_x":     game.ScoreX,
-			"score_o":     game.ScoreO,
+			"service":      "caro",
+			"status":       "game_start",
+			"your_symbol":  symbol,
+			"next_turn":    "X",
+			"board":        s.boardToSlice(&game.Board),
+			"score_x":      game.ScoreX,
+			"score_o":      game.ScoreO,
+			"turn_ms_left": CaroTurnTimeout.Milliseconds(),
 		}
 		s.sendToSession(sid, "1000", resp)
 		s.sendToSession(sid, "1001", resp)
@@ -218,6 +224,7 @@ func (s *DCASServer) checkLateJoinCaro(callID, sessionID string) {
 	if changed {
 		gameBytes, _ := json.Marshal(&game)
 		setToRedis("caro:game:"+callID, string(gameBytes))
+		s.caroEnsureTimer(callID, &game, time.Now())
 		log.Printf("[DCAS-CARO] Late-join rebind. PlayerX=%s, PlayerO=%s for CallID=%s", game.PlayerX, game.PlayerO, callID)
 
 		// Broadcast update to all sessions
@@ -229,13 +236,14 @@ func (s *DCASServer) checkLateJoinCaro(callID, sessionID string) {
 				continue
 			}
 			resp := map[string]interface{}{
-				"service":     "caro",
-				"status":      "game_start",
-				"your_symbol": symbol,
-				"next_turn":   game.Turn,
-				"board":       s.boardToSlice(&game.Board),
-				"score_x":     game.ScoreX,
-				"score_o":     game.ScoreO,
+				"service":      "caro",
+				"status":       "game_start",
+				"your_symbol":  symbol,
+				"next_turn":    game.Turn,
+				"board":        s.boardToSlice(&game.Board),
+				"score_x":      game.ScoreX,
+				"score_o":      game.ScoreO,
+				"turn_ms_left": caroTurnMsLeft(&game, time.Now()),
 			}
 			s.sendToSession(sid, "1000", resp)
 			s.sendToSession(sid, "1001", resp)
@@ -328,11 +336,17 @@ func (s *DCASServer) caroMakeMove(callID, sessionID string, row, col int) {
 	}
 	if winner == "" && !draw {
 		game.Turn = nextTurn
+		startCaroTurn(&game, time.Now())
 	}
 
 	// Save back to Redis
 	updatedGameBytes, _ := json.Marshal(&game)
 	setToRedis("caro:game:"+callID, string(updatedGameBytes))
+	if winner == "" && !draw {
+		s.armCaroTimer(callID, game.TurnSeq, CaroTurnTimeout)
+	} else {
+		s.stopCaroTimer(callID)
+	}
 
 	sessions := s.getAllCallSessions(callID)
 	boardSlice := s.boardToSlice(&game.Board)
@@ -354,16 +368,17 @@ func (s *DCASServer) caroMakeMove(callID, sessionID string, row, col int) {
 
 	// Broadcast update to all sessions
 	resp := map[string]interface{}{
-		"service":    "caro",
-		"status":     "update_board",
-		"board":      boardSlice,
-		"last_move":  map[string]interface{}{"row": row, "col": col, "player": playerSymbol},
-		"next_turn":  nextTurn,
-		"move_count": moveCount,
-		"score_x":    scoreX,
-		"score_o":    scoreO,
-		"winner":     winner,
-		"draw":       draw,
+		"service":      "caro",
+		"status":       "update_board",
+		"board":        boardSlice,
+		"last_move":    map[string]interface{}{"row": row, "col": col, "player": playerSymbol},
+		"next_turn":    nextTurn,
+		"move_count":   moveCount,
+		"score_x":      scoreX,
+		"score_o":      scoreO,
+		"winner":       winner,
+		"draw":         draw,
+		"turn_ms_left": caroTurnMsLeft(&game, time.Now()),
 	}
 	if len(winCells) > 0 {
 		resp["win_cells"] = winCells
@@ -461,6 +476,95 @@ func caroTurnMsLeft(game *CaroGame, now time.Time) int64 {
 	return caroRemaining(game, now).Milliseconds()
 }
 
+// armCaroTimer (re)starts the turn timer for a call. Caller must hold caroMu.
+func (s *DCASServer) armCaroTimer(callID string, seq int, d time.Duration) {
+	if s.caroTimers == nil {
+		s.caroTimers = make(map[string]*time.Timer)
+	}
+	s.stopCaroTimer(callID)
+	fire := s.caroTimeoutFn
+	if fire == nil {
+		fire = s.caroOnTimeout
+	}
+	s.caroTimers[callID] = time.AfterFunc(d, func() { fire(callID, seq) })
+}
+
+// stopCaroTimer cancels the pending turn timer for a call. Caller must hold caroMu.
+func (s *DCASServer) stopCaroTimer(callID string) {
+	if t, ok := s.caroTimers[callID]; ok {
+		t.Stop()
+		delete(s.caroTimers, callID)
+	}
+}
+
+// caroEnsureTimer re-arms the turn timer for a game in progress when none is
+// pending (e.g. after a DCAS restart). Caller must hold caroMu.
+func (s *DCASServer) caroEnsureTimer(callID string, game *CaroGame, now time.Time) {
+	if game.Status != "playing" {
+		return
+	}
+	if _, ok := s.caroTimers[callID]; ok {
+		return
+	}
+	s.armCaroTimer(callID, game.TurnSeq, caroRemaining(game, now))
+}
+
+// caroOnTimeout runs when a player did not move within CaroTurnTimeout:
+// the turn passes to the opponent and both players are notified.
+func (s *DCASServer) caroOnTimeout(callID string, seq int) {
+	s.caroMu.Lock()
+	defer s.caroMu.Unlock()
+
+	gameVal, err := getFromRedis("caro:game:" + callID)
+	if err != nil {
+		log.Printf("[DCAS-CARO] Turn timeout for CallID=%s: Redis read failed: %v", callID, err)
+		return
+	}
+	sessions := s.getAllCallSessions(callID)
+	if gameVal == "" || len(sessions) == 0 {
+		log.Printf("[DCAS-CARO] Turn timeout for CallID=%s: game ended or no sessions, dropping timer", callID)
+		s.stopCaroTimer(callID)
+		return
+	}
+
+	var game CaroGame
+	if err := json.Unmarshal([]byte(gameVal), &game); err != nil {
+		log.Printf("[DCAS-CARO] Turn timeout for CallID=%s: parse game failed: %v", callID, err)
+		return
+	}
+
+	timedOut := game.Turn
+	if !applyCaroTimeout(&game, seq, time.Now()) {
+		return // a move or new game already advanced the turn
+	}
+
+	gameBytes, _ := json.Marshal(&game)
+	setToRedis("caro:game:"+callID, string(gameBytes))
+	log.Printf("[DCAS-CARO] Turn timeout: %s ran out of time, turn passes to %s (CallID=%s seq=%d)",
+		timedOut, game.Turn, callID, game.TurnSeq)
+
+	resp := map[string]interface{}{
+		"service":      "caro",
+		"status":       "update_board",
+		"board":        s.boardToSlice(&game.Board),
+		"next_turn":    game.Turn,
+		"move_count":   game.MoveCount,
+		"score_x":      game.ScoreX,
+		"score_o":      game.ScoreO,
+		"winner":       "",
+		"draw":         false,
+		"timeout":      true,
+		"timed_out":    timedOut,
+		"turn_ms_left": CaroTurnTimeout.Milliseconds(),
+	}
+	for _, sid := range sessions {
+		s.sendToSession(sid, "1000", resp)
+		s.sendToSession(sid, "1001", resp)
+	}
+
+	s.armCaroTimer(callID, game.TurnSeq, CaroTurnTimeout)
+}
+
 func (s *DCASServer) sendCaroError(sessionID, message string) {
 	resp := map[string]interface{}{
 		"service": "caro",
@@ -508,6 +612,7 @@ func (s *DCASServer) caroSyncState(callID, sessionID string) {
 		gameBytes, _ := json.Marshal(&game)
 		setToRedis("caro:game:"+callID, string(gameBytes))
 	}
+	s.caroEnsureTimer(callID, &game, time.Now())
 
 	playerSymbol := "X"
 	if sessionID == game.PlayerO {
@@ -515,13 +620,14 @@ func (s *DCASServer) caroSyncState(callID, sessionID string) {
 	}
 
 	resp := map[string]interface{}{
-		"service":     "caro",
-		"status":      "game_start",
-		"your_symbol": playerSymbol,
-		"next_turn":   game.Turn,
-		"board":       s.boardToSlice(&game.Board),
-		"score_x":     game.ScoreX,
-		"score_o":     game.ScoreO,
+		"service":      "caro",
+		"status":       "game_start",
+		"your_symbol":  playerSymbol,
+		"next_turn":    game.Turn,
+		"board":        s.boardToSlice(&game.Board),
+		"score_x":      game.ScoreX,
+		"score_o":      game.ScoreO,
+		"turn_ms_left": caroTurnMsLeft(&game, time.Now()),
 	}
 
 	s.sendToSession(sessionID, "1000", resp)

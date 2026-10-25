@@ -117,3 +117,79 @@ func TestCaroTurnMsLeft(t *testing.T) {
 		t.Fatalf("game over: got %d want 0", got)
 	}
 }
+
+func newTestCaroServer() *DCASServer {
+	return &DCASServer{caroTimers: make(map[string]*time.Timer)}
+}
+
+func TestArmCaroTimerFiresWithSeq(t *testing.T) {
+	s := newTestCaroServer()
+	fired := make(chan int, 2)
+	s.caroTimeoutFn = func(callID string, seq int) { fired <- seq }
+	s.armCaroTimer("call1", 7, 10*time.Millisecond)
+	select {
+	case seq := <-fired:
+		if seq != 7 {
+			t.Fatalf("fired with seq %d, want 7", seq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timer did not fire")
+	}
+}
+
+func TestArmCaroTimerReplacesPrevious(t *testing.T) {
+	s := newTestCaroServer()
+	fired := make(chan int, 2)
+	s.caroTimeoutFn = func(callID string, seq int) { fired <- seq }
+	s.armCaroTimer("call1", 1, 30*time.Millisecond)
+	s.armCaroTimer("call1", 2, 10*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	close(fired)
+	var got []int
+	for seq := range fired {
+		got = append(got, seq)
+	}
+	if len(got) != 1 || got[0] != 2 {
+		t.Fatalf("fired %v, want only [2]", got)
+	}
+}
+
+func TestStopCaroTimer(t *testing.T) {
+	s := newTestCaroServer()
+	fired := make(chan int, 1)
+	s.caroTimeoutFn = func(callID string, seq int) { fired <- seq }
+	s.armCaroTimer("call1", 1, 20*time.Millisecond)
+	s.stopCaroTimer("call1")
+	if _, ok := s.caroTimers["call1"]; ok {
+		t.Fatal("timer entry not removed")
+	}
+	select {
+	case <-fired:
+		t.Fatal("stopped timer fired")
+	case <-time.After(60 * time.Millisecond):
+	}
+}
+
+func TestCaroEnsureTimer(t *testing.T) {
+	now := time.Now()
+	s := newTestCaroServer()
+	s.caroTimeoutFn = func(string, int) {}
+
+	over := &CaroGame{Status: "win_X", TurnSeq: 1, TurnStartedAt: now.UnixMilli()}
+	s.caroEnsureTimer("call1", over, now)
+	if _, ok := s.caroTimers["call1"]; ok {
+		t.Fatal("must not arm a timer for a finished game")
+	}
+
+	playing := &CaroGame{Status: "playing", TurnSeq: 1, TurnStartedAt: now.UnixMilli()}
+	s.caroEnsureTimer("call1", playing, now)
+	first, ok := s.caroTimers["call1"]
+	if !ok {
+		t.Fatal("expected a timer for a game in progress")
+	}
+	s.caroEnsureTimer("call1", playing, now)
+	if s.caroTimers["call1"] != first {
+		t.Fatal("must keep an already pending timer")
+	}
+	s.stopCaroTimer("call1")
+}
