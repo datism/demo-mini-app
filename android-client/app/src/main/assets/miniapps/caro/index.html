@@ -6,6 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Caro Game</title>
   <style>
+    :root {
+      /* Clear area above the board so the remote face stays visible. Tune on device. */
+      --video-gap: 25vh;
+      --board-size: min(92vw, calc(100vh - var(--video-gap) - 76px));
+      --x-color: #60a5fa;
+      --o-color: #f87171;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -25,56 +33,116 @@
 
     #game-container {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      inset: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #video-gap {
+      flex: 0 0 var(--video-gap);
     }
 
     #game-header {
+      width: 100%;
+      padding: 0 12px 6px;
       color: white;
       text-align: center;
-      margin-bottom: 12px;
-    }
-
-    #game-header h2 {
-      font-size: 20px;
-      font-weight: 700;
-      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
 
     #status-bar {
       display: flex;
-      gap: 16px;
-      margin-top: 6px;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .score-pill {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.55);
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      transition: background 0.2s, transform 0.2s;
     }
 
-    .score-item {
-      padding: 4px 12px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.15);
-    }
-
-    .score-item.active {
-      background: rgba(59, 130, 246, 0.6);
+    .score-pill.active {
+      background: rgba(37, 99, 235, 0.7);
+      transform: scale(1.06);
       font-weight: 700;
     }
 
+    .pill-symbol {
+      font-weight: 800;
+    }
+
+    .pill-symbol.x {
+      color: var(--x-color);
+    }
+
+    .pill-symbol.o {
+      color: var(--o-color);
+    }
+
+    .pill-score {
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .vs {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 12px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    #header-new-game-btn {
+      margin-left: 6px;
+      padding: 5px 12px;
+      border-radius: 16px;
+      border: none;
+      background: rgba(59, 130, 246, 0.85);
+      color: white;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
     #turn-indicator {
-      color: #fbbf24;
-      font-size: 14px;
-      font-weight: 600;
       margin-top: 4px;
-      min-height: 20px;
+      min-height: 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fbbf24;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    }
+
+    #turn-timer {
+      margin-left: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #panel {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 10px;
+      background: rgba(2, 6, 23, 0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 20px 20px 0 0;
+    }
+
+    #board-wrap {
+      position: relative;
+      width: var(--board-size);
+      height: var(--board-size);
     }
 
     #board {
@@ -82,20 +150,20 @@
       grid-template-columns: repeat(9, 1fr);
       grid-template-rows: repeat(9, 1fr);
       gap: 1px;
-      width: min(85vw, 85vh - 120px);
-      height: min(85vw, 85vh - 120px);
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 10px;
       overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
     }
 
     .cell {
-      background: rgba(15, 23, 42, 0.9);
+      background: rgba(15, 23, 42, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: clamp(16px, 4vw, 28px);
+      font-size: calc(var(--board-size) / 13);
       font-weight: 800;
       cursor: pointer;
       transition: background 0.15s;
@@ -103,19 +171,25 @@
     }
 
     .cell:active {
-      background: rgba(30, 41, 59, 0.9);
+      background: rgba(51, 65, 85, 0.55);
+    }
+
+    .glyph {
+      display: inline-block;
     }
 
     .cell.x {
-      color: #3b82f6;
+      color: var(--x-color);
+      text-shadow: 0 0 8px rgba(96, 165, 250, 0.8);
     }
 
     .cell.o {
-      color: #ef4444;
+      color: var(--o-color);
+      text-shadow: 0 0 8px rgba(248, 113, 113, 0.8);
     }
 
     .cell.last-move {
-      background: rgba(59, 130, 246, 0.25);
+      box-shadow: inset 0 0 0 2px rgba(251, 191, 36, 0.85);
     }
 
     .cell.win {
@@ -136,11 +210,8 @@
     #winner-overlay {
       display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.7);
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
       z-index: 200;
       flex-direction: column;
       align-items: center;
@@ -170,28 +241,222 @@
       cursor: pointer;
       box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
     }
+    .cell.pop .glyph {
+      animation: pop 0.2s ease-out;
+    }
+
+    @keyframes pop {
+      0% {
+        transform: scale(0);
+      }
+
+      70% {
+        transform: scale(1.15);
+      }
+
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    #board-wrap.shake {
+      animation: shake 0.3s ease-in-out;
+    }
+
+    @keyframes shake {
+
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+
+      20%,
+      60% {
+        transform: translateX(-6px);
+      }
+
+      40%,
+      80% {
+        transform: translateX(6px);
+      }
+    }
+
+    #toast {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translate(-50%, 20px);
+      max-width: 90vw;
+      padding: 10px 18px;
+      border-radius: 20px;
+      background: rgba(15, 23, 42, 0.92);
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 300;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    #win-line {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: none;
+    }
+
+    #win-line.show {
+      display: block;
+    }
+
+    #win-line line {
+      stroke: #fde047;
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      filter: drop-shadow(0 0 6px rgba(253, 224, 71, 0.9));
+    }
+
+    #win-line.draw line {
+      animation: drawLine 0.4s ease-out forwards;
+    }
+
+    @keyframes drawLine {
+      to {
+        stroke-dashoffset: 0;
+      }
+    }
+
+    #confetti {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 250;
+      display: none;
+    }
+
+    #winner-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 32px;
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.9);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      animation: cardIn 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+    }
+
+    #winner-card.lose {
+      animation: none;
+      background: rgba(30, 41, 59, 0.9);
+    }
+
+    #winner-score {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 15px;
+      margin-bottom: 16px;
+    }
+
+    @keyframes cardIn {
+      from {
+        transform: scale(0.6);
+        opacity: 0;
+      }
+
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    .timer-ring {
+      position: absolute;
+      inset: -3px;
+      width: calc(100% + 6px);
+      height: calc(100% + 6px);
+      pointer-events: none;
+      overflow: visible;
+      display: none;
+    }
+
+    .score-pill.active.timing .timer-ring {
+      display: block;
+    }
+
+    .timer-ring rect {
+      x: 1.5px;
+      y: 1.5px;
+      width: calc(100% - 3px);
+      height: calc(100% - 3px);
+      rx: 18px;
+      fill: none;
+      stroke: #22c55e;
+      stroke-width: 3;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 0;
+      transition: stroke 0.3s;
+    }
+
+    .timer-ring.warn rect {
+      stroke: #f59e0b;
+    }
+
+    .timer-ring.danger rect {
+      stroke: #ef4444;
+    }
   </style>
 </head>
 
 <body>
   <div id="game-container">
+    <div id="video-gap"></div>
     <div id="game-header">
-      <h2>🎮 Caro 9×9</h2>
       <div id="status-bar">
-        <span class="score-item" id="score-x">X: 0</span>
-        <span class="score-item" id="score-o">O: 0</span>
-        <button id="header-new-game-btn" onclick="requestNewGame()" style="padding: 4px 12px; border-radius: 12px; background: rgba(59, 130, 246, 0.8); color: white; border: none; cursor: pointer; font-weight: bold; margin-left: auto;">Ván mới</button>
+        <div class="score-pill" id="pill-me">
+          <svg class="timer-ring"><rect pathLength="100"></rect></svg>
+          <span class="pill-symbol x" id="me-symbol">X</span>
+          <span class="pill-label">Bạn</span>
+          <span class="pill-score" id="me-score">0</span>
+        </div>
+        <span class="vs">vs</span>
+        <div class="score-pill" id="pill-opp">
+          <svg class="timer-ring"><rect pathLength="100"></rect></svg>
+          <span class="pill-score" id="opp-score">0</span>
+          <span class="pill-label">Đối thủ</span>
+          <span class="pill-symbol o" id="opp-symbol">O</span>
+        </div>
+        <button id="header-new-game-btn" onclick="requestNewGame()">Ván mới</button>
       </div>
-      <div id="turn-indicator">Đang chờ kết nối...</div>
+      <div id="turn-indicator"><span id="turn-text">Đang chờ kết nối...</span><span id="turn-timer"></span></div>
     </div>
-    <div id="board"></div>
+    <div id="panel">
+      <div id="board-wrap">
+        <div id="board"></div>
+        <svg id="win-line" viewBox="0 0 900 900" preserveAspectRatio="none">
+          <line pathLength="100" x1="0" y1="0" x2="0" y2="0"></line>
+        </svg>
+      </div>
+    </div>
   </div>
 
   <div id="winner-overlay">
-    <div id="winner-text"></div>
-    <button id="new-game-btn" onclick="requestNewGame()">Ván mới</button>
+    <div id="winner-card">
+      <div id="winner-text"></div>
+      <div id="winner-score"></div>
+      <button id="new-game-btn" onclick="requestNewGame()">Ván mới</button>
+    </div>
   </div>
+  <canvas id="confetti"></canvas>
 
+  <div id="toast"></div>
   <script>
     const BOARD_SIZE = 9;
     let mySymbol = 'X';
@@ -202,6 +467,231 @@
 
     let myScore = 0;
     let opponentScore = 0;
+
+    // Last state confirmed by DCAS, used to roll back optimistic moves the server rejects.
+    let lastServerBoard = null;
+    let lastServerMove = null;
+    let lastServerTurn = null;
+
+    // ---- Effects (sound, vibration, toast). All optional: silently skipped if unsupported.
+    function fx(name) {
+      (window.__fx = window.__fx || []).push(name);
+    }
+
+    let audioCtx = null;
+    function getAudio() {
+      if (!audioCtx) {
+        try {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+          audioCtx = null;
+        }
+      }
+      return audioCtx;
+    }
+
+    function playTone(freq, durMs, type, gain) {
+      fx('tone:' + freq);
+      const ctx = getAudio();
+      if (!ctx) return;
+      try {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(gain || 0.2, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durMs / 1000);
+        osc.connect(g).connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + durMs / 1000);
+      } catch (e) {
+        // audio not available
+      }
+    }
+
+    function buzz(pattern) {
+      fx('buzz:' + JSON.stringify(pattern));
+      try {
+        if (navigator.vibrate) navigator.vibrate(pattern);
+      } catch (e) {
+        // vibration not available
+      }
+    }
+
+    let toastTimeout = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function shakeBoard() {
+      const wrap = document.getElementById('board-wrap');
+      wrap.classList.remove('shake');
+      void wrap.offsetWidth; // restart the animation
+      wrap.classList.add('shake');
+    }
+
+    function rejectLocally(msg) {
+      showToast(msg);
+      shakeBoard();
+      buzz([30, 60, 30]);
+    }
+
+    function onServerError(message) {
+      rejectLocally(message || 'Nước đi không hợp lệ.');
+      if (lastServerBoard) renderBoard(lastServerBoard, lastServerMove, false);
+      if (lastServerTurn) updateTurn(lastServerTurn);
+      if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now(), savedTickSecond);
+      else stopTurnTimer();
+      savedTurnDeadline = 0;
+    }
+
+    // ---- Win celebration
+    const RESULT_DELAY_MS = 1000; // 400ms line draw + 600ms pause
+    let resultTimeout = null;
+
+    function drawWinLine(cells) {
+      if (!cells || cells.length < 2) return;
+      // DCAS sends the cells unordered; sorting by row then column gives the two ends of any straight line.
+      const sorted = cells.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const svg = document.getElementById('win-line');
+      const line = svg.querySelector('line');
+      line.setAttribute('x1', (first[1] + 0.5) * 100);
+      line.setAttribute('y1', (first[0] + 0.5) * 100);
+      line.setAttribute('x2', (last[1] + 0.5) * 100);
+      line.setAttribute('y2', (last[0] + 0.5) * 100);
+      svg.classList.remove('draw');
+      void svg.getBoundingClientRect(); // restart the animation
+      svg.classList.add('show', 'draw');
+    }
+
+    function clearWinLine() {
+      document.getElementById('win-line').classList.remove('show', 'draw');
+    }
+
+    let confettiRaf = null;
+
+    function cancelConfetti() {
+      if (confettiRaf !== null) cancelAnimationFrame(confettiRaf);
+      confettiRaf = null;
+      const canvas = document.getElementById('confetti');
+      const c = canvas.getContext && canvas.getContext('2d');
+      if (c) c.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.style.display = 'none';
+    }
+
+    function launchConfetti(durationMs) {
+      cancelConfetti();
+      fx('confetti');
+      const canvas = document.getElementById('confetti');
+      const ctx2d = canvas.getContext && canvas.getContext('2d');
+      if (!ctx2d) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.display = 'block';
+      const colors = ['#f87171', '#60a5fa', '#fbbf24', '#34d399', '#a78bfa', '#f472b6'];
+      const parts = Array.from({ length: 120 }, () => ({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * canvas.height * 0.5,
+        vx: (Math.random() - 0.5) * 2,
+        vy: 2 + Math.random() * 3,
+        size: 4 + Math.random() * 5,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      }));
+      const start = performance.now();
+      function frame(now) {
+        ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+        for (const p of parts) {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.04;
+          p.rot += p.vr;
+          ctx2d.save();
+          ctx2d.translate(p.x, p.y);
+          ctx2d.rotate(p.rot);
+          ctx2d.fillStyle = p.color;
+          ctx2d.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+          ctx2d.restore();
+        }
+        if (now - start < durationMs) {
+          confettiRaf = requestAnimationFrame(frame);
+        } else {
+          confettiRaf = null;
+          ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.style.display = 'none';
+        }
+      }
+      confettiRaf = requestAnimationFrame(frame);
+    }
+
+    // ---- Turn timer (display only; DCAS decides when a turn times out)
+    const TURN_TOTAL_MS = 20000;
+    let turnDeadline = 0;
+    let timerRaf = 0;
+    let lastTickSecond = -1;
+    let savedTurnDeadline = 0; // restored if the server rejects an optimistic move
+    let savedTickSecond = -1;
+
+    function startTurnTimer(msLeft, resumeTickSecond) {
+      stopTurnTimer();
+      if (!msLeft || msLeft <= 0) return;
+      turnDeadline = performance.now() + msLeft;
+      // A restored countdown keeps its last ticked second so it does not tick twice.
+      lastTickSecond = resumeTickSecond === undefined ? -1 : resumeTickSecond;
+      document.querySelectorAll('.score-pill').forEach(p => p.classList.add('timing'));
+      tickTimer();
+    }
+
+    function stopTurnTimer() {
+      if (timerRaf) cancelAnimationFrame(timerRaf);
+      timerRaf = 0;
+      turnDeadline = 0;
+      document.querySelectorAll('.score-pill').forEach(p => p.classList.remove('timing'));
+      document.querySelectorAll('.timer-ring').forEach(r => {
+        r.classList.remove('warn', 'danger');
+        r.querySelector('rect').style.strokeDashoffset = '0';
+      });
+      document.getElementById('turn-timer').textContent = '';
+    }
+
+    function tickTimer() {
+      const left = Math.max(0, turnDeadline - performance.now());
+      const frac = Math.min(1, left / TURN_TOTAL_MS);
+      const secs = Math.ceil(left / 1000);
+      document.querySelectorAll('.timer-ring').forEach(r => {
+        r.querySelector('rect').style.strokeDashoffset = String(100 * (1 - frac));
+        r.classList.toggle('warn', secs <= 10 && secs > 5);
+        r.classList.toggle('danger', secs <= 5);
+      });
+      document.getElementById('turn-timer').textContent = '· ' + secs + 's';
+      if (secs !== lastTickSecond) {
+        if (secs > 0 && secs <= 3) {
+          playTone(1200, 50, 'square', 0.05);
+          fx('tick');
+        }
+        lastTickSecond = secs;
+      }
+      timerRaf = left > 0 ? requestAnimationFrame(tickTimer) : 0;
+    }
+
+    function sendToServer(payload) {
+      if (window.IMSDataChannelBridge) {
+        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
+      } else if (window.AndroidBridge) {
+        window.AndroidBridge.sendData(JSON.stringify(payload));
+      }
+    }
+
+    function cellAt(row, col) {
+      return document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+    }
 
     // Initialize empty board
     function initBoard() {
@@ -219,104 +709,160 @@
       }
     }
 
+    function setCell(cell, val) {
+      cell.innerHTML = val ? '<span class="glyph">' + val + '</span>' : '';
+      cell.className = 'cell';
+      if (val === 'X') cell.classList.add('x');
+      if (val === 'O') cell.classList.add('o');
+    }
+
     function onCellClick(row, col) {
-      if (!gameActive || currentTurn !== mySymbol) return;
-      if (boardState[row] && boardState[row][col] !== '') return;
+      if (!gameActive) return;
+      if (currentTurn !== mySymbol) {
+        rejectLocally('Chưa đến lượt của bạn.');
+        return;
+      }
+      if (boardState[row] && boardState[row][col] !== '') {
+        rejectLocally('Ô này đã có quân.');
+        return;
+      }
 
       // Optimistic UI Update: Make it feel instant and hide network latency!
       boardState[row][col] = mySymbol;
-      
-      const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+
+      const cell = cellAt(row, col);
       if (cell) {
-        cell.textContent = mySymbol;
-        cell.classList.add(mySymbol.toLowerCase());
+        setCell(cell, mySymbol);
         // Remove last-move from other cells, add to this one optimistically
         document.querySelectorAll('.cell.last-move').forEach(c => c.classList.remove('last-move'));
-        cell.classList.add('last-move');
+        cell.classList.add('last-move', 'pop');
       }
-      
+      playTone(880, 90, 'triangle', 0.25);
+      buzz(25);
+
       updateTurn(mySymbol === 'X' ? 'O' : 'X');
 
-      const payload = {
+      savedTurnDeadline = turnDeadline;
+      savedTickSecond = lastTickSecond;
+      startTurnTimer(TURN_TOTAL_MS);
+      sendToServer({
         service: 'caro',
         action: 'move',
         row: row,
         col: col
-      };
-
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      });
     }
 
     function requestNewGame() {
       document.getElementById('winner-overlay').classList.remove('show');
-      const payload = {
+      clearTimeout(resultTimeout);
+      cancelConfetti();
+      clearWinLine();
+      sendToServer({
         service: 'caro',
         action: 'new_game'
-      };
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      });
     }
 
-    function renderBoard(board, lastMove) {
-      boardState = board;
-      const cells = document.querySelectorAll('.cell');
-      cells.forEach(cell => {
+    function renderBoard(board, lastMove, popMove) {
+      boardState = board.map(row => row.slice());
+      document.querySelectorAll('.cell').forEach(cell => {
         const r = parseInt(cell.dataset.row);
         const c = parseInt(cell.dataset.col);
-        const val = board[r] ? board[r][c] : '';
-        cell.textContent = val;
-        cell.className = 'cell';
-        if (val === 'X') cell.classList.add('x');
-        if (val === 'O') cell.classList.add('o');
+        setCell(cell, board[r] ? board[r][c] : '');
         if (lastMove && lastMove.row === r && lastMove.col === c) {
           cell.classList.add('last-move');
+          if (popMove) cell.classList.add('pop');
         }
       });
     }
 
     function updateScores() {
-      const sx = document.getElementById('score-x');
-      const so = document.getElementById('score-o');
-      sx.textContent = 'Bạn: ' + myScore;
-      so.textContent = 'Đối thủ: ' + opponentScore;
-      sx.className = 'score-item active';
-      so.className = 'score-item';
+      const oppSymbol = mySymbol === 'X' ? 'O' : 'X';
+      document.getElementById('me-score').textContent = myScore;
+      document.getElementById('opp-score').textContent = opponentScore;
+      const meSym = document.getElementById('me-symbol');
+      meSym.textContent = mySymbol;
+      meSym.className = 'pill-symbol ' + mySymbol.toLowerCase();
+      const oppSym = document.getElementById('opp-symbol');
+      oppSym.textContent = oppSymbol;
+      oppSym.className = 'pill-symbol ' + oppSymbol.toLowerCase();
+    }
+
+    // Highlights the pill of the player whose turn it is (null = nobody).
+    function setActivePill(symbol) {
+      document.getElementById('pill-me').classList.toggle('active', symbol !== null && symbol === mySymbol);
+      document.getElementById('pill-opp').classList.toggle('active', symbol !== null && symbol !== mySymbol);
     }
 
     function updateTurn(nextTurn) {
       currentTurn = nextTurn;
       const indicator = document.getElementById('turn-indicator');
+      const text = document.getElementById('turn-text');
       if (nextTurn === mySymbol) {
-        indicator.textContent = '👉 Lượt của bạn (' + mySymbol + ')';
+        text.textContent = '👉 Lượt của bạn';
         indicator.style.color = '#22c55e';
       } else {
-        indicator.textContent = '⏳ Đợi đối thủ (' + nextTurn + ')...';
+        text.textContent = '⏳ Đợi đối thủ...';
         indicator.style.color = '#fbbf24';
       }
+      setActivePill(gameActive ? nextTurn : null);
     }
 
-    function showWinner(winner, isDraw) {
+    function showWinner(winner, isDraw, winCells) {
       gameActive = false;
+      setActivePill(null);
+      stopTurnTimer();
       const overlay = document.getElementById('winner-overlay');
+      const card = document.getElementById('winner-card');
       const text = document.getElementById('winner-text');
+      const iWon = !isDraw && winner === mySymbol;
+
       if (isDraw) {
-        text.textContent = '🤝 Hòa!';
+        text.textContent = '🤝 Hòa';
         text.style.color = '#94a3b8';
-      } else if (winner === mySymbol) {
+        card.className = 'draw';
+      } else if (iWon) {
         text.textContent = '🎉 Bạn thắng!';
         text.style.color = '#22c55e';
+        card.className = 'win';
       } else {
-        text.textContent = '😢 Bạn thua!';
-        text.style.color = '#ef4444';
+        text.textContent = 'Bạn thua 😅';
+        text.style.color = '#f87171';
+        card.className = 'lose';
       }
-      overlay.classList.add('show');
+      document.getElementById('winner-score').textContent = 'Bạn ' + myScore + ' – ' + opponentScore + ' Đối thủ';
+
+      if (!isDraw) drawWinLine(winCells);
+
+      clearTimeout(resultTimeout);
+      resultTimeout = setTimeout(() => {
+        overlay.classList.add('show');
+        if (iWon) {
+          launchConfetti(2500);
+          buzz([40, 60, 40, 60, 40]);
+          playTone(523, 120, 'triangle', 0.2);
+          setTimeout(() => playTone(659, 120, 'triangle', 0.2), 130);
+          setTimeout(() => playTone(784, 220, 'triangle', 0.2), 260);
+        }
+      }, isDraw ? 0 : RESULT_DELAY_MS);
+    }
+
+    function rememberServerState(data) {
+      lastServerBoard = data.board;
+      lastServerMove = data.last_move || null;
+      lastServerTurn = data.next_turn;
+    }
+
+    function applyScores(data) {
+      if (data.score_x === undefined || data.score_o === undefined) return;
+      if (mySymbol === 'X') {
+        myScore = data.score_x;
+        opponentScore = data.score_o;
+      } else {
+        myScore = data.score_o;
+        opponentScore = data.score_x;
+      }
     }
 
     // Called by native Android when ADC data arrives
@@ -330,41 +876,44 @@
           mySymbol = data.your_symbol || 'X';
           initialized = true;
           gameActive = true;
-          if (mySymbol === 'X') {
-            myScore = data.score_x || 0;
-            opponentScore = data.score_o || 0;
-          } else {
-            myScore = data.score_o || 0;
-            opponentScore = data.score_x || 0;
-          }
-          renderBoard(data.board, null);
+          applyScores(data);
+          rememberServerState(data);
+          renderBoard(data.board, null, false);
           updateScores();
           updateTurn(data.next_turn);
+          savedTurnDeadline = 0;
+          startTurnTimer(data.turn_ms_left);
+          clearTimeout(resultTimeout);
+          cancelConfetti();
+          clearWinLine();
           document.getElementById('winner-overlay').classList.remove('show');
         } else if (data.status === 'update_board') {
           if (!initialized) {
             console.log('[Caro] Ignoring update_board because not initialized yet.');
             return;
           }
-          renderBoard(data.board, data.last_move);
-          if (data.score_x !== undefined && data.score_o !== undefined) {
-            if (mySymbol === 'X') {
-              myScore = data.score_x;
-              opponentScore = data.score_o;
-            } else {
-              myScore = data.score_o;
-              opponentScore = data.score_x;
-            }
-          }
+          rememberServerState(data);
+          const opponentMoved = !!(data.last_move && data.last_move.player && data.last_move.player !== mySymbol);
+          renderBoard(data.board, data.last_move, opponentMoved);
+          if (opponentMoved) playTone(660, 90, 'triangle', 0.2);
+          applyScores(data);
+          updateScores();
           if (data.winner && data.winner !== '') {
-            showWinner(data.winner, false);
-            updateScores();
+            showWinner(data.winner, false, data.win_cells);
           } else if (data.draw) {
-            showWinner('', true);
+            showWinner('', true, null);
           } else {
             gameActive = true;
             updateTurn(data.next_turn);
+            savedTurnDeadline = 0;
+            startTurnTimer(data.turn_ms_left);
+            if (data.timeout) {
+              showToast(data.timed_out === mySymbol ? '⏰ Hết giờ! Bạn mất lượt' : 'Đối thủ hết giờ — đến lượt bạn');
+              buzz([60, 40, 60]);
+            }
           }
+        } else if (data.status === 'error') {
+          onServerError(data.message);
         }
       } catch (e) {
         console.error('[Caro] Parse error: ' + e.message);
@@ -378,18 +927,13 @@
     const MAX_SYNC_RETRIES = 15;
 
     function sendSyncState() {
-      const payload = { service: 'caro', action: 'sync_state' };
-      if (window.IMSDataChannelBridge) {
-        window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
-      } else if (window.AndroidBridge) {
-        window.AndroidBridge.sendData(JSON.stringify(payload));
-      }
+      sendToServer({ service: 'caro', action: 'sync_state' });
       console.log('[Caro] sync_state sent (attempt ' + (syncRetries + 1) + '/' + MAX_SYNC_RETRIES + ')');
     }
 
     window.onload = function () {
       initBoard();
-      
+
       // Request GSMA Data Channel creation (Triggers re-INVITE natively)
       if (window.ImsDcBridge) {
         window.ImsDcBridge.createDataChannel("caro");
@@ -397,7 +941,6 @@
         // Fallback for some JS bridges
         window._dsbridge.call("createDataChannel", "caro");
       }
-
 
       // Send initial sync_state immediately (may arrive before re-INVITE completes — harmless, will be retried)
       sendSyncState();

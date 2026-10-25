@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-10-25
+
+### Added & Enhanced
+- **Caro Mini-App Demo Upgrade:**
+  - New layout: board in a frosted bottom panel, remote video clearly visible in the top part of the screen (`caro/index.html`).
+  - Move feedback: pop animation, synthesized sound, vibration; rejected moves now shake the board and show a toast, with optimistic moves rolled back.
+  - Win celebration: animated winning line, confetti on the winner's phone, result card with score.
+  - 20 s turn timer enforced by DCAS (`caro_game.go`); turn passes to the opponent on timeout. New additive message fields `turn_ms_left`, `timeout`, `timed_out`.
+
+### Fixed
+- Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
+
 ## [16.0.0] - 2026-08-20
 
 ### Added & Enhanced
