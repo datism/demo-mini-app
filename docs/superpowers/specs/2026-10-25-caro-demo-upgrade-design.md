@@ -48,21 +48,21 @@ The WebView spans between the native top bar and the bottom call controls; the n
 - Remove the full-screen `rgba(0,0,0,0.75)` + blur background from `#game-container`; page background is transparent.
 - Bottom panel: rounded top corners, ~55% dark glass with `backdrop-filter: blur`.
 - Cells: ~35% opacity (was 90%); X/O glyphs get a glow (`text-shadow`) for contrast.
-- Board size: `min(92vw, available panel height)`; no scrolling at ~360x780 CSS px (Galaxy S24).
+- Board size: `min(92vw, available panel height)`; no scrolling in the WebView area of ~360x490 CSS px (Galaxy S24, between the native top bar and call controls). The clear video area height is a CSS variable `--video-gap` (default `25vh`) to tune on device.
 - Score pills sit at the bottom edge of the video area with a text shadow and a small dark backing for legibility on bright video.
 
 ## 3. Move feedback
 
-Moves remain **server-authoritative**: nothing is drawn until DCAS sends `update_board`.
+Moves remain **server-authoritative**, but the existing optimistic placement is kept: your own piece is drawn (with pop, sound and vibration) as soon as you tap. The client remembers the last board confirmed by DCAS and rolls back to it if the server answers with `status: "error"`.
 
-**On `update_board` with `last_move`:**
+**On own tap (optimistic) and on `update_board` with the opponent's `last_move`:**
 - Newly placed glyph animates scale 0 → 1.15 → 1 (~200 ms); last-move ring fades in.
 - Sound: short synthesized "tock" via Web Audio API (no audio files). Own move uses a slightly higher pitch than the opponent's move.
 - Vibration: `navigator.vibrate(25)` for own move. (`VIBRATE` permission already exists in `AndroidManifest.xml`.)
 - Web Audio context is created lazily on the first tap; WebView already sets `mediaPlaybackRequiresUserGesture = false`.
 
 **Rejected moves:**
-- Client handles `status: "error"` (today it is silently ignored): board shake (~300 ms), bottom toast with the server's `message`, `navigator.vibrate([30, 60, 30])`.
+- Client handles `status: "error"` (today it is silently ignored): board shake (~300 ms), bottom toast with the server's `message`, `navigator.vibrate([30, 60, 30])`, and rollback of the optimistic piece and turn to the last server state.
 - Client-side pre-check: tapping when it is not your turn, or on an occupied cell, shows the same toast/shake without sending to the server.
 - Server error strings rewritten in proper UTF-8 Vietnamese:
 
@@ -78,8 +78,8 @@ Moves remain **server-authoritative**: nothing is drawn until DCAS sends `update
 
 Triggered by `update_board` with non-empty `winner` (or `draw: true`).
 
-1. **Winning line:** an SVG line overlaid on the board, drawn across the winning cells with a stroke-dash animation (~400 ms). The server's `win_cells` are not ordered (forward cells then backward cells), so the client sorts them by row, then column (column descending for the anti-diagonal) and uses the first and last cell centres.
-2. **Confetti:** ~2.5 s canvas particle effect, ~40 lines, **winner's phone only**.
+1. **Winning line:** an SVG line overlaid on the board, drawn across the winning cells with a stroke-dash animation (~400 ms). The server's `win_cells` are not ordered (forward cells then backward cells), so the client sorts them by row, then column, and uses the first and last cell centres (this gives the two ends for every straight direction, including the anti-diagonal).
+2. **Confetti:** ~2.5 s canvas particle effect (~120 particles, ~40 lines of code), **winner's phone only**.
 3. **Result card** (existing `#winner-overlay`, restyled), shown 600 ms after the line:
    - Winner: "🎉 Bạn thắng!" + score, `navigator.vibrate([40, 60, 40, 60, 40])`.
    - Loser: "Bạn thua 😅" in a calmer style, no confetti.
@@ -170,8 +170,8 @@ func caroRemaining(game *CaroGame, now time.Time) time.Duration
 - Error-string guard: all `sendCaroError` messages are valid UTF-8 and contain none of `Ã`, `Ä`, `á»`.
 - Run: `go test ./internal/dcas/...` and `go vet ./internal/dcas/...`.
 
-### Headless page check (Playwright + pre-installed Chromium)
-- Load `caro/index.html` at 360x780, inject messages via `window.receiveData(...)`: `game_start` → move → `error` → timeout → win.
+### Headless page check (Playwright, installed in `go-mf/test/caro_ui`)
+- Load `caro/index.html` at 360x490, inject messages via `window.receiveData(...)`: `game_start` → move → `error` → timeout → win.
 - Screenshot each step; assert toast visible, ring colour changes, SVG win line present, result card shown.
 - Screenshots shared for layout review before device testing.
 
