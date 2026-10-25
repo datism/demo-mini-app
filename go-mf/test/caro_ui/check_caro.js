@@ -58,6 +58,50 @@ scenario('layout', async (page) => {
   check('my pill is active on my turn', await page.$eval('#pill-me', (p) => p.classList.contains('active')));
 });
 
+scenario('feedback', async (page) => {
+  await send(page, gameStart('X'));
+
+  // Own move: optimistic pop, tone, vibration, sent to server
+  await page.click('.cell[data-row="4"][data-col="4"]');
+  let fx = await page.evaluate(() => window.__fx || []);
+  check('own move plays tone 880', fx.includes('tone:880'), fx.join(','));
+  check('own move vibrates 25ms', fx.includes('buzz:25'), fx.join(','));
+  check('own move pops', await page.$eval('.cell[data-row="4"][data-col="4"]', (c) => c.classList.contains('pop')));
+  check('move sent to server', await page.evaluate(
+    () => window.__sent.some((m) => m.action === 'move' && m.row === 4 && m.col === 4)));
+
+  // Server rejects it: toast + shake + rollback
+  await send(page, { service: 'caro', status: 'error', message: 'Ô này đã có quân.' });
+  check('toast shows server message', (await page.textContent('#toast')).includes('Ô này đã có quân.'));
+  check('toast visible', await page.$eval('#toast', (t) => t.classList.contains('show')));
+  check('board shakes', await page.$eval('#board-wrap', (b) => b.classList.contains('shake')));
+  check('optimistic piece rolled back',
+    (await page.textContent('.cell[data-row="4"][data-col="4"]')).trim() === '');
+
+  // Opponent move: lower tone + pop
+  const b = emptyBoard();
+  b[0][0] = 'O';
+  await page.evaluate(() => { window.__fx = []; });
+  await send(page, {
+    service: 'caro', status: 'update_board', board: b, last_move: { row: 0, col: 0, player: 'O' },
+    next_turn: 'X', move_count: 1, score_x: 0, score_o: 0, winner: '', draw: false, turn_ms_left: 20000,
+  });
+  fx = await page.evaluate(() => window.__fx || []);
+  check('opponent move plays tone 660', fx.includes('tone:660'), fx.join(','));
+  check('opponent move pops', await page.$eval('.cell[data-row="0"][data-col="0"]', (c) => c.classList.contains('pop')));
+
+  // Not my turn: local toast, nothing sent
+  await send(page, {
+    service: 'caro', status: 'update_board', board: b, last_move: { row: 0, col: 0, player: 'O' },
+    next_turn: 'O', move_count: 1, score_x: 0, score_o: 0, winner: '', draw: false, turn_ms_left: 20000,
+  });
+  const sentBefore = await page.evaluate(() => window.__sent.filter((m) => m.action === 'move').length);
+  await page.click('.cell[data-row="2"][data-col="2"]');
+  check('not-your-turn toast', (await page.textContent('#toast')).includes('Chưa đến lượt của bạn.'));
+  check('no move sent on opponent turn',
+    (await page.evaluate(() => window.__sent.filter((m) => m.action === 'move').length)) === sentBefore);
+});
+
 // ---------------------------------------------------------------- runner
 
 (async () => {
