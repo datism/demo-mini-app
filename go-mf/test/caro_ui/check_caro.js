@@ -159,6 +159,60 @@ scenario('new-game-clears-win', async (page) => {
     !(await page.$eval('#winner-overlay', (o) => o.classList.contains('show'))));
 });
 
+scenario('timer', async (page) => {
+  const ring = () => page.evaluate(() => {
+    const active = document.querySelector('.score-pill.active');
+    const r = active && active.querySelector('.timer-ring');
+    return {
+      pill: active ? active.id : null,
+      visible: !!r && getComputedStyle(r).display !== 'none',
+      warn: !!r && r.classList.contains('warn'),
+      danger: !!r && r.classList.contains('danger'),
+      text: document.getElementById('turn-timer').textContent,
+    };
+  });
+
+  await send(page, gameStart('X', { turn_ms_left: 20000 }));
+  await page.waitForTimeout(200);
+  let st = await ring();
+  check('ring visible on my pill', st.pill === 'pill-me' && st.visible, JSON.stringify(st));
+  check('timer text starts at 20s', st.text === '· 20s' || st.text === '· 19s', st.text);
+
+  await send(page, gameStart('X', { turn_ms_left: 8000 }));
+  await page.waitForTimeout(150);
+  st = await ring();
+  check('amber at <=10s', st.warn && !st.danger, JSON.stringify(st));
+
+  await send(page, gameStart('X', { turn_ms_left: 4000 }));
+  await page.waitForTimeout(150);
+  st = await ring();
+  check('red at <=5s', st.danger, JSON.stringify(st));
+
+  await send(page, {
+    service: 'caro', status: 'update_board', board: emptyBoard(), next_turn: 'O', move_count: 0,
+    score_x: 0, score_o: 0, winner: '', draw: false, timeout: true, timed_out: 'X', turn_ms_left: 20000,
+  });
+  await page.waitForTimeout(150);
+  st = await ring();
+  check('timeout toast for the player who ran out',
+    (await page.textContent('#toast')).includes('Hết giờ! Bạn mất lượt'));
+  check('ring moves to opponent after timeout', st.pill === 'pill-opp' && st.visible, JSON.stringify(st));
+
+  await send(page, winMessage());
+  await page.waitForTimeout(150);
+  st = await ring();
+  check('no ring when the game is over', st.pill === null && st.text === '', JSON.stringify(st));
+});
+
+scenario('timer-opponent-timeout', async (page) => {
+  await send(page, gameStart('O', { next_turn: 'X' }));
+  await send(page, {
+    service: 'caro', status: 'update_board', board: emptyBoard(), next_turn: 'O', move_count: 0,
+    score_x: 0, score_o: 0, winner: '', draw: false, timeout: true, timed_out: 'X', turn_ms_left: 20000,
+  });
+  check('opponent-timeout toast', (await page.textContent('#toast')).includes('Đối thủ hết giờ'));
+});
+
 scenario('new-game-during-delay', async (page) => {
   await send(page, gameStart('X'));
   await send(page, winMessage());

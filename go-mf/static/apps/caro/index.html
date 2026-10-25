@@ -377,6 +377,41 @@
         opacity: 1;
       }
     }
+    .timer-ring {
+      position: absolute;
+      inset: -3px;
+      width: calc(100% + 6px);
+      height: calc(100% + 6px);
+      pointer-events: none;
+      overflow: visible;
+      display: none;
+    }
+
+    .score-pill.active .timer-ring {
+      display: block;
+    }
+
+    .timer-ring rect {
+      x: 1.5px;
+      y: 1.5px;
+      width: calc(100% - 3px);
+      height: calc(100% - 3px);
+      rx: 18px;
+      fill: none;
+      stroke: #22c55e;
+      stroke-width: 3;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 0;
+      transition: stroke 0.3s;
+    }
+
+    .timer-ring.warn rect {
+      stroke: #f59e0b;
+    }
+
+    .timer-ring.danger rect {
+      stroke: #ef4444;
+    }
   </style>
 </head>
 
@@ -386,12 +421,14 @@
     <div id="game-header">
       <div id="status-bar">
         <div class="score-pill" id="pill-me">
+          <svg class="timer-ring"><rect pathLength="100"></rect></svg>
           <span class="pill-symbol x" id="me-symbol">X</span>
           <span class="pill-label">Bạn</span>
           <span class="pill-score" id="me-score">0</span>
         </div>
         <span class="vs">vs</span>
         <div class="score-pill" id="pill-opp">
+          <svg class="timer-ring"><rect pathLength="100"></rect></svg>
           <span class="pill-score" id="opp-score">0</span>
           <span class="pill-label">Đối thủ</span>
           <span class="pill-symbol o" id="opp-symbol">O</span>
@@ -507,6 +544,8 @@
       rejectLocally(message || 'Nước đi không hợp lệ.');
       if (lastServerBoard) renderBoard(lastServerBoard, lastServerMove, false);
       if (lastServerTurn) updateTurn(lastServerTurn);
+      if (savedTurnDeadline) startTurnTimer(savedTurnDeadline - performance.now());
+      savedTurnDeadline = 0;
     }
 
     // ---- Win celebration
@@ -591,6 +630,49 @@
       confettiRaf = requestAnimationFrame(frame);
     }
 
+    // ---- Turn timer (display only; DCAS decides when a turn times out)
+    const TURN_TOTAL_MS = 20000;
+    let turnDeadline = 0;
+    let timerRaf = 0;
+    let lastTickSecond = -1;
+    let savedTurnDeadline = 0; // restored if the server rejects an optimistic move
+
+    function startTurnTimer(msLeft) {
+      stopTurnTimer();
+      if (!msLeft || msLeft <= 0) return;
+      turnDeadline = performance.now() + msLeft;
+      lastTickSecond = -1;
+      tickTimer();
+    }
+
+    function stopTurnTimer() {
+      if (timerRaf) cancelAnimationFrame(timerRaf);
+      timerRaf = 0;
+      turnDeadline = 0;
+      document.querySelectorAll('.timer-ring').forEach(r => r.classList.remove('warn', 'danger'));
+      document.getElementById('turn-timer').textContent = '';
+    }
+
+    function tickTimer() {
+      const left = Math.max(0, turnDeadline - performance.now());
+      const frac = Math.min(1, left / TURN_TOTAL_MS);
+      const secs = Math.ceil(left / 1000);
+      document.querySelectorAll('.timer-ring').forEach(r => {
+        r.querySelector('rect').style.strokeDashoffset = String(100 * (1 - frac));
+        r.classList.toggle('warn', secs <= 10 && secs > 5);
+        r.classList.toggle('danger', secs <= 5);
+      });
+      document.getElementById('turn-timer').textContent = '· ' + secs + 's';
+      if (secs !== lastTickSecond) {
+        if (secs > 0 && secs <= 3) {
+          playTone(1200, 50, 'square', 0.05);
+          fx('tick');
+        }
+        lastTickSecond = secs;
+      }
+      timerRaf = left > 0 ? requestAnimationFrame(tickTimer) : 0;
+    }
+
     function sendToServer(payload) {
       if (window.IMSDataChannelBridge) {
         window.IMSDataChannelBridge.send(1000, JSON.stringify(payload));
@@ -652,6 +734,8 @@
 
       updateTurn(mySymbol === 'X' ? 'O' : 'X');
 
+      savedTurnDeadline = turnDeadline;
+      startTurnTimer(TURN_TOTAL_MS);
       sendToServer({
         service: 'caro',
         action: 'move',
@@ -719,6 +803,7 @@
     function showWinner(winner, isDraw, winCells) {
       gameActive = false;
       setActivePill(null);
+      stopTurnTimer();
       const overlay = document.getElementById('winner-overlay');
       const card = document.getElementById('winner-card');
       const text = document.getElementById('winner-text');
@@ -787,6 +872,7 @@
           renderBoard(data.board, null, false);
           updateScores();
           updateTurn(data.next_turn);
+          startTurnTimer(data.turn_ms_left);
           clearTimeout(resultTimeout);
           cancelConfetti();
           clearWinLine();
@@ -809,6 +895,11 @@
           } else {
             gameActive = true;
             updateTurn(data.next_turn);
+            startTurnTimer(data.turn_ms_left);
+            if (data.timeout) {
+              showToast(data.timed_out === mySymbol ? '⏰ Hết giờ! Bạn mất lượt' : 'Đối thủ hết giờ — đến lượt bạn');
+              buzz([60, 40, 60]);
+            }
           }
         } else if (data.status === 'error') {
           onServerError(data.message);
