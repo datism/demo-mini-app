@@ -12,6 +12,17 @@ import (
 const CaroBoardSize = 9
 const CaroWinCount = 5
 
+// Caro error texts sent to the client (shown as a toast).
+const (
+	caroErrGameOver    = "Ván đã kết thúc. Bấm 'Ván mới' để chơi lại."
+	caroErrBoardFull   = "Bàn cờ đã đủ 2 người chơi."
+	caroErrNotYourTurn = "Chưa đến lượt của bạn."
+	caroErrInvalidPos  = "Vị trí không hợp lệ."
+	caroErrOccupied    = "Ô này đã có quân."
+)
+
+var caroErrorMessages = []string{caroErrGameOver, caroErrBoardFull, caroErrNotYourTurn, caroErrInvalidPos, caroErrOccupied}
+
 type CaroGame struct {
 	Board     [CaroBoardSize][CaroBoardSize]string
 	Turn      string // "X" or "O"
@@ -241,7 +252,7 @@ func (s *DCASServer) caroMakeMove(callID, sessionID string, row, col int) {
 	}
 
 	if game.Status != "playing" {
-		s.sendCaroError(sessionID, "Game Ä‘Ã£ káº¿t thÃºc. Báº¥m 'VÃ¡n má»›i' Ä‘á»ƒ chÆ¡i láº¡i.")
+		s.sendCaroError(sessionID, caroErrGameOver)
 		return
 	}
 
@@ -260,24 +271,24 @@ func (s *DCASServer) caroMakeMove(callID, sessionID string, row, col int) {
 			game.PlayerO = sessionID
 			playerSymbol = "O"
 		} else {
-			s.sendCaroError(sessionID, "BÃ n cá» Ä‘Ã£ Ä‘á»§ 2 ngÆ°á»i chÆ¡i.")
+			s.sendCaroError(sessionID, caroErrBoardFull)
 			return
 		}
 	}
 
 	// Validate turn
 	if game.Turn != playerSymbol {
-		s.sendCaroError(sessionID, "ChÆ°a Ä‘áº¿n lÆ°á»£t cá»§a báº¡n.")
+		s.sendCaroError(sessionID, caroErrNotYourTurn)
 		return
 	}
 
 	// Validate position
 	if row < 0 || row >= CaroBoardSize || col < 0 || col >= CaroBoardSize {
-		s.sendCaroError(sessionID, "Vá»‹ trÃ­ khÃ´ng há»£p lá»‡.")
+		s.sendCaroError(sessionID, caroErrInvalidPos)
 		return
 	}
 	if game.Board[row][col] != "" {
-		s.sendCaroError(sessionID, "Ã” nÃ y Ä‘Ã£ cÃ³ quÃ¢n.")
+		s.sendCaroError(sessionID, caroErrOccupied)
 		return
 	}
 
