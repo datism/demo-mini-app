@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/demo/ims-dc-mf/internal/config"
 	"github.com/demo/ims-dc-mf/internal/sba"
 )
 
@@ -90,7 +91,7 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 
 	contact := msg.GetHeader("Contact")
 	isCallerDC := strings.Contains(contact, "webrtc-datachannel")
-	isCalledHotline := (toUser == "198")
+	isCalledHotline := config.IsHotline(toUser)
 	isOriginatingMTSIInterworking := !isCallerDC && isCalledHotline
 
 	psDataOffStatus := "INACTIVE"
@@ -250,7 +251,7 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 
 	if session.IsAnchorCtxCreated && !isAppSwitch {
 		log.Printf("[IMS-AS] ADC context already created for app '%s'.", session.ActiveAppID)
-		if session.Callee == "198" {
+		if config.IsHotline(session.Callee) {
 			headers := map[string]string{
 				"Content-Type": "application/sdp",
 			}
@@ -671,7 +672,7 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 		session.MfInfoA = mfInfoA
 		session.MfInfoB = mfInfoB
 
-		if session.Callee == "198" {
+		if config.IsHotline(session.Callee) {
 			headers := map[string]string{
 				"Content-Type": "application/sdp",
 			}
@@ -696,7 +697,7 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 	case <-time.After(5 * time.Second):
 		log.Printf("[IMS-AS] [TS 24.186 Clause 9.4.4] Timeout waiting for media instruction for re-INVITE. Disabling data channel (port 0) and continuing voice/video procedure...")
 		rewrittenSDP := ExcludeADCFromSDP(msg.Body)
-		if session.Callee == "198" {
+		if config.IsHotline(session.Callee) {
 			headers := map[string]string{
 				"Content-Type": "application/sdp",
 			}
@@ -749,7 +750,7 @@ func (b *B2BUA) processMediaInstruction(session *CallSession, instruction *sba.M
 		IsCoreNetwork: isCore,
 	}
 	var mSpec *sba.DcMediaSpecification
-	isHotline := (session.Callee == "198")
+	isHotline := config.IsHotline(session.Callee)
 
 	if isHotline {
 		if session.IsInterworking {

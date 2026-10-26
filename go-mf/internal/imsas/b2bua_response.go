@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/demo/ims-dc-mf/internal/config"
 	"github.com/demo/ims-dc-mf/internal/sba"
 )
 
@@ -26,7 +27,7 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		return
 	}
 
-	if session.Callee == "198" {
+	if config.IsHotline(session.Callee) {
 		log.Printf("[IMS-AS] Ignoring 200 OK response for Hotline call %s", callID)
 		return
 	}
@@ -413,7 +414,7 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	b.sendUDP(resp, remoteAddr)
 
 	// If it's Hotline 198, consume it locally
-	if ok && session != nil && session.Callee == "198" {
+	if ok && session != nil && config.IsHotline(session.Callee) {
 		log.Printf("[IMS-AS] Consumed BYE locally for Hotline 198 (call=%s)", callID)
 		return
 	}
@@ -515,7 +516,7 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	}
 
 	// Forward CANCEL to S-CSCF (only if not Hotline 198)
-	if ok && session != nil && session.Callee != "198" {
+	if ok && session != nil && !config.IsHotline(session.Callee) {
 		targetCallID := session.TermCallID
 		if !isCaller {
 			targetCallID = session.OrigCallID
@@ -538,7 +539,7 @@ func (b *B2BUA) handleAck(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 
-	if exists && session.Callee == "198" {
+	if exists && config.IsHotline(session.Callee) {
 		log.Printf("[IMS-AS] Consumed ACK locally for Hotline 198 (call=%s)", msgCallID)
 		return
 	}

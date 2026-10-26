@@ -211,7 +211,7 @@ func (s *DCSFServer) HandleSessionEventSubscription(w http.ResponseWriter, r *ht
 	qosHint := "latency=200;loss=0.05" // default fallback
 	connectionPolicy := "P2P"           // default fallback
 
-	isHotline := strings.Contains(req.SessionInfo.CalledIdentity, "198")
+	isHotline := config.IsHotline(calleeUser)
 	if isHotline {
 		connectionPolicy = "P2A"
 	}

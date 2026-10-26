@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
   - DCAS handler (`flight_booking.go`) acts as the agent: returns flights, suggests SL 213 and seat 4A, validates the booking and issues the PNR. Page falls back to local data if no reply arrives.
   - Routed as P2A in DCSF / IMS-AS; listed in the operator menu.
   - Booked seats are shared between callers (per flight and date, in memory until DCAS restarts). If two callers confirm the same seat, the second gets `code: "seat_taken"` with a fresh seat map and a new agent suggestion. On a phone a missing confirm reply is an error after 10 s; only the browser preview books locally.
+  - Airline hotline **1900**: dialing it is answered by the network like 198 (voice-only) and auto-opens flight-booking. Hotline numbers now live in one table (`go-mf/internal/config/hotline.go`, mirrored in `CallActivity.HOTLINE_APPS`).
 
 ### Fixed
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.

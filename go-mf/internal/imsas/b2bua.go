@@ -505,7 +505,7 @@ func (b *B2BUA) handleSIP(data string, remoteAddr *net.UDPAddr) {
 					b.mu.Lock()
 					session, ok := b.sessions[callID]
 					b.mu.Unlock()
-					if ok && session != nil && !session.IsPlayingAnnouncement && !session.TermAnswered && session.OrigMsg != nil && session.Callee != "198" {
+					if ok && session != nil && !session.IsPlayingAnnouncement && !session.TermAnswered && session.OrigMsg != nil && !config.IsHotline(session.Callee) {
 						log.Printf("[IMS-AS] Intercepted %d for call %s: triggering unreachable announcement", msg.StatusCode, callID)
 						session.IsPlayingAnnouncement = true
 						session.AnnouncementCallID = callID

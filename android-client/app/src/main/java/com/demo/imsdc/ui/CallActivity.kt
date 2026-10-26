@@ -65,6 +65,13 @@ class CallActivity : AppCompatActivity() {
         val isCallActive: Boolean
             get() = activeInstance?.let { !it.isFinishing && !it.isDestroyed && !it.isEndingCall } ?: false
 
+        // Hotline numbers answered by the network (P2A): voice-only, the mapped mini-app auto-launches.
+        // Keep in sync with go-mf/internal/config/hotline.go.
+        private val HOTLINE_APPS = mapOf("198" to "smart-menu", "1900" to "flight-booking")
+        private val APP_RESET_JS = mapOf("smart-menu" to "resetSmartMenu", "flight-booking" to "resetFlightBooking")
+
+        fun hotlineApp(user: String): String? = HOTLINE_APPS[user.removePrefix("+84")]
+
         const val EXTRA_SIP_SERVER  = "sip_server"
         const val EXTRA_LOCAL_USER  = "local_user"
         const val EXTRA_REMOTE_USER = "remote_user"
@@ -444,9 +451,9 @@ class CallActivity : AppCompatActivity() {
         // Prevent accidental Back button from killing CallActivity (and the call)
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (remoteUser == "198" || currentAppId == "smart-menu") {
-                    Log.i(TAG, "Back button pressed in Hotline 198: resetting smart-menu without opening operator-menu")
-                    binding.webviewMiniapp.evaluateJavascript("if (typeof resetSmartMenu === 'function') resetSmartMenu();", null)
+                if (hotlineApp(remoteUser) != null || currentAppId == "smart-menu") {
+                    Log.i(TAG, "Back button pressed in hotline $remoteUser: resetting $currentAppId without opening operator-menu")
+                    resetHotlineApp()
                 } else if (binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != "operator-menu") {
                     Log.i(TAG, "Back button pressed: returning to operator-menu instead of finishing CallActivity")
                     miniAppManager.launchMiniApp("operator-menu")
@@ -635,9 +642,9 @@ class CallActivity : AppCompatActivity() {
 
         // Nút quay lại Menu của mini-app
         binding.btnExitMiniapp.setOnClickListener {
-            if (remoteUser == "198" || currentAppId == "smart-menu") {
-                Log.i(TAG, "Exit clicked in Hotline 198: resetting smart-menu")
-                binding.webviewMiniapp.evaluateJavascript("if (typeof resetSmartMenu === 'function') resetSmartMenu();", null)
+            if (hotlineApp(remoteUser) != null || currentAppId == "smart-menu") {
+                Log.i(TAG, "Exit clicked in hotline $remoteUser: resetting $currentAppId")
+                resetHotlineApp()
             } else {
                 Log.i(TAG, "User clicked Exit Mini-app -> returning to operator-menu")
                 miniAppManager.launchMiniApp("operator-menu")
@@ -1208,7 +1215,7 @@ class CallActivity : AppCompatActivity() {
 
                 // B?t d?u capture local camera v� microphone
                 withContext(Dispatchers.Main) {
-                    val enableVideo = (remoteUser != "198")
+                    val enableVideo = (hotlineApp(remoteUser) == null)
                     isVideoEnabled = enableVideo
                     webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
                 }
@@ -1338,7 +1345,7 @@ class CallActivity : AppCompatActivity() {
                 if (remoteSdp.trim().isEmpty()) {
                     Log.i(TAG, "B (Delayed Offer): Creating local SDP Offer...")
                     withContext(Dispatchers.Main) {
-                        val enableVideo = (remoteUser != "198")
+                        val enableVideo = (hotlineApp(remoteUser) == null)
                         isVideoEnabled = enableVideo
                         webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
                     }
@@ -1386,7 +1393,7 @@ class CallActivity : AppCompatActivity() {
 
                     // B?t d?u capture local camera v� microphone cho B SAU khi d� set remote offer!
                     withContext(Dispatchers.Main) {
-                        val enableVideo = (remoteUser != "198")
+                        val enableVideo = (hotlineApp(remoteUser) == null)
                         isVideoEnabled = enableVideo
                         webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
                     }
@@ -1438,11 +1445,12 @@ class CallActivity : AppCompatActivity() {
 
             if (!isCallActiveUiShown) {
                 isCallActiveUiShown = true
-                if (remoteUser == "198") {
+                val hotlineAppId = hotlineApp(remoteUser)
+                if (hotlineAppId != null) {
                     binding.localVideoView.visibility = View.GONE
                     binding.remoteVideoView.visibility = View.GONE
-                    Log.i(TAG, "Hotline 198: auto-launching smart-menu via BDC & ADC")
-                    miniAppManager.launchMiniApp("smart-menu", sendRemoteTrigger = true)
+                    Log.i(TAG, "Hotline $remoteUser: auto-launching $hotlineAppId via BDC & ADC")
+                    miniAppManager.launchMiniApp(hotlineAppId, sendRemoteTrigger = true)
                 } else if (currentAppId == "operator-menu") {
                     binding.localVideoView.visibility = View.VISIBLE
                     binding.remoteVideoView.visibility = View.VISIBLE
@@ -1479,6 +1487,12 @@ class CallActivity : AppCompatActivity() {
     }
 
     // --- Open DataChannels (sau khi ICE connected) ---------------------------
+
+    /** Hotline apps have no operator-menu to return to: reset the app to its first screen instead. */
+    private fun resetHotlineApp() {
+        val fn = APP_RESET_JS[currentAppId] ?: "resetSmartMenu"
+        binding.webviewMiniapp.evaluateJavascript("if (typeof $fn === 'function') $fn();", null)
+    }
 
     private fun openDataChannels() {
         Log.i(TAG, "Opening DataChannels (was opened=$isDataChannelsOpened)...")

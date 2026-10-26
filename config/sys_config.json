@@ -22,7 +22,8 @@
     { "impu": "sip:1004@ims.mnc001.mcc452.3gppnetwork.org", "username": "1004", "password": "password1004", "vrbt_enabled": false },
     { "impu": "sip:1005@ims.mnc001.mcc452.3gppnetwork.org", "username": "1005", "password": "password1005", "vrbt_enabled": false },
     { "impu": "sip:1006@ims.mnc001.mcc452.3gppnetwork.org", "username": "1006", "password": "password1006", "vrbt_enabled": false },
-    { "impu": "sip:198@ims.mnc001.mcc452.3gppnetwork.org", "username": "198", "password": "password198", "vrbt_enabled": false }
+    { "impu": "sip:198@ims.mnc001.mcc452.3gppnetwork.org", "username": "198", "password": "password198", "vrbt_enabled": false },
+    { "impu": "sip:1900@ims.mnc001.mcc452.3gppnetwork.org", "username": "1900", "password": "password1900", "vrbt_enabled": false }
   ],
   "ifc": {
     "trigger_content": "webrtc-datachannel",

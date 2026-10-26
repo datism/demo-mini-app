@@ -335,13 +335,14 @@ class MiniAppManager(val activity: CallActivity) {
             } else if (targetId == "caro") {
                 activity.binding.tvCallStatus.text = "♟️ Game Cờ Caro (5G New Calling)"
             } else if (targetId == "flight-booking") {
-                activity.binding.tvCallStatus.text = "✈️ Đặt vé SkyLotus Air (5G New Calling)"
+                activity.binding.tvCallStatus.text = if (CallActivity.hotlineApp(activity.remoteUser) != null)
+                    "📞 Tổng đài SkyLotus Air ${activity.remoteUser}" else "✈️ Đặt vé SkyLotus Air (5G New Calling)"
             } else if (targetId == "enterprise-callerid") {
                 activity.binding.tvCallStatus.text = "🏢 Doanh nghiệp đã xác thực (Enterprise Caller ID)"
             } else {
                 activity.binding.tvCallStatus.text = "📱 Ứng dụng: $targetId"
             }
-            if (targetId == "smart-menu" || activity.remoteUser == "198") {
+            if (targetId == "smart-menu" || CallActivity.hotlineApp(activity.remoteUser) != null) {
                 activity.binding.btnExitMiniapp.visibility = View.GONE
             } else {
                 activity.binding.btnExitMiniapp.visibility = View.VISIBLE
