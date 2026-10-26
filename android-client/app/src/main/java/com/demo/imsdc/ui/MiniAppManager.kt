@@ -232,7 +232,8 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.webviewMiniapp.visibility = View.VISIBLE
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
                 activity.binding.webviewMiniapp.bringToFront()
-                val isEnterpriseOrSmart = activity.currentAppId == "enterprise-callerid" || activity.currentAppId == "smart-menu" || url?.contains("enterprise-callerid") == true || url?.contains("smart-menu") == true
+                val isEnterpriseOrSmart = activity.currentAppId == "enterprise-callerid" || activity.currentAppId == "smart-menu" || url?.contains("enterprise-callerid") == true || url?.contains("smart-menu") == true ||
+                    activity.currentAppId == "flight-booking" || url?.contains("flight-booking") == true
                 if (isEnterpriseOrSmart) {
                     activity.binding.localVideoView.visibility = View.GONE
                 } else {
@@ -333,6 +334,8 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.tvCallStatus.text = "📞 Tổng đài 198 (Smart Menu)"
             } else if (targetId == "caro") {
                 activity.binding.tvCallStatus.text = "♟️ Game Cờ Caro (5G New Calling)"
+            } else if (targetId == "flight-booking") {
+                activity.binding.tvCallStatus.text = "✈️ Đặt vé SkyLotus Air (5G New Calling)"
             } else if (targetId == "enterprise-callerid") {
                 activity.binding.tvCallStatus.text = "🏢 Doanh nghiệp đã xác thực (Enterprise Caller ID)"
             } else {
@@ -350,7 +353,7 @@ class MiniAppManager(val activity: CallActivity) {
             activity.binding.layoutMiddleDetails.visibility = View.GONE
             activity.binding.webviewMiniapp.visibility = View.VISIBLE
             activity.binding.webviewMiniapp.bringToFront()
-            if (targetId == "enterprise-callerid" || targetId == "smart-menu") {
+            if (targetId == "enterprise-callerid" || targetId == "smart-menu" || targetId == "flight-booking") {
                 activity.binding.localVideoView.visibility = View.GONE
             } else {
                 activity.binding.localVideoView.visibility = View.VISIBLE

@@ -445,7 +445,7 @@ func (s *DCSFServer) handleMediaChangeRequest(w http.ResponseWriter, r *http.Req
 	// For operator-menu, it's P2A (HTTP_PROXY).
 	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" {
 		connectionPolicy = "P2P"
-	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" {
+	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
 		connectionPolicy = "P2A" // Anchored via DCAS server
 	}
 
@@ -499,7 +499,7 @@ func (s *DCSFServer) handleMediaChangeRequest(w http.ResponseWriter, r *http.Req
 	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" {
 		adcType = "P2A2P"
 		mediaProxyConfig = ""
-	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" {
+	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
 		adcType = "P2A2P"
 		mediaProxyConfig = "UDP_PROXY"
 	} else if reqAppId == "operator-menu" {

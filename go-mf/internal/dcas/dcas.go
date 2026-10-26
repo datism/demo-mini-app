@@ -259,6 +259,8 @@ func (s *DCASServer) processMdc2Payload(sessionID, streamID string, payload []by
 			s.handleSmartMenuMessage(sessionID, payload, nil)
 		case "enterprise-callerid":
 			s.handleEnterpriseCallerIDMessage(sessionID, payload)
+		case "flight-booking":
+			s.handleFlightBookingMessage(sessionID, payload)
 		default:
 			s.handleSmartMenuMessage(sessionID, payload, nil)
 		}
@@ -440,6 +442,10 @@ func (s *DCASServer) handleSmartMenuMessage(sessionID string, data []byte, conn 
 		}
 		if service == "enterprise-callerid" {
 			s.handleEnterpriseCallerIDMessage(sessionID, data)
+			return
+		}
+		if service == "flight-booking" {
+			s.handleFlightBookingMessage(sessionID, data)
 			return
 		}
 

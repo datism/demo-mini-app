@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
   - Win celebration: animated winning line, confetti on the winner's phone, result card with score.
   - 20 s turn timer enforced by DCAS (`caro_game.go`); turn passes to the opponent on timeout. New additive message fields `turn_ms_left`, `timeout`, `timed_out`.
 
+- **SkyLotus Air Flight Booking Mini-App (new, P2A):**
+  - Light bottom-sheet app (`flight-booking/index.html`) with 4 steps: search, results with inline fare choice, seat map (A321, 3-3), review & mock payment, plus a confirmation ticket with PNR and QR. Can be minimized to a pill so the call stays visible.
+  - DCAS handler (`flight_booking.go`) acts as the agent: returns flights, suggests SL 213 and seat 4A, validates the booking and issues the PNR. Page falls back to local data if no reply arrives.
+  - Routed as P2A in DCSF / IMS-AS; listed in the operator menu.
+  - Booked seats are shared between callers (per flight and date, in memory until DCAS restarts). If two callers confirm the same seat, the second gets `code: "seat_taken"` with a fresh seat map and a new agent suggestion. On a phone a missing confirm reply is an error after 10 s; only the browser preview books locally.
+
 ### Fixed
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 

@@ -280,7 +280,7 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 	if reqAppId != "" {
 		if reqAppId == "fun-calling-app" || reqAppId == "caro" || reqAppId == "tic-tac-toe-app" {
 			adcType = "P2A2P"
-		} else if reqAppId == "operator-menu" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" {
+		} else if reqAppId == "operator-menu" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
 			adcType = "P2A"
 		}
 	}

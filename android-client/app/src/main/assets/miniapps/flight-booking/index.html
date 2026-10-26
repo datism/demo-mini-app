@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>SkyLotus Air - Đặt vé trong cuộc gọi</title>
+  <style>
+    :root {
+      --bg: #FFFFFF;
+      --surface: #F7F8FA;
+      --line: #ECEEF2;
+      --text: #0F172A;
+      --muted: #64748B;
+      --accent: #0EA5E9;
+      --accent-soft: #F0F9FF;
+      --accent-ink: #0369A1;
+      --btn: #0270AD;
+      --btn-active: #025E91;
+      --ok: #10B981;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button,
+    input {
+      font-family: inherit;
+      color: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+      background: transparent;
+    }
+
+    button:disabled {
+      cursor: default;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    svg {
+      display: block;
+      flex: none;
+    }
+
+    .tnum {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .tap {
+      transition: background-color .15s, transform .12s, border-color .15s;
+    }
+
+    .tap:active {
+      background-color: #F1F5F9;
+      transform: scale(.985);
+    }
+
+    .btn {
+      height: 52px;
+      width: 100%;
+      border-radius: 14px;
+      background: var(--btn);
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      transition: background-color .15s, transform .12s;
+    }
+
+    .btn:active {
+      background: var(--btn-active);
+      transform: scale(.985);
+    }
+
+    .btn .sub {
+      font-weight: 400;
+      opacity: .85;
+    }
+
+    .btn:disabled {
+      background: var(--btn-active);
+      transform: none;
+    }
+
+    .scroll {
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    .scroll::-webkit-scrollbar,
+    .hscroll::-webkit-scrollbar {
+      display: none;
+    }
+
+    .hscroll {
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    /* ---------- sheet ---------- */
+    .sheet {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      border-radius: 24px 24px 0 0;
+      box-shadow: 0 -10px 40px rgba(15, 23, 42, .22);
+      display: flex;
+      flex-direction: column;
+      animation: slUp .45s cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .sheet.hidden,
+    .pill.hidden {
+      display: none;
+    }
+
+    .grabber {
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: #E2E8F0;
+      margin: 8px auto 0;
+      flex: none;
+    }
+
+    .header {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 8px 6px 20px;
+    }
+
+    .logo {
+      width: 36px;
+      height: 36px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .brand {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .brand-name {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .live {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ok);
+      flex: none;
+    }
+
+    .icon-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+    }
+
+    .progress {
+      flex: none;
+      padding: 4px 20px 0;
+    }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 4px;
+    }
+
+    .bars span {
+      height: 3px;
+      border-radius: 2px;
+      background: var(--line);
+      transition: background-color .3s;
+    }
+
+    .bars span.on {
+      background: var(--accent);
+    }
+
+    .main {
+      flex: 1;
+      min-height: 0;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .footer {
+      flex: none;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .footer:empty {
+      display: none;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -.01em;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .title-row .icon-btn {
+      margin-left: -14px;
+      color: var(--text);
+    }
+
+    .title-row .t {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .title-row .s {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .section-label {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .section-label small {
+      font-weight: 400;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .caption {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .group-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      font-size: 14px;
+      line-height: 1.4;
+      animation: slExp .28s ease both;
+    }
+
+    .banner svg {
+      margin-top: 1px;
+    }
+
+    /* ---------- search ---------- */
+    .route {
+      position: relative;
+      background: var(--surface);
+      border-radius: 16px;
+    }
+
+    .route-field {
+      width: 100%;
+      min-height: 68px;
+      padding: 10px 72px 10px 16px;
+      text-align: left;
+      display: block;
+    }
+
+    .route-field:first-child {
+      border-radius: 16px 16px 0 0;
+    }
+
+    .route-field:last-of-type {
+      border-radius: 0 0 16px 16px;
+    }
+
+    .route-field .k {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .route-field .v {
+      display: block;
+      font-size: 17px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .route-field .v span {
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    .route-sep {
+      height: 1px;
+      background: var(--line);
+      margin: 0 72px 0 16px;
+    }
+
+    .swap {
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      margin-top: -24px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      border: 1px solid var(--line);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .swap svg {
+      transition: transform .35s ease;
+    }
+
+    .dates {
+      display: flex;
+      gap: 8px;
+      margin: 0 -20px;
+      padding: 0 20px;
+    }
+
+    .date {
+      flex: none;
+      width: 58px;
+      height: 76px;
+      border-radius: 14px;
+      border: 1.5px solid var(--line);
+      background: #FFFFFF;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .date.sel {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .date .wd {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .date .d {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .date .f {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .date .f.low {
+      color: var(--accent-ink);
+      font-weight: 600;
+    }
+
+    .pax-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 64px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .pax-row .who {
+      flex: 1;
+      font-size: 15px;
+    }
+
+    .step-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+
+    .step-btn.dec {
+      color: var(--text);
+    }
+
+    .step-btn:disabled {
+      color: #CBD5E1;
+    }
+
+    .pax-n {
+      width: 24px;
+      text-align: center;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    /* ---------- results ---------- */
+    .flight {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .flight-row {
+      width: 100%;
+      min-height: 76px;
+      padding: 14px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      border-radius: 12px;
+    }
+
+    .flight-row .info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .flight-row .times {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px 8px;
+      white-space: nowrap;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .flight-row .meta {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .tag {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #E0F2FE;
+      color: var(--accent-ink);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .flight-row .price {
+      text-align: right;
+      flex: none;
+    }
+
+    .flight-row .price small {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .flight-row .price b {
+      display: block;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .chev {
+      transition: transform .25s ease;
+    }
+
+    .open .chev {
+      transform: rotate(180deg);
+    }
+
+    .fares-wrap {
+      padding: 0 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: slExp .28s ease both;
+    }
+
+    .fares {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .choice {
+      border-radius: 14px;
+      border: 1.5px solid var(--line);
+      background: #FFFFFF;
+      text-align: left;
+    }
+
+    .choice.sel {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .fare {
+      min-height: 96px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .fare .n {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .fare .l {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .fare .p {
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    /* ---------- seat ---------- */
+    .seat-top {
+      flex: none;
+      padding: 12px 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend i {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+
+    .cols,
+    .seat-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .cols {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .cols span {
+      width: 44px;
+      text-align: center;
+    }
+
+    .cols span.aisle,
+    .seat-row .rn {
+      width: 28px;
+      text-align: center;
+    }
+
+    .seat-row .rn {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .seat-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .exit {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      padding: 4px 0 0;
+    }
+
+    .seat {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px 10px 7px 7px;
+      border: 1px solid #CBD5E1;
+      background: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color .15s, border-color .15s, transform .12s;
+    }
+
+    .seat:active {
+      transform: scale(.92);
+    }
+
+    .seat.extra {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+
+    .seat.taken {
+      background: var(--line);
+      border-color: var(--line);
+    }
+
+    .seat.sel {
+      background: var(--btn);
+      border-color: var(--btn);
+    }
+
+    .seat-footer {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .seat-footer .what {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .seat-footer .what b {
+      display: block;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .seat-footer .btn {
+      width: auto;
+      flex: none;
+      padding: 0 22px;
+    }
+
+    /* ---------- review ---------- */
+    .trip {
+      background: var(--surface);
+      border-radius: 16px;
+      padding: 14px 16px;
+    }
+
+    .trip-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .trip-seat {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    .link {
+      min-height: 44px;
+      padding: 0 10px;
+      margin-right: -10px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent-ink);
+    }
+
+    .field-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .field-label em {
+      font-style: normal;
+      font-size: 12px;
+      color: var(--accent-ink);
+    }
+
+    .input {
+      width: 100%;
+      height: 52px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #FFFFFF;
+      padding: 0 14px;
+      font-size: 16px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .methods {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .method {
+      min-height: 56px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-radius: 12px;
+    }
+
+    .method .ic {
+      color: var(--muted);
+    }
+
+    .method .lbl {
+      flex: 1;
+      font-size: 15px;
+    }
+
+    .method .lbl small {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .radio {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 1.5px solid #CBD5E1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .radio i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .sel .radio {
+      border-color: var(--accent);
+    }
+
+    .sel .radio i {
+      background: var(--accent);
+    }
+
+    .note {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .note svg {
+      margin-top: 1px;
+    }
+
+    .sum-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      padding: 6px 0;
+    }
+
+    .sum-row.last {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sum-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 10px 0 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .sum-total b {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, .35);
+      border-top-color: #FFFFFF;
+      animation: spin .8s linear infinite;
+    }
+
+    /* ---------- confirm ---------- */
+    .done {
+      align-items: center;
+      gap: 16px;
+    }
+
+    .check {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #ECFDF5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      animation: slPop .4s cubic-bezier(.2, .8, .3, 1.2) both;
+    }
+
+    .check path {
+      stroke-dasharray: 30;
+      stroke-dashoffset: 30;
+      animation: slDraw .45s ease .3s forwards;
+    }
+
+    .ticket {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      flex: none;
+      animation: slExp .28s ease .35s both;
+    }
+
+    .ticket-top {
+      padding: 16px 18px 14px;
+    }
+
+    .ticket .k {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .ticket .v {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .pnr {
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: .12em;
+    }
+
+    .legs {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .legs .code {
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .legs .path {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+    }
+
+    .legs .path span {
+      flex: 1;
+      border-top: 1px dashed #CBD5E1;
+    }
+
+    .ticket-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .ticket-cut {
+      height: 1px;
+      margin: 0 18px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .ticket-bottom {
+      padding: 14px 18px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--surface);
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .qr {
+      flex: none;
+      padding: 6px;
+      background: #FFFFFF;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
+    .qr-grid {
+      display: grid;
+      grid-template-columns: repeat(21, 4px);
+      grid-auto-rows: 4px;
+    }
+
+    .qr-grid i.on {
+      background: var(--text);
+    }
+
+    /* ---------- minimized pill ---------- */
+    .pill {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      height: 64px;
+      border-radius: 999px;
+      background: #FFFFFF;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 10px;
+      text-align: left;
+      transition: transform .12s;
+      animation: slUp .4s cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .pill:active {
+      transform: scale(.98);
+    }
+
+    .pill .logo {
+      width: 44px;
+      height: 44px;
+    }
+
+    .pill .txt {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .pill .txt b {
+      display: block;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .pill .txt small {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .mini-bars {
+      display: inline-flex;
+      gap: 3px;
+    }
+
+    .mini-bars i {
+      width: 12px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--line);
+    }
+
+    .mini-bars i.on {
+      background: var(--accent);
+    }
+
+    .pill .up {
+      width: 44px;
+      height: 44px;
+      flex: none;
+      border-radius: 50%;
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .toast {
+      position: absolute;
+      left: 20px;
+      right: 20px;
+      bottom: 92px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--text);
+      color: #FFFFFF;
+      font-size: 14px;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: none;
+    }
+
+    @keyframes slUp {
+      from { transform: translateY(100%); }
+      to { transform: none; }
+    }
+
+    @keyframes slExp {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @keyframes slDraw {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes slPop {
+      from { transform: scale(.6); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation: none !important;
+      }
+
+      .check path {
+        stroke-dashoffset: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <section id="sheet" class="sheet" aria-label="SkyLotus Air">
+    <div class="grabber"></div>
+    <header class="header">
+      <span class="logo" data-icon="lotus"></span>
+      <div class="brand">
+        <div class="brand-name">SkyLotus Air</div>
+        <div class="live" role="status"><span class="live-dot"></span><span class="tnum">Live with agent · <span id="timer">00:00</span></span></div>
+      </div>
+      <button class="icon-btn tap" data-act="minimize" aria-label="Thu nhỏ · Minimize" data-icon="down"></button>
+    </header>
+    <div id="progress" class="progress">
+      <div class="progress-label"><span id="step-vn"></span><span id="step-en"></span></div>
+      <div class="bars" id="bars"><span></span><span></span><span></span><span></span></div>
+    </div>
+    <div id="top"></div>
+    <main id="main" class="main scroll"></main>
+    <div id="footer" class="footer"></div>
+  </section>
+
+  <button id="pill" class="pill hidden" data-act="restore">
+    <span class="logo" data-icon="lotus"></span>
+    <span class="txt">
+      <b id="pill-title"></b>
+      <small><span class="mini-bars" id="pill-bars"><i></i><i></i><i></i><i></i></span><span id="pill-sub"></span></small>
+    </span>
+    <span class="up" data-icon="up"></span>
+  </button>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    // ------------------------------------------------------------ icons
+    const ICONS = {
+      lotus: '<svg width="22" height="22" viewBox="0 0 32 32" fill="none" stroke="#0EA5E9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4c3.6 4.4 3.6 11.2 0 17.5C12.4 15.2 12.4 8.4 16 4z"/><path d="M14.5 22.5C9 22 5 18 4 12.5c5.3.4 9.4 4.3 10.5 10z"/><path d="M17.5 22.5C23 22 27 18 28 12.5c-5.3.4-9.4 4.3-10.5 10z"/><path d="M6 27c5-2 15-2 20 0"/></svg>',
+      down: svg('<path d="m6 9 6 6 6-6"/>', 22),
+      up: svg('<path d="m18 15-6-6-6 6"/>', 20),
+      back: svg('<path d="m15 18-6-6 6-6"/>', 22),
+      next: svg('<path d="m9 18 6-6-6-6"/>', 18, 2),
+      swap: svg('<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>', 20),
+      minus: svg('<path d="M5 12h14"/>', 18),
+      plus: svg('<path d="M12 5v14M5 12h14"/>', 18),
+      agent: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0EA5E9" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/></svg>',
+      tick: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+      arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>', 18),
+      card: svg('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>', 20),
+      wallet: svg('<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>', 20),
+      qr: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>', 20),
+      info: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>', 15),
+      plane: svg('<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>', 18, 1.75, 'transform:rotate(45deg)'),
+      check: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+    };
+
+    function svg(paths, size, width, style) {
+      return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (width || 1.75) +
+        '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (style ? ' style="' + style + '"' : '') + '>' + paths + '</svg>';
+    }
+
+    document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
+
+    // ------------------------------------------------------------ data
+    // Local copy of the DCAS schedule so the page still works if the ADC is slow;
+    // DCAS replies (flight_booking.go) replace it.
+    const AIRPORTS = { HAN: 'Hà Nội', SGN: 'TP. Hồ Chí Minh' };
+    const DATES = [
+      { wd: 'T2', d: 9, f: '1,29tr' }, { wd: 'T3', d: 10, f: '1,19tr' }, { wd: 'T4', d: 11, f: '1,09tr' },
+      { wd: 'T5', d: 12, f: '999K', low: true }, { wd: 'T6', d: 13, f: '1,39tr' }, { wd: 'T7', d: 14, f: '1,59tr' },
+      { wd: 'CN', d: 15, f: '1,49tr' }, { wd: 'T2', d: 16, f: '1,09tr' }
+    ];
+    const FLEX = 600000, EXTRA_FEE = 150000, TAX = 480000;
+    const LOCAL_FLIGHTS = [
+      { no: 'SL 201', dep: '06:00', arr: '08:10', dur: '2g 10p', price: 1479000 },
+      { no: 'SL 213', dep: '08:30', arr: '10:40', dur: '2g 10p', price: 1770000, pick: true },
+      { no: 'SL 225', dep: '11:15', arr: '13:20', dur: '2g 05p', price: 1670000 },
+      { no: 'SL 241', dep: '19:45', arr: '21:55', dur: '2g 10p', price: 1570000 }
+    ];
+    const LOCAL_TAKEN = ['1A', '1B', '1F', '2E', '2F', '3C', '3D', '4B', '4C', '5E', '6A', '6F', '7C', '7D', '8B', '9A', '9F', '10C', '10D', '11A', '12B', '12C', '13D', '13E', '14A', '14F', '15C', '16B', '16D', '17E', '17F', '18A', '19C', '20D'];
+    const SEAT_NAME = { A: 'cửa sổ', F: 'cửa sổ', C: 'lối đi', D: 'lối đi', B: 'giữa', E: 'giữa' };
+    const METHODS = [
+      { k: 'card', vn: 'Thẻ ngân hàng', en: 'Card · thẻ demo' },
+      { k: 'wallet', vn: 'Ví điện tử', en: 'E-wallet · ví demo' },
+      { k: 'qr', vn: 'QR chuyển khoản', en: 'QR bank transfer' }
+    ];
+    const STEPS = {
+      search: { n: 1, vn: 'Tìm chuyến', en: 'Search', pill: 'Đang tìm chuyến', pillEn: 'Searching' },
+      results: { n: 2, vn: 'Chọn chuyến', en: 'Choose flight', pill: 'Đang chọn chuyến', pillEn: 'Choosing flight' },
+      seat: { n: 3, vn: 'Chọn ghế', en: 'Seat', pill: 'Đang chọn ghế', pillEn: 'Choosing seat' },
+      review: { n: 4, vn: 'Thanh toán', en: 'Review & pay', pill: 'Đang thanh toán', pillEn: 'Review & pay' },
+      confirm: { n: 4, vn: 'Hoàn tất', en: 'Done', pill: 'Đã đặt vé', pillEn: 'Booking confirmed' }
+    };
+    // Browser preview (no bridge) books locally after a short wait. On a phone the
+    // seat must come from DCAS, so a missing reply is an error, not a fake booking.
+    const LOCAL_CONFIRM_MS = 2500;
+    const DCAS_CONFIRM_TIMEOUT_MS = 10000;
+
+    function initialState() {
+      return {
+        screen: 'search', minimized: false,
+        flip: false, rot: 0, dateIdx: 3, pax: { a: 1, c: 0 },
+        flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
+        taken: LOCAL_TAKEN, extraRows: [1, 11], seat: '4A', agentSeat: '4A', seatBanner: null,
+        name: 'NGUYỄN VĂN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
+      };
+    }
+
+    let state = initialState();
+    let confirmTimer = null;
+    const callStart = Date.now();
+
+    // ------------------------------------------------------------ helpers
+    const money = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '₫';
+    const pad = n => String(n).padStart(2, '0');
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const route = () => state.flip ? ['SGN', 'HAN'] : ['HAN', 'SGN'];
+    const paxCount = () => state.pax.a + state.pax.c;
+    const paxText = () => state.pax.a + ' người lớn' + (state.pax.c ? ', ' + state.pax.c + ' trẻ em' : '');
+    const dateText = () => DATES[state.dateIdx].wd + ', ' + DATES[state.dateIdx].d + '/11';
+    const dateIso = () => '2026-11-' + pad(DATES[state.dateIdx].d);
+    const seatRow = s => parseInt(s, 10);
+    const isExtra = s => !!s && state.extraRows.indexOf(seatRow(s)) >= 0;
+    const farePerPax = f => f.price + (state.fare === 'flex' ? FLEX : 0);
+
+    function quote() {
+      const f = state.flight;
+      const fare = farePerPax(f) * paxCount();
+      const seatFee = isExtra(state.seat) ? EXTRA_FEE : 0;
+      const tax = TAX * paxCount();
+      return { fare: fare - tax, seatFee, tax, total: fare + seatFee };
+    }
+
+    function hasBridge() {
+      return !!((window.AndroidBridge && (typeof window.AndroidBridge.sendData === 'function' || typeof window.AndroidBridge.send === 'function')) ||
+        (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function'));
+    }
+
+    function sendAdcMessage(payload) {
+      const jsonStr = JSON.stringify(Object.assign({ service: 'flight-booking' }, payload));
+      console.log('[FlightBooking] Sending via ADC:', jsonStr);
+      if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
+        window.AndroidBridge.sendData(jsonStr);
+      } else if (window.AndroidBridge && typeof window.AndroidBridge.send === 'function') {
+        window.AndroidBridge.send(1000, jsonStr);
+      } else if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function') {
+        window.IMSDataChannelBridge.send(1000, jsonStr);
+      }
+    }
+
+    let toastTimer = null;
+    function showToast(text) {
+      const el = document.getElementById('toast');
+      el.textContent = text;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+    }
+
+    function setState(patch) {
+      Object.assign(state, patch);
+      render();
+    }
+
+    function go(screen) {
+      setState({ screen });
+      document.getElementById('main').scrollTop = 0;
+    }
+
+    // ------------------------------------------------------------ screens
+    function titleRow(backTo, title, sub) {
+      return '<div class="title-row"><button class="icon-btn tap" data-act="go" data-to="' + backTo + '" aria-label="Quay lại · Back">' + ICONS.back +
+        '</button><div style="flex:1;min-width:0"><div class="t">' + title + '</div><div class="s">' + sub + '</div></div></div>';
+    }
+
+    function banner(vn, en) {
+      return '<div class="banner" role="status">' + ICONS.agent + '<div>' + esc(vn) + '<div class="caption">' + esc(en) + '</div></div></div>';
+    }
+
+    function screenSearch() {
+      const [from, to] = route();
+      const dates = DATES.map((d, i) =>
+        '<button role="option" aria-selected="' + (i === state.dateIdx) + '" class="date tap' + (i === state.dateIdx ? ' sel' : '') + '" data-act="date" data-i="' + i + '">' +
+        '<span class="wd">' + d.wd + '</span><span class="d tnum">' + d.d + '</span><span class="f tnum' + (d.low ? ' low' : '') + '">' + d.f + '</span></button>').join('');
+      const rows = [
+        { k: 'a', vn: 'Người lớn', en: 'Adult · 12+', min: 1 },
+        { k: 'c', vn: 'Trẻ em', en: 'Child · 2–11', min: 0 }
+      ].map(r => {
+        const n = state.pax[r.k];
+        return '<div class="pax-row"><div class="who">' + r.vn + '<div class="caption">' + r.en + '</div></div>' +
+          '<button class="step-btn dec tap" data-act="pax" data-k="' + r.k + '" data-d="-1"' + (n <= r.min ? ' disabled' : '') + ' aria-label="Bớt ' + r.vn + '">' + ICONS.minus + '</button>' +
+          '<span class="pax-n tnum" aria-live="polite">' + n + '</span>' +
+          '<button class="step-btn tap" data-act="pax" data-k="' + r.k + '" data-d="1"' + (n >= 9 ? ' disabled' : '') + ' aria-label="Thêm ' + r.vn + '">' + ICONS.plus + '</button></div>';
+      }).join('');
+      return {
+        main:
+          '<div><h1>Tìm chuyến bay</h1><div class="muted" style="font-size:13px;margin-top:2px">Search flights</div></div>' +
+          '<div class="route">' +
+          '<button class="route-field tap"><span class="k">Từ · From</span><span class="v">' + AIRPORTS[from] + ' <span>' + from + '</span></span></button>' +
+          '<div class="route-sep"></div>' +
+          '<button class="route-field tap"><span class="k">Đến · To</span><span class="v">' + AIRPORTS[to] + ' <span>' + to + '</span></span></button>' +
+          '<button class="swap tap" data-act="swap" aria-label="Đổi chiều · Swap">' + ICONS.swap.replace('<svg', '<svg style="transform:rotate(' + state.rot + 'deg)"') + '</button>' +
+          '</div>' +
+          '<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-label">Ngày đi <small>· Date</small></span><span class="muted" style="font-size:13px">Tháng 11/2026</span></div>' +
+          '<div class="dates hscroll" role="listbox" aria-label="Ngày đi">' + dates + '</div>' +
+          '<div class="caption" style="margin-top:8px">Giá thấp nhất / người lớn · Lowest fare per day</div></div>' +
+          '<div><div class="section-label" style="margin-bottom:4px">Hành khách <small>· Passengers</small></div>' + rows + '</div>',
+        footer: '<button class="btn" data-act="search">Tìm chuyến bay<span class="sub">· Search flights</span></button>'
+      };
+    }
+
+    function screenResults() {
+      const [from, to] = route();
+      const list = state.flights.map(f => {
+        const open = state.open === f.no;
+        let html = '<div class="flight' + (open ? ' open' : '') + '">' +
+          '<button class="flight-row tap" data-act="toggle" data-no="' + f.no + '" aria-expanded="' + open + '">' +
+          '<span class="info"><span class="times tnum">' + f.dep + ' → ' + f.arr + (f.pick ? '<span class="tag">Agent pick</span>' : '') + '</span>' +
+          '<span class="meta">' + f.dur + ' · Bay thẳng · ' + f.no + '</span></span>' +
+          '<span class="price"><small>từ</small><b class="tnum">' + money(f.price) + '</b></span>' +
+          '<span class="chev muted">' + ICONS.down.replace('width="22" height="22"', 'width="18" height="18"') + '</span></button>';
+        if (open) {
+          const opts = [
+            { k: 'saver', name: 'Saver', l1: '7 kg xách tay', l2: 'Không đổi / hoàn', price: f.price },
+            { k: 'flex', name: 'Flex', l1: '+ 23 kg ký gửi', l2: 'Đổi vé miễn phí', price: f.price + FLEX }
+          ];
+          html += '<div class="fares-wrap"><div class="fares" role="radiogroup" aria-label="Hạng vé · Fare">' +
+            opts.map(o => '<button role="radio" aria-checked="' + (o.k === state.fare) + '" class="choice fare tap' + (o.k === state.fare ? ' sel' : '') + '" data-act="fare" data-k="' + o.k + '">' +
+              '<span class="n">' + o.name + '</span><span class="l">' + o.l1 + '</span><span class="l">' + o.l2 + '</span><span class="p tnum">' + money(o.price) + '</span></button>').join('') +
+            '</div><button class="btn" data-act="pick" data-no="' + f.no + '">Tiếp tục <span class="sub tnum">· ' + money(farePerPax(f) * paxCount()) + '</span></button></div>';
+        }
+        return html + '</div>';
+      }).join('');
+      return {
+        main:
+          titleRow('search', from + ' → ' + to, dateText() + ' · ' + paxText()) +
+          (state.flightBanner ? banner(state.flightBanner.vn, state.flightBanner.en) : '') +
+          '<div>' + list + '</div>' +
+          '<div class="caption">Giá / người lớn, đã gồm thuế phí · Fares incl. taxes</div>',
+        footer: ''
+      };
+    }
+
+    function screenSeat() {
+      const seatBtn = (n, c) => {
+        const id = n + c;
+        const taken = state.taken.indexOf(id) >= 0;
+        const extra = state.extraRows.indexOf(n) >= 0;
+        const sel = id === state.seat;
+        const cls = 'seat' + (taken ? ' taken' : extra ? ' extra' : '') + (sel ? ' sel' : '');
+        const aria = 'Ghế ' + id + ', ' + SEAT_NAME[c] + (taken ? ', đã đặt' : extra ? ', rộng chân +150.000₫' : '');
+        return '<button class="' + cls + '" data-act="seat" data-id="' + id + '"' + (taken ? ' disabled' : '') + ' aria-label="' + aria + '" aria-pressed="' + sel + '">' + (sel ? ICONS.tick : '') + '</button>';
+      };
+      let grid = '';
+      for (let n = 1; n <= 20; n++) {
+        if (n === 11) grid += '<div class="exit"><span>‹ Cửa thoát hiểm</span><span>Exit ›</span></div>';
+        grid += '<div class="seat-row">' + ['A', 'B', 'C'].map(c => seatBtn(n, c)).join('') + '<span class="rn tnum">' + n + '</span>' + ['D', 'E', 'F'].map(c => seatBtn(n, c)).join('') + '</div>';
+      }
+      const s = state.seat;
+      const what = s ? 'Ghế ' + s + ' · ' + SEAT_NAME[s.slice(-1)] : 'Chưa chọn ghế';
+      const fee = !s ? 'Bỏ qua: xếp ngẫu nhiên miễn phí · Skip'
+        : isExtra(s) ? '+150.000₫ · ghế rộng chân'
+          : state.fare === 'flex' ? 'Miễn phí với hạng Flex' : 'Miễn phí · ghế tiêu chuẩn';
+      const tip = state.seatBanner && s === state.agentSeat;
+      return {
+        top:
+          '<div class="seat-top">' + titleRow('results', 'Chọn ghế', state.flight.no + ' · Airbus A321 · Choose a seat') +
+          (tip ? banner(state.seatBanner.vn, state.seatBanner.en) : '') +
+          '<div class="legend"><span><i style="border:1px solid #CBD5E1;background:#FFFFFF"></i>Trống</span><span><i style="background:#ECEEF2"></i>Đã đặt</span>' +
+          '<span><i style="border:1px solid #0EA5E9;background:#F0F9FF"></i>Rộng chân +150K</span><span><i style="background:#0270AD"></i>Đang chọn</span></div></div>',
+        main:
+          '<div aria-label="Sơ đồ ghế"><div class="cols"><span>A</span><span>B</span><span>C</span><span class="aisle"></span><span>D</span><span>E</span><span>F</span></div>' +
+          '<div class="seat-grid">' + grid + '</div></div>',
+        mainStyle: 'padding-top:12px',
+        footer: '<div class="seat-footer"><div class="what"><b>' + what + '</b><span class="caption tnum">' + fee + '</span></div>' +
+          '<button class="btn" data-act="go" data-to="review">Tiếp tục' + ICONS.next + '</button></div>'
+      };
+    }
+
+    function screenReview() {
+      const f = state.flight;
+      const [from, to] = route();
+      const q = quote();
+      const fareName = state.fare === 'flex' ? 'Flex' : 'Saver';
+      const methods = METHODS.map(m =>
+        '<button role="radio" aria-checked="' + (m.k === state.pm) + '" class="choice method tap' + (m.k === state.pm ? ' sel' : '') + '" data-act="pm" data-k="' + m.k + '">' +
+        '<span class="ic">' + ICONS[m.k] + '</span><span class="lbl">' + m.vn + '<small>' + m.en + '</small></span><span class="radio"><i></i></span></button>').join('');
+      const seatLine = state.seat
+        ? 'Ghế ' + state.seat + ' <span class="muted">· ' + SEAT_NAME[state.seat.slice(-1)] + '</span>'
+        : '<span class="muted">Xếp ghế ngẫu nhiên</span>';
+      return {
+        main:
+          titleRow('seat', 'Xem lại &amp; thanh toán', 'Review &amp; pay') +
+          '<div class="trip"><div class="trip-line tnum"><span>' + from + ' ' + f.dep + '</span><span class="muted">' + ICONS.arrow + '</span><span>' + to + ' ' + f.arr + '</span></div>' +
+          '<div class="caption" style="font-size:13px;margin-top:6px">' + dateText() + '/2026 · ' + f.no + ' · ' + fareName + ' · ' + f.dur + '</div>' +
+          '<div class="trip-seat"><span>' + seatLine + '</span><button class="link tap" data-act="go" data-to="seat">Đổi ghế</button></div></div>' +
+          '<div><div class="group-label">Hành khách · Passenger</div>' +
+          '<label style="display:block"><span class="field-label"><span>Họ và tên</span><em>Từ số gọi đến · Caller ID</em></span>' +
+          '<input id="name" class="input" value="' + esc(state.name) + '" autocomplete="off"></label>' +
+          '<div class="caption tnum" style="font-size:13px;margin-top:8px">+84 912 345 678 · vé gửi qua SMS</div></div>' +
+          '<div><div class="group-label">Thanh toán · Payment</div><div class="methods" role="radiogroup" aria-label="Phương thức thanh toán">' + methods + '</div>' +
+          '<div class="note">' + ICONS.info + '<span>Bản demo: thanh toán mô phỏng, không trừ tiền thật. Demo only — no real charge.</span></div></div>' +
+          '<div><div class="sum-row"><span class="muted">Vé ' + fareName + ' · ' + paxText() + '</span><span class="tnum">' + money(q.fare) + '</span></div>' +
+          (q.seatFee ? '<div class="sum-row"><span class="muted">Ghế rộng chân · Extra legroom</span><span class="tnum">' + money(q.seatFee) + '</span></div>' : '') +
+          '<div class="sum-row last"><span class="muted">Thuế &amp; phí · Taxes</span><span class="tnum">' + money(q.tax) + '</span></div>' +
+          '<div class="sum-total"><span>Tổng · Total</span><b class="tnum">' + money(q.total) + '</b></div></div>',
+        footer: state.booking
+          ? '<button class="btn" disabled><span class="spinner"></span>Đang xác nhận…<span class="sub">· Confirming</span></button>'
+          : '<button class="btn" data-act="confirm">Xác nhận đặt vé<span class="sub">· Confirm booking</span></button>'
+      };
+    }
+
+    function qrCells() {
+      const finder = (x, y) => {
+        for (const [ox, oy] of [[0, 0], [14, 0], [0, 14]]) {
+          const dx = x - ox, dy = y - oy;
+          if (dx < 0 || dy < 0 || dx > 6 || dy > 6) continue;
+          return dx === 0 || dy === 0 || dx === 6 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4);
+        }
+        return null;
+      };
+      let seed = 0;
+      for (const ch of state.pnr || '') seed = (seed * 31 + ch.charCodeAt(0)) % 997;
+      let html = '';
+      for (let y = 0; y < 21; y++) {
+        for (let x = 0; x < 21; x++) {
+          const fv = finder(x, y);
+          const near = (x <= 7 && y <= 7) || (x >= 13 && y <= 7) || (x <= 7 && y >= 13);
+          const on = fv !== null ? fv : (near ? false : ((x * 7 + y * 13 + x * y * 3 + seed) % 5) < 2);
+          html += on ? '<i class="on"></i>' : '<i></i>';
+        }
+      }
+      return html;
+    }
+
+    function screenConfirm() {
+      const f = state.flight;
+      const [from, to] = route();
+      const seat = state.seat ? state.seat + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + SEAT_NAME[state.seat.slice(-1)] + '</span>' : 'Xếp khi làm thủ tục';
+      return {
+        main:
+          '<div class="check">' + ICONS.check + '</div>' +
+          '<div role="status" style="text-align:center"><h1>Đặt vé thành công</h1><div class="muted" style="font-size:13px;margin-top:2px">Booking confirmed · vé đã gửi qua SMS</div></div>' +
+          '<article class="ticket"><div class="ticket-top">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+          '<div><div class="k">Mã đặt chỗ · PNR</div><div class="pnr tnum" id="pnr">' + esc(state.pnr) + '</div></div>' +
+          '<div style="text-align:right"><div class="k">Chuyến bay</div><div style="font-size:15px;font-weight:600">' + f.no + '</div></div></div>' +
+          '<div class="legs"><div><div class="code">' + from + '</div><div class="k tnum" style="font-size:13px">' + f.dep + '</div></div>' +
+          '<div class="path"><span></span>' + ICONS.plane + '<span></span></div>' +
+          '<div style="text-align:right"><div class="code">' + to + '</div><div class="k tnum" style="font-size:13px">' + f.arr + '</div></div></div>' +
+          '<div class="ticket-grid">' +
+          '<div><div class="k">Hành khách</div><div class="v">' + esc(state.name.toUpperCase()) + '</div></div>' +
+          '<div><div class="k">Ngày · Date</div><div class="v tnum">' + pad(DATES[state.dateIdx].d) + '/11/2026</div></div>' +
+          '<div><div class="k">Ghế · Seat</div><div class="v">' + seat + '</div></div>' +
+          '<div><div class="k">Hạng · Fare</div><div class="v">Economy ' + (state.fare === 'flex' ? 'Flex' : 'Saver') + '</div></div>' +
+          '</div></div><div class="ticket-cut"></div>' +
+          '<div class="ticket-bottom"><div class="qr" role="img" aria-label="Mã QR vé · Ticket QR code"><div class="qr-grid">' + qrCells() + '</div></div>' +
+          '<div>Xuất trình mã khi làm thủ tục.<br>Cửa ra tàu cập nhật trước giờ bay. <span style="color:#94A3B8">Gate TBD</span></div></div></article>',
+        mainClass: 'done',
+        footer: '<button class="btn" data-act="done">Xong<span class="sub">· Done</span></button>'
+      };
+    }
+
+    const SCREENS = { search: screenSearch, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
+
+    // ------------------------------------------------------------ render
+    function render() {
+      const step = STEPS[state.screen];
+      document.getElementById('sheet').classList.toggle('hidden', state.minimized);
+      document.getElementById('pill').classList.toggle('hidden', !state.minimized);
+
+      document.getElementById('progress').style.display = state.screen === 'confirm' ? 'none' : '';
+      document.getElementById('step-vn').textContent = 'Bước ' + step.n + '/4 · ' + step.vn;
+      document.getElementById('step-en').textContent = step.en;
+      document.querySelectorAll('#bars span').forEach((b, i) => b.classList.toggle('on', i < step.n));
+
+      document.getElementById('pill-title').textContent = step.pill + (state.screen === 'confirm' ? ' · ' + state.pnr : ' · ' + step.n + '/4');
+      document.getElementById('pill-sub').textContent = step.pillEn + ' · chạm để mở';
+      document.querySelectorAll('#pill-bars i').forEach((b, i) => b.classList.toggle('on', i < step.n));
+      document.getElementById('pill').setAttribute('aria-label', 'Mở lại SkyLotus Air · ' + step.pill + ', bước ' + step.n + ' trên 4');
+
+      const view = SCREENS[state.screen]();
+      const main = document.getElementById('main');
+      document.getElementById('top').innerHTML = view.top || '';
+      main.className = 'main scroll' + (view.mainClass ? ' ' + view.mainClass : '');
+      main.style.cssText = view.mainStyle || '';
+      main.innerHTML = view.main;
+      document.getElementById('footer').innerHTML = view.footer;
+
+      const name = document.getElementById('name');
+      if (name) name.addEventListener('input', e => { state.name = e.target.value; });
+    }
+
+    // ------------------------------------------------------------ actions
+    const actions = {
+      minimize: () => setState({ minimized: true }),
+      restore: () => setState({ minimized: false }),
+      go: el => go(el.dataset.to),
+      swap: () => setState({ flip: !state.flip, rot: state.rot + 180 }),
+      date: el => setState({ dateIdx: +el.dataset.i }),
+      pax: el => {
+        const k = el.dataset.k, min = k === 'a' ? 1 : 0;
+        const pax = Object.assign({}, state.pax);
+        pax[k] = Math.max(min, Math.min(9, pax[k] + (+el.dataset.d)));
+        setState({ pax });
+      },
+      search: () => {
+        const [from, to] = route();
+        sendAdcMessage({ action: 'search', from, to, date: dateIso(), adults: state.pax.a, children: state.pax.c });
+        state.flightBanner = { vn: 'Tổng đài viên gợi ý chuyến SL 213', en: 'Agent suggested this flight' };
+        go('results');
+      },
+      toggle: el => setState({ open: state.open === el.dataset.no ? null : el.dataset.no }),
+      fare: el => setState({ fare: el.dataset.k }),
+      pick: el => {
+        const flight = state.flights.find(f => f.no === el.dataset.no);
+        sendAdcMessage({ action: 'select', flight: flight.no, date: dateIso(), fare: state.fare });
+        state.flight = flight;
+        state.seatBanner = { vn: 'Tổng đài viên gợi ý ghế cửa sổ ' + state.agentSeat, en: 'Agent suggested this seat' };
+        go('seat');
+      },
+      seat: el => setState({ seat: state.seat === el.dataset.id ? null : el.dataset.id }),
+      pm: el => setState({ pm: el.dataset.k }),
+      confirm: () => {
+        if (!state.name.trim()) {
+          showToast('Vui lòng nhập họ và tên · Enter a name');
+          return;
+        }
+        sendAdcMessage({
+          action: 'confirm', flight: state.flight.no, date: dateIso(), fare: state.fare, seat: state.seat || '',
+          adults: state.pax.a, children: state.pax.c, name: state.name.trim().toUpperCase(), payment: state.pm
+        });
+        setState({ booking: true });
+        clearTimeout(confirmTimer);
+        if (hasBridge()) {
+          confirmTimer = setTimeout(() => {
+            if (!state.booking) return;
+            setState({ booking: false });
+            showToast('Chưa nhận được xác nhận, vui lòng thử lại · No reply, try again');
+          }, DCAS_CONFIRM_TIMEOUT_MS);
+        } else {
+          confirmTimer = setTimeout(() => {
+            if (state.booking) confirmBooking(localPnr(), quote().total, quote().tax);
+          }, LOCAL_CONFIRM_MS);
+        }
+      },
+      done: () => {
+        clearTimeout(confirmTimer);
+        state = initialState();
+        render();
+      }
+    };
+
+    document.addEventListener('click', e => {
+      const el = e.target.closest('[data-act]');
+      if (!el || el.disabled) return;
+      actions[el.dataset.act](el);
+    });
+
+    function localPnr() {
+      const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let p = 'SL';
+      for (let i = 0; i < 4; i++) p += abc[Math.floor(Math.random() * abc.length)];
+      return p;
+    }
+
+    function confirmBooking(pnr, total, tax) {
+      clearTimeout(confirmTimer);
+      state.booking = false;
+      state.pnr = pnr;
+      state.total = total;
+      state.tax = tax;
+      go('confirm');
+    }
+
+    // ------------------------------------------------------------ DCAS replies
+    function applySeatMap(msg) {
+      if (Array.isArray(msg.taken_seats)) state.taken = msg.taken_seats;
+      if (Array.isArray(msg.extra_rows)) state.extraRows = msg.extra_rows;
+      state.agentSeat = msg.agent_seat || '';
+      if (state.seat && state.taken.indexOf(state.seat) >= 0) state.seat = null;
+    }
+
+    function onDataReceived(data) {
+      console.log('[FlightBooking] onDataReceived:', data);
+      let msg = data;
+      if (typeof data === 'string') {
+        try { msg = JSON.parse(data); } catch (e) { return; }
+      }
+      if (!msg || msg.service !== 'flight-booking') return;
+
+      if (msg.status === 'error') {
+        if (state.booking) {
+          clearTimeout(confirmTimer);
+          state.booking = false;
+        }
+        if (msg.code === 'seat_taken') {
+          // Another caller booked this seat first: refresh the map and go back to it.
+          const lost = state.seat;
+          applySeatMap(msg);
+          state.seat = state.agentSeat || null;
+          state.seatBanner = state.agentSeat
+            ? { vn: 'Ghế ' + lost + ' vừa có người đặt · gợi ý ghế ' + state.agentSeat, en: 'Seat ' + lost + ' was just taken, agent suggests ' + state.agentSeat }
+            : null;
+          go('seat');
+          if (!state.agentSeat) showToast(msg.message);
+          return;
+        }
+        render();
+        showToast(msg.message || 'Có lỗi xảy ra');
+        return;
+      }
+
+      if (msg.action === 'search' && Array.isArray(msg.flights) && msg.flights.length) {
+        state.flights = msg.flights;
+        if (msg.agent_pick) state.open = msg.agent_pick;
+        if (msg.message) state.flightBanner = { vn: msg.message, en: msg.message_en || '' };
+        if (state.screen === 'results') render();
+      } else if (msg.action === 'select') {
+        // Only move the selection if the user has not picked another seat yet.
+        const followAgent = state.seat === state.agentSeat || state.seat === null;
+        applySeatMap(msg);
+        if (followAgent) state.seat = state.agentSeat || null;
+        state.seatBanner = msg.message && state.agentSeat ? { vn: msg.message, en: msg.message_en || '' } : null;
+        if (state.screen === 'seat') render();
+      } else if (msg.action === 'confirm' && msg.status === 'confirmed' && state.booking) {
+        confirmBooking(msg.pnr || localPnr(), msg.total, msg.tax);
+      }
+    }
+
+    window.receiveData = function (jsonStr) { onDataReceived(jsonStr); };
+    window.onDataChannelMessage = function (jsonStr) { onDataReceived(jsonStr); };
+
+    // Reset hook, same contract as resetSmartMenu() for the native side.
+    window.resetFlightBooking = function () { actions.done(); };
+
+    setInterval(() => {
+      const t = Math.floor((Date.now() - callStart) / 1000);
+      document.getElementById('timer').textContent = pad(Math.floor(t / 60)) + ':' + pad(t % 60);
+    }, 1000);
+
+    render();
+  </script>
+</body>
+
+</html>

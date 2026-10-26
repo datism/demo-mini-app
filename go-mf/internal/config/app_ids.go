@@ -7,4 +7,5 @@ const (
     AppIDFunCalling   = "fun-calling-app"
     AppIDSketchSync   = "sketch-sync-app"
     AppIDSmartMenu    = "smart-menu"
+    AppIDFlightBooking = "flight-booking"
 )
