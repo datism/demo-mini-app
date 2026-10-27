@@ -676,9 +676,13 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 			headers := map[string]string{
 				"Content-Type": "application/sdp",
 			}
-			resp := b.BuildSIPResponse(msg, 200, "OK", headers, rewrittenSDP)
+			answerSDP := rewrittenSDP
+			if mSpec.AdcType != "P2A" {
+				answerSDP = hotlineReInviteAnswer(msg.Body, mfInfoA, mfInfoB, isCallerInitiator, session.ActiveAppID)
+			}
+			resp := b.BuildSIPResponse(msg, 200, "OK", headers, answerSDP)
 			b.sendUDP(resp, remoteAddr)
-			log.Printf("[IMS-AS] Replied 200 OK for Hotline 198 re-INVITE directly")
+			log.Printf("[IMS-AS] Replied 200 OK for Hotline re-INVITE directly (initiator-side MF transport)")
 			return
 		}
 
@@ -1026,4 +1030,19 @@ func (b *B2BUA) processMediaInstruction(session *CallSession, instruction *sba.M
 		b.forwardToSCSCF(forwardedInvite)
 		log.Printf("[IMS-AS] Forwarded INVITE (SDP rewritten, TermCallID=%s) to S-CSCF", session.TermCallID)
 	}
+}
+
+// hotlineReInviteAnswer builds the 200 OK a hotline (network-answered, no far-end leg) sends
+// back for an app re-INVITE. rewrittenSDP is the offer meant for the other leg, so answering
+// with it hands the phone that leg's ICE/DTLS credentials and MF's ADC never connects; the
+// answer has to describe MF's termination on the initiator's own side instead.
+func hotlineReInviteAnswer(offer string, mfInfoA, mfInfoB *MFAllocResponse, isCallerInitiator bool, appID string) string {
+	own := mfInfoA
+	if !isCallerInitiator {
+		own = mfInfoB
+	}
+	if own == nil {
+		return offer
+	}
+	return RewriteSDP(offer, own, appID)
 }
