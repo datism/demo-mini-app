@@ -944,7 +944,6 @@ class RtpMediaManager(
             val packetBuf = ByteArray(2048)
             val naluStream = ByteArrayOutputStream()
             var lastFuTimestamp = -1L
-            var lastSeq = -1
             var lostPackets = 0
             var waitingForKeyframe = false
             var skippedNalus = 0
@@ -966,11 +965,103 @@ class RtpMediaManager(
                 if (!feedDecoder(nalu, ptsMs) && videoDecoder != null) waitingForKeyframe = true
             }
 
+            // Depacketize one in-order RTP packet into NALUs.
+            fun process(pkt: ByteArray, len: Int) {
+                val timestamp = ((pkt[4].toLong() and 0xFF) shl 24) or
+                        ((pkt[5].toLong() and 0xFF) shl 16) or
+                        ((pkt[6].toLong() and 0xFF) shl 8) or
+                        (pkt[7].toLong() and 0xFF)
+
+                val payloadHeader = pkt[12].toInt() and 0xFF
+                val naluType = payloadHeader and 0x1F
+
+                if (naluType == 28) {
+                    // FU-A Fragmentation Unit
+                    val fuHeader = pkt[13].toInt() and 0xFF
+                    val isStart = (fuHeader and 0x80) != 0
+                    val isEnd = (fuHeader and 0x40) != 0
+                    val originalType = fuHeader and 0x1F
+
+                    if (isStart) {
+                        naluStream.reset()
+                        // Prepend start code 00 00 00 01
+                        naluStream.write(byteArrayOf(0, 0, 0, 1))
+                        // Reconstruct NALU header
+                        val reconstructedHeader = (payloadHeader and 0xE0) or originalType
+                        naluStream.write(reconstructedHeader)
+                        lastFuTimestamp = timestamp
+                    }
+
+                    if (timestamp == lastFuTimestamp) {
+                        // Append fragment payload
+                        naluStream.write(pkt, 14, len - 14)
+                    }
+
+                    if (isEnd && timestamp == lastFuTimestamp) {
+                        val completeNalu = naluStream.toByteArray()
+                        deliver(completeNalu, timestamp / 90) // Convert 90kHz timestamp to milliseconds
+                        naluStream.reset()
+                    }
+                } else if (naluType in 1..23) {
+                    // Single NAL Unit
+                    naluStream.reset()
+                    // Prepend start code 00 00 00 01
+                    naluStream.write(byteArrayOf(0, 0, 0, 1))
+                    naluStream.write(pkt, 12, len - 12)
+
+                    deliver(naluStream.toByteArray(), timestamp / 90)
+                    naluStream.reset()
+                }
+            }
+
+            // The network reorders packets (seen as 1504,1506,1507,1505). Hold early packets
+            // briefly and release them in sequence order; only a gap that outlives the hold
+            // window counts as loss.
+            val held = java.util.TreeMap<Int, ByteArray>() // seq distance from expected -> packet
+            var expectedSeq = -1
+            var oldestHeldAt = 0L
+            val maxHeldPackets = 32
+            val maxHoldMs = 60L
+
+            fun drain() {
+                while (true) {
+                    val pkt = held.remove(0) ?: break
+                    process(pkt, pkt.size)
+                    expectedSeq = (expectedSeq + 1) and 0xFFFF
+                    // Re-key the rest relative to the new expected seq.
+                    val rest = held.entries.map { (it.key - 1) to it.value }
+                    held.clear()
+                    rest.forEach { held[it.first] = it.second }
+                }
+                if (held.isEmpty()) oldestHeldAt = 0L
+            }
+
+            fun skipGap() {
+                val first = held.firstKey()
+                lostPackets += first
+                Log.w(TAG, "⚠️ Video RTP loss: $first packet(s) before seq ${(expectedSeq + first) and 0xFFFF} never arrived (total lost $lostPackets of $videoPacketsReceived) — freezing until keyframe")
+                waitingForKeyframe = true
+                lastFuTimestamp = -1L
+                naluStream.reset()
+                expectedSeq = (expectedSeq + first) and 0xFFFF
+                val rest = held.entries.map { (it.key - first) to it.value }
+                held.clear()
+                rest.forEach { held[it.first] = it.second }
+                oldestHeldAt = System.currentTimeMillis()
+                drain()
+            }
+
             Log.i(TAG, "Video receiver thread started, listening on socket...")
+            try { socket?.soTimeout = 20 } catch (_: Exception) {}
             while (isRunning && socket != null && !socket.isClosed) {
                 try {
                     val packet = DatagramPacket(packetBuf, packetBuf.size)
-                    socket.receive(packet)
+                    try {
+                        socket.receive(packet)
+                    } catch (_: java.net.SocketTimeoutException) {
+                        if (held.isNotEmpty() && System.currentTimeMillis() - oldestHeldAt > maxHoldMs) skipGap()
+                        continue
+                    }
                     val len = packet.length
                     if (len <= 12) continue
 
@@ -982,62 +1073,41 @@ class RtpMediaManager(
                         Log.d(TAG, "📊 Video Packets Received: $videoPacketsReceived (len=$len, from ${packet.address}:${packet.port})")
                     }
 
-                    val timestamp = ((packetBuf[4].toLong() and 0xFF) shl 24) or
-                            ((packetBuf[5].toLong() and 0xFF) shl 16) or
-                            ((packetBuf[6].toLong() and 0xFF) shl 8) or
-                            (packetBuf[7].toLong() and 0xFF)
-
                     val seq = ((packetBuf[2].toInt() and 0xFF) shl 8) or (packetBuf[3].toInt() and 0xFF)
-                    val inOrder = lastSeq < 0 || seq == ((lastSeq + 1) and 0xFFFF)
-                    if (!inOrder) {
-                        val gap = (seq - lastSeq - 1) and 0xFFFF
-                        lostPackets += if (gap in 1..1000) gap else 1
-                        Log.w(TAG, "⚠️ Video RTP loss: expected ${(lastSeq + 1) and 0xFFFF}, got $seq (total lost $lostPackets of $videoPacketsReceived) — freezing until keyframe")
-                        waitingForKeyframe = true
-                        lastFuTimestamp = -1L
-                        naluStream.reset()
+                    if (expectedSeq < 0) expectedSeq = seq
+                    val dist = (seq - expectedSeq) and 0xFFFF
+                    when {
+                        dist == 0 -> {
+                            process(packetBuf, len)
+                            expectedSeq = (expectedSeq + 1) and 0xFFFF
+                            val rest = held.entries.map { (it.key - 1) to it.value }
+                            held.clear()
+                            rest.forEach { held[it.first] = it.second }
+                            drain()
+                        }
+                        dist < 1000 -> {
+                            if (held.isEmpty()) oldestHeldAt = System.currentTimeMillis()
+                            held[dist] = packetBuf.copyOf(len)
+                        }
+                        dist > 0xFFFF - 1000 -> {
+                            continue // late duplicate or arrived after we gave up on it
+                        }
+                        else -> {
+                            // Sender restarted its sequence; resync.
+                            Log.w(TAG, "Video RTP seq jumped from $expectedSeq to $seq, resyncing")
+                            held.clear()
+                            oldestHeldAt = 0L
+                            waitingForKeyframe = true
+                            lastFuTimestamp = -1L
+                            naluStream.reset()
+                            process(packetBuf, len)
+                            expectedSeq = (seq + 1) and 0xFFFF
+                        }
                     }
-                    lastSeq = seq
 
-                    val payloadHeader = packetBuf[12].toInt() and 0xFF
-                    val naluType = payloadHeader and 0x1F
-
-                    if (naluType == 28) {
-                        // FU-A Fragmentation Unit
-                        val fuHeader = packetBuf[13].toInt() and 0xFF
-                        val isStart = (fuHeader and 0x80) != 0
-                        val isEnd = (fuHeader and 0x40) != 0
-                        val originalType = fuHeader and 0x1F
-
-                        if (isStart) {
-                            naluStream.reset()
-                            // Prepend start code 00 00 00 01
-                            naluStream.write(byteArrayOf(0, 0, 0, 1))
-                            // Reconstruct NALU header
-                            val reconstructedHeader = (payloadHeader and 0xE0) or originalType
-                            naluStream.write(reconstructedHeader)
-                            lastFuTimestamp = timestamp
-                        }
-
-                        if (timestamp == lastFuTimestamp) {
-                            // Append fragment payload
-                            naluStream.write(packetBuf, 14, len - 14)
-                        }
-
-                        if (isEnd && timestamp == lastFuTimestamp) {
-                            val completeNalu = naluStream.toByteArray()
-                            deliver(completeNalu, timestamp / 90) // Convert 90kHz timestamp to milliseconds
-                            naluStream.reset()
-                        }
-                    } else if (naluType in 1..23) {
-                        // Single NAL Unit
-                        naluStream.reset()
-                        // Prepend start code 00 00 00 01
-                        naluStream.write(byteArrayOf(0, 0, 0, 1))
-                        naluStream.write(packetBuf, 12, len - 12)
-                        
-                        deliver(naluStream.toByteArray(), timestamp / 90)
-                        naluStream.reset()
+                    while (held.isNotEmpty() &&
+                        (held.size > maxHeldPackets || System.currentTimeMillis() - oldestHeldAt > maxHoldMs)) {
+                        skipGap()
                     }
                 } catch (e: Exception) {
                     if (!isRunning) break

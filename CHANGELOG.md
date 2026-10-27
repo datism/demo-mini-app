@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Video sent from some phones (e.g. OPPO / MediaTek) showed black-and-white on the far end: the encoder is now fed through `getInputImage()` so each chip's colour layout is honoured.
 - Choppy received video: incomplete FU-A NALUs are dropped instead of decoded, the decoder gets more time for input, the video socket buffer is larger, and outgoing RTP now has correct sequence numbers and marker bits.
 - Smeared/blocky video after packet loss: the receiver now counts every RTP gap and freezes on the last good frame until the next keyframe instead of decoding broken frames; failed sends are logged and the video socket send buffer is larger.
+- Blocky video on movement: the network delivers video RTP out of order (e.g. 1504, 1506, 1507, 1505), and fragments were joined in arrival order. The receiver now holds early packets for up to 60 ms and puts them back in sequence order. Only a gap that never fills counts as loss and triggers the keyframe freeze.
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 
 ## [16.0.0] - 2026-08-20
