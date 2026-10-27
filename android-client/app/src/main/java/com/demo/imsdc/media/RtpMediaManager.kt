@@ -62,6 +62,7 @@ class RtpMediaManager(
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
     private var videoSendErrors = 0
+    @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
 
     // WebRTC connection tracking
@@ -755,6 +756,13 @@ class RtpMediaManager(
         val nalus = splitNalus(stream)
         val targetAddr = try { InetAddress.getByName(ipStr) } catch (_: Exception) { return startSeqNum }
         val lastNalu = nalus.indexOfLast { it.isNotEmpty() }
+        var sentInFrame = 0
+        // A keyframe is 20-40 packets; sent back-to-back the burst overflows Wi-Fi/VPN queues
+        // and a few packets in a row are dropped. Spread it out (well within the 40 ms frame time).
+        fun pace() {
+            sentInFrame++
+            if (sentInFrame % 4 == 0) try { Thread.sleep(1) } catch (_: InterruptedException) {}
+        }
 
         for ((idx, nalu) in nalus.withIndex()) {
             if (nalu.isEmpty()) continue
@@ -784,6 +792,7 @@ class RtpMediaManager(
                     noteVideoSendError(e)
                 }
                 seqNum = (seqNum + 1) and 0xFFFF
+                pace()
             } else {
                 // Fragmented using FU-A
                 val payloadSize = 1380
@@ -827,10 +836,41 @@ class RtpMediaManager(
                     }
                     seqNum = (seqNum + 1) and 0xFFFF
                     sentBytes += chunkSize
+                    pace()
                 }
             }
         }
         return seqNum
+    }
+
+    // RTCP PLI (RFC 4585): ask the far end for a keyframe instead of waiting up to 1 s for the next one.
+    private fun sendKeyframeRequest(socket: DatagramSocket) {
+        val ip = remoteIP ?: return
+        try {
+            val ssrc = localVideoSsrc
+            val pli = byteArrayOf(
+                0x81.toByte(), 206.toByte(), 0, 2,
+                (ssrc ushr 24).toByte(), (ssrc ushr 16).toByte(), (ssrc ushr 8).toByte(), ssrc.toByte(),
+                0, 0, 0, 0
+            )
+            socket.send(DatagramPacket(pli, pli.size, InetAddress.getByName(ip), remoteVideoPort))
+            Log.i(TAG, "📨 Sent keyframe request (PLI)")
+        } catch (e: Exception) {
+            Log.w(TAG, "PLI send failed: ${e.message}")
+        }
+    }
+
+    private fun forceKeyframe() {
+        val now = System.currentTimeMillis()
+        if (now - lastKeyframeForcedAt < 200) return
+        val encoder = videoEncoder ?: return
+        lastKeyframeForcedAt = now
+        try {
+            encoder.setParameters(android.os.Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) })
+            Log.i(TAG, "🔑 Keyframe requested by far end (PLI), encoding one now")
+        } catch (e: Exception) {
+            Log.w(TAG, "Keyframe request failed: ${e.message}")
+        }
     }
 
     // A failed send is a lost packet for the far end; it used to be swallowed silently.
@@ -1051,6 +1091,16 @@ class RtpMediaManager(
                 drain()
             }
 
+            var lastPliAt = 0L
+            // While frozen, keep asking for a keyframe (a PLI can be lost too).
+            fun requestKeyframeIfFrozen() {
+                val now = System.currentTimeMillis()
+                if (waitingForKeyframe && socket != null && now - lastPliAt > 300) {
+                    lastPliAt = now
+                    sendKeyframeRequest(socket)
+                }
+            }
+
             Log.i(TAG, "Video receiver thread started, listening on socket...")
             try { socket?.soTimeout = 20 } catch (_: Exception) {}
             while (isRunning && socket != null && !socket.isClosed) {
@@ -1060,9 +1110,15 @@ class RtpMediaManager(
                         socket.receive(packet)
                     } catch (_: java.net.SocketTimeoutException) {
                         if (held.isNotEmpty() && System.currentTimeMillis() - oldestHeldAt > maxHoldMs) skipGap()
+                        requestKeyframeIfFrozen()
                         continue
                     }
                     val len = packet.length
+                    // RTCP PLI from the far end: it lost video and wants a keyframe.
+                    if (len >= 12 && (packetBuf[1].toInt() and 0xFF) == 206 && (packetBuf[0].toInt() and 0x1F) == 1) {
+                        forceKeyframe()
+                        continue
+                    }
                     if (len <= 12) continue
 
                     val pt = packetBuf[1].toInt() and 0x7F
@@ -1109,6 +1165,7 @@ class RtpMediaManager(
                         (held.size > maxHeldPackets || System.currentTimeMillis() - oldestHeldAt > maxHoldMs)) {
                         skipGap()
                     }
+                    requestKeyframeIfFrozen()
                 } catch (e: Exception) {
                     if (!isRunning) break
                 }
