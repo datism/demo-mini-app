@@ -22,6 +22,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Hotline app re-INVITE (e.g. 1900 → flight-booking): IMS-AS answered the phone with the callee-leg ADC credentials, so the ADC stayed CONNECTING and DCAS never got search/select/confirm. The answer now carries MF's caller-side ADC transport.
+- Declining an incoming call from the notification left MT on the ringing screen while MO had already hung up. Declining now ends the call locally on MT too.
+- Video sent from some phones (e.g. OPPO / MediaTek) showed black-and-white on the far end: the encoder is now fed through `getInputImage()` so each chip's colour layout is honoured.
+- Choppy received video: incomplete FU-A NALUs are dropped instead of decoded, the decoder gets more time for input, the video socket buffer is larger, and outgoing RTP now has correct sequence numbers and marker bits.
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 
 ## [16.0.0] - 2026-08-20

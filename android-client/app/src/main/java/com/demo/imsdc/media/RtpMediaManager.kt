@@ -60,6 +60,7 @@ class RtpMediaManager(
     private var audioPacketsReceived = 0
     private var videoPacketsSent = 0
     private var videoPacketsReceived = 0
+    private var loggedEncoderLayout = false
     private var videoFramesDecoded = 0
 
     // WebRTC connection tracking
@@ -130,10 +131,10 @@ class RtpMediaManager(
             return sample.toShort()
         }
 
-        fun buildRtpHeader(payloadType: Byte, seqNum: Int, timestamp: Long, ssrc: Int): ByteArray {
+        fun buildRtpHeader(payloadType: Byte, seqNum: Int, timestamp: Long, ssrc: Int, marker: Boolean = false): ByteArray {
             val header = ByteArray(12)
             header[0] = 0x80.toByte() // Version 2
-            header[1] = (payloadType.toInt() and 0x7F).toByte()
+            header[1] = ((payloadType.toInt() and 0x7F) or (if (marker) 0x80 else 0)).toByte()
             header[2] = (seqNum ushr 8).toByte()
             header[3] = (seqNum and 0xFF).toByte()
             header[4] = (timestamp ushr 24).toByte()
@@ -245,6 +246,8 @@ class RtpMediaManager(
                 }
                 videoSocket = DatagramSocket(null).apply {
                     reuseAddress = true
+                    // An IDR frame arrives as a burst of ~30-60 packets; the default buffer can overflow.
+                    try { receiveBufferSize = 1 shl 20 } catch (_: Exception) {}
                     try {
                         bind(bindVideoAddr)
                     } catch (e: Exception) {
@@ -596,8 +599,8 @@ class RtpMediaManager(
                             outputBuffer.get(naluBytes)
 
                             // Find and packetize H.264 NALUs from the byte stream
-                            packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr)
-                            seqNum = (seqNum + (naluBytes.size / 1400) + 1) and 0xFFFF
+                            val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                            seqNum = packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, !isConfig)
                         }
                         encoder.releaseOutputBuffer(outputBufferIndex, false)
                     }
@@ -654,9 +657,44 @@ class RtpMediaManager(
                 rotatedU.rewind()
                 rotatedV.rewind()
 
-                nv12Buffer.clear()
                 val nv12Width = if (rotation == 90 || rotation == 270) outWidth else i420.width
                 val nv12Height = if (rotation == 90 || rotation == 270) outHeight else i420.height
+
+                val inputBufferIndex = encoder.dequeueInputBuffer(5000)
+                if (inputBufferIndex < 0) return@VideoSink
+                // COLOR_FormatYUV420Flexible must be filled through the Image API: chroma layout
+                // (planar I420, semi-planar NV12, padded strides) differs per chip, and copying raw
+                // NV12 into an encoder that expects another layout loses the colour (black-and-white).
+                val image = try { encoder.getInputImage(inputBufferIndex) } catch (_: Exception) { null }
+                if (image != null) {
+                    if (!loggedEncoderLayout) {
+                        loggedEncoderLayout = true
+                        val pl = image.planes
+                        Log.i(TAG, "🎨 Encoder ${encoder.name} input ${image.width}x${image.height} " +
+                                "Y(row=${pl[0].rowStride},px=${pl[0].pixelStride}) " +
+                                "U(row=${pl[1].rowStride},px=${pl[1].pixelStride}) " +
+                                "V(row=${pl[2].rowStride},px=${pl[2].pixelStride})")
+                    }
+                    val written = try {
+                        writeI420ToImage(image, rotatedY, rotatedU, rotatedV, nv12Width, nv12Height)
+                        true
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Encoder image write failed: ${e.message}")
+                        false
+                    }
+                    // Always hand the buffer back, or the encoder runs out of input slots.
+                    encoder.queueInputBuffer(
+                        inputBufferIndex,
+                        0,
+                        if (written) image.width * image.height * 3 / 2 else 0,
+                        frame.timestampNs / 1000,
+                        0
+                    )
+                    return@VideoSink
+                }
+
+                // Fallback for codecs without Image input: semi-planar NV12, as before.
+                nv12Buffer.clear()
 
                 YuvHelper.I420ToNV12(
                     rotatedY, nv12Width,
@@ -671,8 +709,7 @@ class RtpMediaManager(
                 val nv12Bytes = ByteArray(dataSize)
                 nv12Buffer.get(nv12Bytes)
 
-                val inputBufferIndex = encoder.dequeueInputBuffer(5000)
-                if (inputBufferIndex >= 0) {
+                run {
                     val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
                     if (inputBuffer != null) {
                         inputBuffer.clear()
@@ -705,24 +742,27 @@ class RtpMediaManager(
         startSeqNum: Int,
         ssrc: Int,
         socket: DatagramSocket,
-        ipStr: String?
-    ) {
-        if (ipStr == null) return
+        ipStr: String?,
+        endOfFrame: Boolean
+    ): Int {
+        if (ipStr == null) return startSeqNum
         var seqNum = startSeqNum
         val timestamp = ptsMs * 90 // 90kHz clock for H.264
 
         // Find NAL units (delimited by 0x00000001 or 0x000001)
         val nalus = splitNalus(stream)
-        val targetAddr = try { InetAddress.getByName(ipStr) } catch (_: Exception) { return }
+        val targetAddr = try { InetAddress.getByName(ipStr) } catch (_: Exception) { return startSeqNum }
+        val lastNalu = nalus.indexOfLast { it.isNotEmpty() }
 
-        for (nalu in nalus) {
+        for ((idx, nalu) in nalus.withIndex()) {
             if (nalu.isEmpty()) continue
             val naluHeader = nalu[0]
+            val lastOfFrame = endOfFrame && idx == lastNalu
 
             if (nalu.size <= 1400) {
                 // Single NAL unit packet
                 try {
-                    val rtpHeader = buildRtpHeader(97, seqNum++, timestamp, ssrc)
+                    val rtpHeader = buildRtpHeader(97, seqNum, timestamp, ssrc, lastOfFrame)
                     val packetBytes = ByteArray(12 + nalu.size)
                     System.arraycopy(rtpHeader, 0, packetBytes, 0, 12)
                     System.arraycopy(nalu, 0, packetBytes, 12, nalu.size)
@@ -741,6 +781,7 @@ class RtpMediaManager(
                 } catch (e: Exception) {
                     // Ignore
                 }
+                seqNum = (seqNum + 1) and 0xFFFF
             } else {
                 // Fragmented using FU-A
                 val payloadSize = 1380
@@ -761,7 +802,7 @@ class RtpMediaManager(
                     val fuHeader = fuHeaderVal.toByte()
 
                     try {
-                        val rtpHeader = buildRtpHeader(97, seqNum++, timestamp, ssrc)
+                        val rtpHeader = buildRtpHeader(97, seqNum, timestamp, ssrc, lastOfFrame && isEnd)
                         val packetBytes = ByteArray(12 + 2 + chunkSize)
                         System.arraycopy(rtpHeader, 0, packetBytes, 0, 12)
                         packetBytes[12] = fuIndicator
@@ -782,10 +823,50 @@ class RtpMediaManager(
                     } catch (e: Exception) {
                         // Ignore
                     }
+                    seqNum = (seqNum + 1) and 0xFFFF
                     sentBytes += chunkSize
                 }
             }
         }
+        return seqNum
+    }
+
+    // Copies tightly packed I420 planes into an encoder input Image, honouring its strides.
+    private fun writeI420ToImage(image: android.media.Image, y: ByteBuffer, u: ByteBuffer, v: ByteBuffer, srcW: Int, srcH: Int) {
+        val w = minOf(srcW, image.width)
+        val h = minOf(srcH, image.height)
+        val planes = image.planes
+        copyPlane(y, srcW, planes[0], w, h)
+        copyPlane(u, srcW / 2, planes[1], w / 2, h / 2)
+        copyPlane(v, srcW / 2, planes[2], w / 2, h / 2)
+    }
+
+    private fun copyPlane(src: ByteBuffer, srcStride: Int, plane: android.media.Image.Plane, w: Int, h: Int) {
+        val dst = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        if (pixelStride == 1) {
+            val row = ByteArray(w)
+            for (r in 0 until h) {
+                src.position(r * srcStride)
+                src.get(row, 0, w)
+                dst.position(r * rowStride)
+                dst.put(row, 0, w)
+            }
+        } else {
+            // Semi-planar (U and V interleaved): each sample goes every pixelStride bytes.
+            // The last sample of the last row may sit past the buffer end, so bound by limit.
+            val limit = dst.limit()
+            for (r in 0 until h) {
+                val srcRow = r * srcStride
+                val dstRow = r * rowStride
+                for (c in 0 until w) {
+                    val idx = dstRow + c * pixelStride
+                    if (idx < limit) dst.put(idx, src.get(srcRow + c))
+                }
+            }
+        }
+        src.rewind()
     }
 
     private fun splitNalus(stream: ByteArray): List<ByteArray> {
@@ -853,6 +934,8 @@ class RtpMediaManager(
             val packetBuf = ByteArray(2048)
             val naluStream = ByteArrayOutputStream()
             var lastFuTimestamp = -1L
+            var lastSeq = -1
+            var droppedNalus = 0
 
             Log.i(TAG, "Video receiver thread started, listening on socket...")
             while (isRunning && socket != null && !socket.isClosed) {
@@ -875,6 +958,10 @@ class RtpMediaManager(
                             ((packetBuf[6].toLong() and 0xFF) shl 8) or
                             (packetBuf[7].toLong() and 0xFF)
 
+                    val seq = ((packetBuf[2].toInt() and 0xFF) shl 8) or (packetBuf[3].toInt() and 0xFF)
+                    val inOrder = lastSeq < 0 || seq == ((lastSeq + 1) and 0xFFFF)
+                    lastSeq = seq
+
                     val payloadHeader = packetBuf[12].toInt() and 0xFF
                     val naluType = payloadHeader and 0x1F
 
@@ -893,6 +980,16 @@ class RtpMediaManager(
                             val reconstructedHeader = (payloadHeader and 0xE0) or originalType
                             naluStream.write(reconstructedHeader)
                             lastFuTimestamp = timestamp
+                        }
+
+                        if (!isStart && !inOrder && lastFuTimestamp != -1L) {
+                            // A fragment of this NALU was lost: feeding the rest corrupts the picture.
+                            lastFuTimestamp = -1L
+                            naluStream.reset()
+                            droppedNalus++
+                            if (droppedNalus == 1 || droppedNalus % 20 == 0) {
+                                Log.w(TAG, "⚠️ Dropped $droppedNalus incomplete video NALUs (RTP loss)")
+                            }
                         }
 
                         if (timestamp == lastFuTimestamp) {
@@ -929,7 +1026,9 @@ class RtpMediaManager(
         if (surface == null || !surface.isValid) return  // Surface not valid or destroyed
 
         try {
-            val inputBufferIndex = decoder.dequeueInputBuffer(2000)
+            // Wait up to 10 ms: a NALU dropped here breaks every frame until the next keyframe.
+            val inputBufferIndex = decoder.dequeueInputBuffer(10000)
+            if (inputBufferIndex < 0) Log.w(TAG, "Decoder input busy, video NALU dropped")
             if (inputBufferIndex >= 0) {
                 val inputBuffer = decoder.getInputBuffer(inputBufferIndex) ?: return
                 inputBuffer.clear()

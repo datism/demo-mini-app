@@ -865,6 +865,13 @@ class SipManager(
             )
             Log.i(TAG, "→ 603 Decline (rejecting INVITE)")
             sendRaw(response)
+
+            // Declining can come from the notification while CallActivity is already showing
+            // the ringing screen, so end the call locally the same way a CANCEL or BYE does.
+            val ctx = appContext ?: Companion.appContext
+            ctx?.let { IncomingCallNotificationManager.dismiss(it) }
+            resetCallState()
+            onCallEnded?.invoke()
         }
 
     // ─── BYE ─────────────────────────────────────────────────────────────────
