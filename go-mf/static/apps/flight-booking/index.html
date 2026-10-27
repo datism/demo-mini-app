@@ -1255,7 +1255,7 @@
         screen: 'search', minimized: false,
         flip: false, rot: 0, dateIdx: 3, pax: { a: 1, c: 0 },
         flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
-        taken: LOCAL_TAKEN, extraRows: [1, 11], seat: '4A', agentSeat: '4A', seatBanner: null,
+        taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
         name: 'NGUYỄN VĂN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
       };
     }
@@ -1276,11 +1276,38 @@
     const seatRow = s => parseInt(s, 10);
     const isExtra = s => !!s && state.extraRows.indexOf(seatRow(s)) >= 0;
     const farePerPax = f => f.price + (state.fare === 'flex' ? FLEX : 0);
+    const seatList = seats => seats.join(', ');
+    const sameSeats = (a, b) => a.length === b.length && a.every(s => b.indexOf(s) >= 0);
+    const seatDesc = seats => seats.length === 1 ? 'Ghế ' + seats[0] + ' · ' + SEAT_NAME[seats[0].slice(-1)] : 'Ghế ' + seatList(seats);
+
+    // Browser-preview copy of DCAS's suggestion: one window seat, or n free standard
+    // seats side by side in one row (a block touching a window first).
+    function localAgentSeats(n) {
+      const free = id => state.taken.indexOf(id) < 0;
+      if (n <= 1) return free('4A') ? ['4A'] : [];
+      const cols = ['A', 'B', 'C', 'D', 'E', 'F'];
+      for (const windowOnly of [true, false]) {
+        for (let r = 2; r <= 20; r++) {
+          if (state.extraRows.indexOf(r) >= 0) continue;
+          for (let st = 0; st + n <= 6; st++) {
+            if (windowOnly && st !== 0 && st + n !== 6) continue;
+            const block = cols.slice(st, st + n).map(c => r + c);
+            if (block.every(free)) return block;
+          }
+        }
+      }
+      const out = [];
+      for (let r = 2; r <= 20 && out.length < n; r++) {
+        if (state.extraRows.indexOf(r) >= 0) continue;
+        cols.forEach(c => { if (out.length < n && free(r + c)) out.push(r + c); });
+      }
+      return out;
+    }
 
     function quote() {
       const f = state.flight;
       const fare = farePerPax(f) * paxCount();
-      const seatFee = isExtra(state.seat) ? EXTRA_FEE : 0;
+      const seatFee = state.seats.filter(isExtra).length * EXTRA_FEE;
       const tax = TAX * paxCount();
       return { fare: fare - tax, seatFee, tax, total: fare + seatFee };
     }
@@ -1400,7 +1427,7 @@
         const id = n + c;
         const taken = state.taken.indexOf(id) >= 0;
         const extra = state.extraRows.indexOf(n) >= 0;
-        const sel = id === state.seat;
+        const sel = state.seats.indexOf(id) >= 0;
         const cls = 'seat' + (taken ? ' taken' : extra ? ' extra' : '') + (sel ? ' sel' : '');
         const aria = 'Ghế ' + id + ', ' + SEAT_NAME[c] + (taken ? ', đã đặt' : extra ? ', rộng chân +150.000₫' : '');
         return '<button class="' + cls + '" data-act="seat" data-id="' + id + '"' + (taken ? ' disabled' : '') + ' aria-label="' + aria + '" aria-pressed="' + sel + '">' + (sel ? ICONS.tick : '') + '</button>';
@@ -1410,15 +1437,20 @@
         if (n === 11) grid += '<div class="exit"><span>‹ Cửa thoát hiểm</span><span>Exit ›</span></div>';
         grid += '<div class="seat-row">' + ['A', 'B', 'C'].map(c => seatBtn(n, c)).join('') + '<span class="rn tnum">' + n + '</span>' + ['D', 'E', 'F'].map(c => seatBtn(n, c)).join('') + '</div>';
       }
-      const s = state.seat;
-      const what = s ? 'Ghế ' + s + ' · ' + SEAT_NAME[s.slice(-1)] : 'Chưa chọn ghế';
-      const fee = !s ? 'Bỏ qua: xếp ngẫu nhiên miễn phí · Skip'
-        : isExtra(s) ? '+150.000₫ · ghế rộng chân'
-          : state.fare === 'flex' ? 'Miễn phí với hạng Flex' : 'Miễn phí · ghế tiêu chuẩn';
-      const tip = state.seatBanner && s === state.agentSeat;
+      const seats = state.seats, need = paxCount();
+      const missing = seats.length > 0 && seats.length < need;
+      const extras = seats.filter(isExtra).length;
+      const what = !seats.length ? 'Chưa chọn ghế'
+        : (need > 1 ? 'Đã chọn ' + seats.length + '/' + need + ' · ' : '') + seatDesc(seats);
+      const fee = !seats.length ? 'Bỏ qua: xếp ngẫu nhiên miễn phí · Skip'
+        : missing ? 'Chọn thêm ' + (need - seats.length) + ' ghế · Pick ' + (need - seats.length) + ' more'
+          : extras ? '+' + money(extras * EXTRA_FEE) + ' · ghế rộng chân'
+            : state.fare === 'flex' ? 'Miễn phí với hạng Flex' : 'Miễn phí · ghế tiêu chuẩn';
+      const tip = state.seatBanner && sameSeats(seats, state.agentSeats);
+      const subtitle = state.flight.no + ' · Airbus A321 · ' + (need > 1 ? 'Chọn ' + need + ' ghế · ' + need + ' seats' : 'Choose a seat');
       return {
         top:
-          '<div class="seat-top">' + titleRow('results', 'Chọn ghế', state.flight.no + ' · Airbus A321 · Choose a seat') +
+          '<div class="seat-top">' + titleRow('results', 'Chọn ghế', subtitle) +
           (tip ? banner(state.seatBanner.vn, state.seatBanner.en) : '') +
           '<div class="legend"><span><i style="border:1px solid #CBD5E1;background:#FFFFFF"></i>Trống</span><span><i style="background:#ECEEF2"></i>Đã đặt</span>' +
           '<span><i style="border:1px solid #0EA5E9;background:#F0F9FF"></i>Rộng chân +150K</span><span><i style="background:#0270AD"></i>Đang chọn</span></div></div>',
@@ -1427,7 +1459,7 @@
           '<div class="seat-grid">' + grid + '</div></div>',
         mainStyle: 'padding-top:12px',
         footer: '<div class="seat-footer"><div class="what"><b>' + what + '</b><span class="caption tnum">' + fee + '</span></div>' +
-          '<button class="btn" data-act="go" data-to="review">Tiếp tục' + ICONS.next + '</button></div>'
+          '<button class="btn" data-act="go" data-to="review"' + (missing ? ' disabled' : '') + '>Tiếp tục' + ICONS.next + '</button></div>'
       };
     }
 
@@ -1439,9 +1471,10 @@
       const methods = METHODS.map(m =>
         '<button role="radio" aria-checked="' + (m.k === state.pm) + '" class="choice method tap' + (m.k === state.pm ? ' sel' : '') + '" data-act="pm" data-k="' + m.k + '">' +
         '<span class="ic">' + ICONS[m.k] + '</span><span class="lbl">' + m.vn + '<small>' + m.en + '</small></span><span class="radio"><i></i></span></button>').join('');
-      const seatLine = state.seat
-        ? 'Ghế ' + state.seat + ' <span class="muted">· ' + SEAT_NAME[state.seat.slice(-1)] + '</span>'
-        : '<span class="muted">Xếp ghế ngẫu nhiên</span>';
+      const seatLine = state.seats.length === 1
+        ? 'Ghế ' + state.seats[0] + ' <span class="muted">· ' + SEAT_NAME[state.seats[0].slice(-1)] + '</span>'
+        : state.seats.length ? 'Ghế ' + seatList(state.seats)
+          : '<span class="muted">Xếp ghế ngẫu nhiên</span>';
       return {
         main:
           titleRow('seat', 'Xem lại &amp; thanh toán', 'Review &amp; pay') +
@@ -1455,7 +1488,7 @@
           '<div><div class="group-label">Thanh toán · Payment</div><div class="methods" role="radiogroup" aria-label="Phương thức thanh toán">' + methods + '</div>' +
           '<div class="note">' + ICONS.info + '<span>Bản demo: thanh toán mô phỏng, không trừ tiền thật. Demo only — no real charge.</span></div></div>' +
           '<div><div class="sum-row"><span class="muted">Vé ' + fareName + ' · ' + paxText() + '</span><span class="tnum">' + money(q.fare) + '</span></div>' +
-          (q.seatFee ? '<div class="sum-row"><span class="muted">Ghế rộng chân · Extra legroom</span><span class="tnum">' + money(q.seatFee) + '</span></div>' : '') +
+          (q.seatFee ? '<div class="sum-row"><span class="muted">Ghế rộng chân · Extra legroom' + (q.seatFee > EXTRA_FEE ? ' ×' + q.seatFee / EXTRA_FEE : '') + '</span><span class="tnum">' + money(q.seatFee) + '</span></div>' : '') +
           '<div class="sum-row last"><span class="muted">Thuế &amp; phí · Taxes</span><span class="tnum">' + money(q.tax) + '</span></div>' +
           '<div class="sum-total"><span>Tổng · Total</span><b class="tnum">' + money(q.total) + '</b></div></div>',
         footer: state.booking
@@ -1490,7 +1523,9 @@
     function screenConfirm() {
       const f = state.flight;
       const [from, to] = route();
-      const seat = state.seat ? state.seat + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + SEAT_NAME[state.seat.slice(-1)] + '</span>' : 'Xếp khi làm thủ tục';
+      const seat = state.seats.length === 1
+        ? state.seats[0] + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + SEAT_NAME[state.seats[0].slice(-1)] + '</span>'
+        : state.seats.length ? seatList(state.seats) : 'Xếp khi làm thủ tục';
       return {
         main:
           '<div class="check">' + ICONS.check + '</div>' +
@@ -1568,12 +1603,28 @@
       fare: el => setState({ fare: el.dataset.k }),
       pick: el => {
         const flight = state.flights.find(f => f.no === el.dataset.no);
-        sendAdcMessage({ action: 'select', flight: flight.no, date: dateIso(), fare: state.fare });
+        sendAdcMessage({ action: 'select', flight: flight.no, date: dateIso(), fare: state.fare, adults: state.pax.a, children: state.pax.c });
         state.flight = flight;
-        state.seatBanner = { vn: 'Tổng đài viên gợi ý ghế cửa sổ ' + state.agentSeat, en: 'Agent suggested this seat' };
+        // Size the selection to the passenger count now; DCAS's reply refines it.
+        state.agentSeats = localAgentSeats(paxCount());
+        state.seats = state.agentSeats.slice();
+        state.seatBanner = state.agentSeats.length
+          ? (state.agentSeats.length === 1
+            ? { vn: 'Tổng đài viên gợi ý ghế cửa sổ ' + state.agentSeats[0], en: 'Agent suggested this seat' }
+            : { vn: 'Tổng đài viên gợi ý ghế ' + seatList(state.agentSeats) + ' ngồi cạnh nhau', en: 'Agent suggested these seats' })
+          : null;
         go('seat');
       },
-      seat: el => setState({ seat: state.seat === el.dataset.id ? null : el.dataset.id }),
+      // One seat per passenger: tap toggles; when all are chosen a new tap replaces the oldest.
+      seat: el => {
+        const id = el.dataset.id;
+        let seats = state.seats.filter(s => s !== id);
+        if (seats.length === state.seats.length) {
+          seats.push(id);
+          if (seats.length > paxCount()) seats = seats.slice(seats.length - paxCount());
+        }
+        setState({ seats });
+      },
       pm: el => setState({ pm: el.dataset.k }),
       confirm: () => {
         if (!state.name.trim()) {
@@ -1581,7 +1632,7 @@
           return;
         }
         sendAdcMessage({
-          action: 'confirm', flight: state.flight.no, date: dateIso(), fare: state.fare, seat: state.seat || '',
+          action: 'confirm', flight: state.flight.no, date: dateIso(), fare: state.fare, seats: state.seats, seat: state.seats[0] || '',
           adults: state.pax.a, children: state.pax.c, name: state.name.trim().toUpperCase(), payment: state.pm
         });
         setState({ booking: true });
@@ -1631,8 +1682,8 @@
     function applySeatMap(msg) {
       if (Array.isArray(msg.taken_seats)) state.taken = msg.taken_seats;
       if (Array.isArray(msg.extra_rows)) state.extraRows = msg.extra_rows;
-      state.agentSeat = msg.agent_seat || '';
-      if (state.seat && state.taken.indexOf(state.seat) >= 0) state.seat = null;
+      state.agentSeats = Array.isArray(msg.agent_seats) ? msg.agent_seats : msg.agent_seat ? [msg.agent_seat] : [];
+      state.seats = state.seats.filter(s => state.taken.indexOf(s) < 0);
     }
 
     function onDataReceived(data) {
@@ -1650,14 +1701,15 @@
         }
         if (msg.code === 'seat_taken') {
           // Another caller booked this seat first: refresh the map and go back to it.
-          const lost = state.seat;
+          const lost = state.seats.filter(s => (msg.taken_seats || []).indexOf(s) >= 0);
           applySeatMap(msg);
-          state.seat = state.agentSeat || null;
-          state.seatBanner = state.agentSeat
-            ? { vn: 'Ghế ' + lost + ' vừa có người đặt · gợi ý ghế ' + state.agentSeat, en: 'Seat ' + lost + ' was just taken, agent suggests ' + state.agentSeat }
+          state.seats = state.agentSeats.slice();
+          const ag = seatList(state.agentSeats);
+          state.seatBanner = state.agentSeats.length
+            ? { vn: 'Ghế ' + seatList(lost) + ' vừa có người đặt · gợi ý ghế ' + ag, en: 'Seat ' + seatList(lost) + ' was just taken, agent suggests ' + ag }
             : null;
           go('seat');
-          if (!state.agentSeat) showToast(msg.message);
+          if (!state.agentSeats.length) showToast(msg.message);
           return;
         }
         render();
@@ -1672,10 +1724,10 @@
         if (state.screen === 'results') render();
       } else if (msg.action === 'select') {
         // Only move the selection if the user has not picked another seat yet.
-        const followAgent = state.seat === state.agentSeat || state.seat === null;
+        const followAgent = !state.seats.length || sameSeats(state.seats, state.agentSeats);
         applySeatMap(msg);
-        if (followAgent) state.seat = state.agentSeat || null;
-        state.seatBanner = msg.message && state.agentSeat ? { vn: msg.message, en: msg.message_en || '' } : null;
+        if (followAgent) state.seats = state.agentSeats.slice();
+        state.seatBanner = msg.message && state.agentSeats.length ? { vn: msg.message, en: msg.message_en || '' } : null;
         if (state.screen === 'seat') render();
       } else if (msg.action === 'confirm' && msg.status === 'confirmed' && state.booking) {
         confirmBooking(msg.pnr || localPnr(), msg.total, msg.tax);

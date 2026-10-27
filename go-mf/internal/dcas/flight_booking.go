@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -25,18 +26,19 @@ const (
 )
 
 type FlightBookingRequest struct {
-	Service  string `json:"service"`
-	Action   string `json:"action"`
-	From     string `json:"from,omitempty"`
-	To       string `json:"to,omitempty"`
-	Date     string `json:"date,omitempty"`
-	Adults   int    `json:"adults,omitempty"`
-	Children int    `json:"children,omitempty"`
-	Flight   string `json:"flight,omitempty"`
-	Fare     string `json:"fare,omitempty"`
-	Seat     string `json:"seat,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Payment  string `json:"payment,omitempty"`
+	Service  string   `json:"service"`
+	Action   string   `json:"action"`
+	From     string   `json:"from,omitempty"`
+	To       string   `json:"to,omitempty"`
+	Date     string   `json:"date,omitempty"`
+	Adults   int      `json:"adults,omitempty"`
+	Children int      `json:"children,omitempty"`
+	Flight   string   `json:"flight,omitempty"`
+	Fare     string   `json:"fare,omitempty"`
+	Seat     string   `json:"seat,omitempty"`  // single seat, kept for older pages
+	Seats    []string `json:"seats,omitempty"` // one seat per passenger
+	Name     string   `json:"name,omitempty"`
+	Payment  string   `json:"payment,omitempty"`
 }
 
 type FlightOption struct {
@@ -59,7 +61,8 @@ type FlightBookingResponse struct {
 	TakenSeats []string       `json:"taken_seats,omitempty"`
 	ExtraRows  []int          `json:"extra_rows,omitempty"`
 	AgentSeat  string         `json:"agent_seat,omitempty"`
-	Code       string         `json:"code,omitempty"` // "seat_taken" when another caller got the seat first
+	AgentSeats []string       `json:"agent_seats,omitempty"` // one per passenger, side by side when possible
+	Code       string         `json:"code,omitempty"`        // "seat_taken" when another caller got the seat first
 	PNR        string         `json:"pnr,omitempty"`
 	Total      int            `json:"total,omitempty"`
 	Tax        int            `json:"tax,omitempty"`
@@ -115,16 +118,26 @@ func (st *flightSeatStore) isTaken(key, seat string) bool {
 
 // claim books seat if it is still free; check and set happen under one lock.
 func (st *flightSeatStore) claim(key, seat string) bool {
+	return st.claimAll(key, []string{seat}) == ""
+}
+
+// claimAll books every seat or none. It returns the first seat that was
+// already taken, or "" on success.
+func (st *flightSeatStore) claimAll(key string, seats []string) string {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if seatTaken(seat) || st.booked[key][seat] {
-		return false
+	for _, seat := range seats {
+		if seatTaken(seat) || st.booked[key][seat] {
+			return seat
+		}
 	}
 	if st.booked[key] == nil {
 		st.booked[key] = make(map[string]bool)
 	}
-	st.booked[key][seat] = true
-	return true
+	for _, seat := range seats {
+		st.booked[key][seat] = true
+	}
+	return ""
 }
 
 // agentSeat suggests 4A, or the frontmost free standard window seat once 4A is gone.
@@ -143,6 +156,82 @@ func (st *flightSeatStore) agentSeat(key string) string {
 	return ""
 }
 
+// agentSeats suggests n seats. One passenger gets agentSeat; a group gets n free
+// standard seats next to each other in one row (a block touching a window first),
+// or the frontmost free standard seats when no row has room.
+func (st *flightSeatStore) agentSeats(key string, n int) []string {
+	if n <= 1 {
+		if seat := st.agentSeat(key); seat != "" {
+			return []string{seat}
+		}
+		return nil
+	}
+	cols := []string{"A", "B", "C", "D", "E", "F"}
+	if n <= len(cols) {
+		for _, windowOnly := range []bool{true, false} {
+			for row := 2; row <= flightRows; row++ {
+				if isExtraRow(row) {
+					continue
+				}
+				for start := 0; start+n <= len(cols); start++ {
+					if windowOnly && start != 0 && start+n != len(cols) {
+						continue
+					}
+					block := make([]string, 0, n)
+					for _, col := range cols[start : start+n] {
+						seat := strconv.Itoa(row) + col
+						if st.isTaken(key, seat) {
+							break
+						}
+						block = append(block, seat)
+					}
+					if len(block) == n {
+						return block
+					}
+				}
+			}
+		}
+	}
+	var out []string
+	for row := 2; row <= flightRows && len(out) < n; row++ {
+		if isExtraRow(row) {
+			continue
+		}
+		for _, col := range cols {
+			seat := strconv.Itoa(row) + col
+			if len(out) < n && !st.isTaken(key, seat) {
+				out = append(out, seat)
+			}
+		}
+	}
+	return out
+}
+
+func paxCount(req FlightBookingRequest) int {
+	if pax := req.Adults + req.Children; pax > 0 {
+		return pax
+	}
+	return 1
+}
+
+// requestedSeats returns the seats list, falling back to the single seat field.
+func requestedSeats(req FlightBookingRequest) []string {
+	if len(req.Seats) > 0 {
+		return req.Seats
+	}
+	if req.Seat != "" {
+		return []string{req.Seat}
+	}
+	return nil
+}
+
+func agentSeatMessage(seats []string) (string, string) {
+	if len(seats) == 1 {
+		return "Tổng đài viên gợi ý ghế cửa sổ " + seats[0], "Agent suggested this seat"
+	}
+	return "Tổng đài viên gợi ý ghế " + strings.Join(seats, ", ") + " ngồi cạnh nhau", "Agent suggested these seats"
+}
+
 func (s *DCASServer) handleFlightBookingMessage(sessionID string, data []byte) {
 	log.Printf("[DCAS] Flight Booking Event from Session %s: %s", sessionID, string(data))
 
@@ -153,7 +242,7 @@ func (s *DCASServer) handleFlightBookingMessage(sessionID string, data []byte) {
 
 	resp := buildFlightBookingReply(req, newFlightPNR, flightSeats)
 	if resp.Status == "confirmed" {
-		log.Printf("[DCAS] Session %s booked %s (%s, seat %s) PNR=%s total=%d", sessionID, req.Flight, req.Fare, req.Seat, resp.PNR, resp.Total)
+		log.Printf("[DCAS] Session %s booked %s (%s, seats %s) PNR=%s total=%d", sessionID, req.Flight, req.Fare, strings.Join(requestedSeats(req), ","), resp.PNR, resp.Total)
 	}
 	s.sendToSession(sessionID, "1000", resp)
 }
@@ -180,10 +269,10 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 		key := flightKey(req.Flight, req.Date)
 		resp.TakenSeats = seats.taken(key)
 		resp.ExtraRows = flightExtraRows
-		resp.AgentSeat = seats.agentSeat(key)
-		if resp.AgentSeat != "" {
-			resp.Message = "Tổng đài viên gợi ý ghế cửa sổ " + resp.AgentSeat
-			resp.MessageEn = "Agent suggested this seat"
+		resp.AgentSeats = seats.agentSeats(key, paxCount(req))
+		if len(resp.AgentSeats) > 0 {
+			resp.AgentSeat = resp.AgentSeats[0]
+			resp.Message, resp.MessageEn = agentSeatMessage(resp.AgentSeats)
 		}
 	case "confirm":
 		f := findFlight(req.Flight)
@@ -193,17 +282,28 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 		if req.Fare != "saver" && req.Fare != "flex" {
 			return flightError(resp, "Hạng vé không hợp lệ")
 		}
-		if req.Seat != "" && !validSeat(req.Seat) {
-			return flightError(resp, "Ghế không hợp lệ")
+		want := requestedSeats(req)
+		if len(want) > paxCount(req) {
+			return flightError(resp, "Số ghế nhiều hơn số hành khách")
+		}
+		seen := map[string]bool{}
+		for _, seat := range want {
+			if !validSeat(seat) || seen[seat] {
+				return flightError(resp, "Ghế không hợp lệ")
+			}
+			seen[seat] = true
 		}
 		key := flightKey(req.Flight, req.Date)
-		if req.Seat != "" && !seats.claim(key, req.Seat) {
-			resp = flightError(resp, "Ghế "+req.Seat+" vừa có người đặt, vui lòng chọn ghế khác")
+		if lost := seats.claimAll(key, want); lost != "" {
+			resp = flightError(resp, "Ghế "+lost+" vừa có người đặt, vui lòng chọn ghế khác")
 			resp.MessageEn = "Seat just taken, please pick another"
 			resp.Code = "seat_taken"
 			resp.TakenSeats = seats.taken(key)
 			resp.ExtraRows = flightExtraRows
-			resp.AgentSeat = seats.agentSeat(key)
+			resp.AgentSeats = seats.agentSeats(key, paxCount(req))
+			if len(resp.AgentSeats) > 0 {
+				resp.AgentSeat = resp.AgentSeats[0]
+			}
 			return resp
 		}
 		resp.Status = "confirmed"
@@ -273,17 +373,16 @@ func validSeat(seat string) bool {
 
 // flightTotal returns the amount due and the tax part of it.
 func flightTotal(f FlightOption, req FlightBookingRequest) (int, int) {
-	pax := req.Adults + req.Children
-	if pax < 1 {
-		pax = 1
-	}
+	pax := paxCount(req)
 	perPax := f.Price
 	if req.Fare == "flex" {
 		perPax += flightFlexSurcharge
 	}
 	total := perPax * pax
-	if req.Seat != "" && isExtraRow(seatRow(req.Seat)) {
-		total += flightExtraSeatFee
+	for _, seat := range requestedSeats(req) {
+		if isExtraRow(seatRow(seat)) {
+			total += flightExtraSeatFee
+		}
 	}
 	return total, flightTaxPerPax * pax
 }

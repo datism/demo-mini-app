@@ -163,3 +163,65 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestFlightSelectSuggestsSeatsTogetherForGroup(t *testing.T) {
+	resp := buildFlightBookingReply(FlightBookingRequest{Action: "select", Flight: "SL 213", Date: "2026-11-12", Adults: 2, Children: 1}, fixedPNR, newFlightSeatStore())
+	if len(resp.AgentSeats) != 3 {
+		t.Fatalf("want 3 suggested seats for 3 passengers, got %v", resp.AgentSeats)
+	}
+	row := seatRow(resp.AgentSeats[0])
+	for _, s := range resp.AgentSeats {
+		if seatTaken(s) || seatRow(s) != row || isExtraRow(row) {
+			t.Errorf("suggested seats should be free, standard and in one row, got %v", resp.AgentSeats)
+		}
+	}
+	if resp.AgentSeat != resp.AgentSeats[0] {
+		t.Errorf("agent_seat should stay the first suggested seat, got %s vs %v", resp.AgentSeat, resp.AgentSeats)
+	}
+
+	one := buildFlightBookingReply(FlightBookingRequest{Action: "select", Flight: "SL 213", Adults: 1}, fixedPNR, newFlightSeatStore())
+	if len(one.AgentSeats) != 1 || one.AgentSeats[0] != flightAgentSeat {
+		t.Errorf("single passenger should still get %s, got %v", flightAgentSeat, one.AgentSeats)
+	}
+}
+
+func TestFlightConfirmBooksEverySeat(t *testing.T) {
+	seats := newFlightSeatStore()
+	req := FlightBookingRequest{Action: "confirm", Flight: "SL 201", Date: "2026-11-12", Fare: "saver", Seats: []string{"11B", "11C"}, Adults: 2}
+	r := buildFlightBookingReply(req, fixedPNR, seats)
+	if r.Status != "confirmed" {
+		t.Fatalf("two-seat booking should succeed, got %+v", r)
+	}
+	if want := 1479000*2 + 2*flightExtraSeatFee; r.Total != want {
+		t.Errorf("extra legroom fee applies per seat: total %d, want %d", r.Total, want)
+	}
+	taken := seats.taken(flightKey("SL 201", "2026-11-12"))
+	if !contains(taken, "11B") || !contains(taken, "11C") {
+		t.Errorf("both seats should now be taken, got %v", taken)
+	}
+}
+
+func TestFlightConfirmGroupIsAllOrNothing(t *testing.T) {
+	seats := newFlightSeatStore()
+	key := flightKey("SL 213", "2026-11-12")
+	seats.claim(key, "5B")
+	r := buildFlightBookingReply(FlightBookingRequest{Action: "confirm", Flight: "SL 213", Date: "2026-11-12", Fare: "flex", Seats: []string{"5A", "5B"}, Adults: 2}, fixedPNR, seats)
+	if r.Status != "error" || r.Code != "seat_taken" || len(r.AgentSeats) != 2 {
+		t.Fatalf("want seat_taken with 2 new suggestions, got %+v", r)
+	}
+	if seats.isTaken(key, "5A") {
+		t.Errorf("5A must not stay booked when the group booking failed")
+	}
+}
+
+func TestFlightConfirmRejectsBadSeatLists(t *testing.T) {
+	for _, req := range []FlightBookingRequest{
+		{Action: "confirm", Flight: "SL 213", Fare: "flex", Seats: []string{"5A", "5A"}, Adults: 2},
+		{Action: "confirm", Flight: "SL 213", Fare: "flex", Seats: []string{"5A", "5B"}, Adults: 1},
+		{Action: "confirm", Flight: "SL 213", Fare: "flex", Seats: []string{"5A", "21B"}, Adults: 2},
+	} {
+		if r := buildFlightBookingReply(req, fixedPNR, newFlightSeatStore()); r.Status != "error" {
+			t.Errorf("seats %v for %d pax should be rejected, got %+v", req.Seats, req.Adults, r)
+		}
+	}
+}
