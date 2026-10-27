@@ -599,7 +599,11 @@ class CallActivity : AppCompatActivity() {
 
     private fun setupUI() {
         binding.tvRemoteUser.text = remoteUser
-        binding.tvLocation.text = "+84 900 00$remoteUser Vietnam"
+        val initial = remoteUser.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        binding.tvTopAvatar.text = initial
+        binding.tvBigAvatar.text = initial
+        binding.tvBigName.text = remoteUser
+        startAvatarPulse()
         
         // Setup background placeholder & details defaults
         binding.viewBackgroundPlaceholder.visibility = View.VISIBLE
@@ -614,9 +618,7 @@ class CallActivity : AppCompatActivity() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             audioManager.isMicrophoneMute = !audioManager.isMicrophoneMute
             val isMuted = audioManager.isMicrophoneMute
-            binding.btnMute.backgroundTintList = android.content.res.ColorStateList.valueOf(
-                android.graphics.Color.parseColor(if (isMuted) "#FF3B82F6" else "#25FFFFFF")
-            )
+            setCallButtonOn(binding.btnMute, isMuted)
             Toast.makeText(this, if (isMuted) "\u0110\u00e3 t\u1eaft ti\u1ebfng" else "\u0110\u00e3 b\u1eadt ti\u1ebfng", Toast.LENGTH_SHORT).show()
         }
 
@@ -624,9 +626,6 @@ class CallActivity : AppCompatActivity() {
         binding.btnSpeakerCircle.setOnClickListener {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             setSpeakerphoneOn(audioManager, !isSpeakerMode)
-            binding.btnSpeakerCircle.backgroundTintList = android.content.res.ColorStateList.valueOf(
-                android.graphics.Color.parseColor(if (isSpeakerMode) "#4D3B82F6" else "#25FFFFFF")
-            )
             Toast.makeText(this, if (isSpeakerMode) "Loa ngo\u00e0i: B\u1eacT" else "Loa ngo\u00e0i: T\u1eaeT", Toast.LENGTH_SHORT).show()
         }
 
@@ -1185,7 +1184,7 @@ class CallActivity : AppCompatActivity() {
             while (isActive) {
                 val minutes = elapsedSeconds / 60
                 val seconds = elapsedSeconds % 60
-                binding.tvCallTimer.text = String.format("%02d:%02d", minutes, seconds)
+                binding.tvCallTimer.text = String.format(" · %02d:%02d", minutes, seconds)
                 kotlinx.coroutines.delay(1000)
                 elapsedSeconds++
             }
@@ -1701,9 +1700,7 @@ class CallActivity : AppCompatActivity() {
         val nextHoldState = !sipManager.isCallHoldActive
         sipManager.isCallHoldActive = nextHoldState
         
-        binding.btnKeypadCircle.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            android.graphics.Color.parseColor(if (nextHoldState) "#FF3B82F6" else "#25FFFFFF")
-        )
+        setCallButtonOn(binding.btnKeypadCircle, nextHoldState)
         
         Toast.makeText(this, if (nextHoldState) "\u0110ang gi\u1eef cu\u1ed9c g\u1ecdi..." else "\u0110ang kh\u00f4i ph\u1ee5c cu\u1ed9c g\u1ecdi...", Toast.LENGTH_SHORT).show()
         
@@ -1722,8 +1719,32 @@ class CallActivity : AppCompatActivity() {
 
 
     
+    // Messenger-style toggle: white circle with a dark icon when on, translucent with a white icon when off.
+    private fun setCallButtonOn(btn: android.widget.ImageView, on: Boolean) {
+        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            android.graphics.Color.parseColor(if (on) "#FFFFFFFF" else "#29FFFFFF")
+        )
+        btn.imageTintList = android.content.res.ColorStateList.valueOf(
+            android.graphics.Color.parseColor(if (on) "#FF111111" else "#FFFFFFFF")
+        )
+    }
+
+    // Soft ring that grows and fades behind the big avatar while the call is connecting.
+    private fun startAvatarPulse() {
+        val ring = binding.viewAvatarPulse
+        val scaleX = android.animation.ObjectAnimator.ofFloat(ring, View.SCALE_X, 0.85f, 1.35f)
+        val scaleY = android.animation.ObjectAnimator.ofFloat(ring, View.SCALE_Y, 0.85f, 1.35f)
+        val alpha = android.animation.ObjectAnimator.ofFloat(ring, View.ALPHA, 1f, 0f)
+        listOf(scaleX, scaleY, alpha).forEach {
+            it.repeatCount = android.animation.ValueAnimator.INFINITE
+            it.duration = 2000
+        }
+        android.animation.AnimatorSet().apply { playTogether(scaleX, scaleY, alpha); start() }
+    }
+
     private fun setSpeakerphoneOn(audioManager: android.media.AudioManager, on: Boolean) {
         isSpeakerMode = on
+        setCallButtonOn(binding.btnSpeakerCircle, on)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             if (on) {
                 val devices = audioManager.availableCommunicationDevices

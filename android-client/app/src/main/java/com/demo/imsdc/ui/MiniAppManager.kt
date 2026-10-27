@@ -282,6 +282,30 @@ class MiniAppManager(val activity: CallActivity) {
         WebView.setWebContentsDebuggingEnabled(true)
     }
 
+    // Flight-booking is a full-height sheet with its own header and call timer, so it gets
+    // the whole screen above the call controls instead of the band under the top bar.
+    private fun applyWebViewBounds(appId: String) {
+        val b = activity.binding
+        val full = appId == "flight-booking"
+        val lp = b.webviewMiniapp.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+        if (full) {
+            // Leave room for the status bar, and for the exit button when it is shown.
+            val topDp = if (CallActivity.hotlineApp(activity.remoteUser) != null) 40 else 72
+            lp.topToBottom = unset
+            lp.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp.topMargin = (topDp * activity.resources.displayMetrics.density).toInt()
+            lp.bottomToTop = b.layoutBottomControls.id
+        } else {
+            lp.topToTop = unset
+            lp.topToBottom = b.layoutTopBar.id
+            lp.topMargin = 0
+            lp.bottomToTop = b.guidelineWebviewBottom.id
+        }
+        b.webviewMiniapp.layoutParams = lp
+        b.layoutTopBar.visibility = if (full) View.INVISIBLE else View.VISIBLE
+    }
+
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {
         if (sendRemoteTrigger) {
             activity.isMiniAppInitiator = true
@@ -297,7 +321,8 @@ class MiniAppManager(val activity: CallActivity) {
             }
             activity.currentAppId = targetId
             Log.i(TAG, "launchMiniApp targetId=$targetId")
-            
+            applyWebViewBounds(targetId)
+
             if (targetId == "operator-menu") {
                 Log.i(TAG, "Exiting mini-app and returning to operator-menu")
                 activity.dcManager.targetAppId = "operator-menu"

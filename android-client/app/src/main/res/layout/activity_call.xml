@@ -28,280 +28,185 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <!-- Top Bar (Name, Location, Status, Timer) - Always visible -->
+        <!-- Top Bar: compact row (avatar, name, status · timer) over a soft gradient -->
         <LinearLayout
             android:id="@+id/layout_top_bar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_horizontal"
-            android:paddingTop="60dp"
-            android:paddingBottom="20dp"
-            android:paddingHorizontal="20dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/gradient_top_bar"
+            android:paddingTop="44dp"
+            android:paddingBottom="24dp"
+            android:paddingHorizontal="16dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent">
 
             <TextView
-                android:id="@+id/tv_remote_user"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="My Wife ❤️❤️❤️"
+                android:id="@+id/tv_top_avatar"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="@drawable/bg_call_avatar"
+                android:gravity="center"
+                android:text="W"
                 android:textColor="#FFFFFFFF"
-                android:textSize="32sp"
-                android:fontFamily="sans-serif-medium" />
+                android:textSize="15sp"
+                android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/tv_location"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="0358 197 864 Vietnam"
-                android:textColor="#CCFFFFFF"
-                android:textSize="16sp"
-                android:layout_marginTop="8dp" />
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:orientation="vertical">
 
+                <TextView
+                    android:id="@+id/tv_remote_user"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="My Wife ❤️❤️❤️"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="17sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
 
-            <TextView
-                android:id="@+id/tv_call_status"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Dialing..."
-                android:textColor="#CCFFFFFF"
-                android:textSize="16sp"
-                android:layout_marginTop="8dp" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/tv_call_timer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="00:00"
-                android:textColor="#CCFFFFFF"
-                android:textSize="16sp"
-                android:layout_marginTop="8dp"
-                android:visibility="gone" />
+                    <TextView
+                        android:id="@+id/tv_call_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Dialing..."
+                        android:textColor="#CCFFFFFF"
+                        android:textSize="13sp"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
 
+                    <TextView
+                        android:id="@+id/tv_call_timer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text=" · 00:00"
+                        android:textColor="#CCFFFFFF"
+                        android:textSize="13sp"
+                        android:fontFeatureSettings="tnum"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- Middle Call details (6 Action Buttons) - hidden when webview is visible -->
+        <!-- Calling state: large pulsing avatar, hidden once video or a mini-app shows -->
         <LinearLayout
             android:id="@+id/layout_middle_details"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:orientation="vertical"
-            android:gravity="bottom|center_horizontal"
-            android:paddingHorizontal="24dp"
-            android:layout_marginBottom="16dp"
+            android:gravity="center_horizontal"
+            android:paddingTop="56dp"
             app:layout_constraintTop_toBottomOf="@id/layout_top_bar"
             app:layout_constraintBottom_toTopOf="@id/layout_bottom_controls"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- 2. Six circular action buttons in 2x3 Grid -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:gravity="center">
+            <FrameLayout
+                android:layout_width="128dp"
+                android:layout_height="128dp">
 
-                <!-- Grid Row 1 -->
-                <LinearLayout
+                <View
+                    android:id="@+id/view_avatar_pulse"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_call_avatar_ring" />
+
+                <TextView
+                    android:id="@+id/tv_big_avatar"
+                    android:layout_width="96dp"
+                    android:layout_height="96dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_call_avatar"
                     android:gravity="center"
-                    android:layout_marginBottom="24dp">
+                    android:text="W"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="38sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
 
-                    <!-- Record -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_record"
-                            android:background="@drawable/circle_call_button_bg" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Record"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-
-                    <!-- Hold -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_hold"
-                            android:background="@drawable/circle_call_button_bg" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Hold"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-
-                    <!-- Add call -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_add_call"
-                            android:background="@drawable/circle_call_button_bg" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Add call"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <!-- Grid Row 2 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center">
-
-                    <!-- Notes -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_notes"
-                            android:background="@drawable/circle_call_button_bg" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Notes"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-
-                    <!-- Mute -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:id="@+id/btn_mute"
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_mute"
-                            android:background="@drawable/circle_call_button_bg"
-                            android:clickable="true"
-                            android:focusable="true"/>
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Mute"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-
-                    <!-- Contacts -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-                        <ImageView
-                            android:layout_width="56dp"
-                            android:layout_height="56dp"
-                            android:padding="14dp"
-                            android:src="@drawable/ic_contacts"
-                            android:tint="#FFFFFFFF"
-                            android:background="@drawable/circle_call_button_bg" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Contacts"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="12sp"
-                            android:layout_marginTop="8dp" />
-                    </LinearLayout>
-                </LinearLayout>
-            </LinearLayout>
-
+            <TextView
+                android:id="@+id/tv_big_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="My Wife ❤️❤️❤️"
+                android:textColor="#FFFFFFFF"
+                android:textSize="24sp"
+                android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
-        <!-- Active Call controls bottom row -->
+        <!-- Call controls: frosted pill with Mute, Speaker, Hold and End -->
         <LinearLayout
             android:id="@+id/layout_bottom_controls"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_width="0dp"
+            android:layout_height="72dp"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginBottom="28dp"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingHorizontal="24dp"
-            android:paddingBottom="60dp"
-            android:background="@android:color/transparent"
+            android:background="@drawable/bg_call_controls_pill"
+            android:elevation="6dp"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent">
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- Keypad circular button -->
             <ImageButton
-                android:id="@+id/btn_keypad_circle"
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:background="@drawable/circle_blue_button_bg"
-                android:src="@drawable/ic_keypad"
-                android:contentDescription="Keypad" />
+                android:id="@+id/btn_mute"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginHorizontal="10dp"
+                android:background="@drawable/bg_call_btn"
+                android:backgroundTint="#29FFFFFF"
+                android:padding="14dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_mute"
+                android:contentDescription="Tắt tiếng" />
 
-            <!-- End Call circular button -->
-            <ImageButton
-                android:id="@+id/btn_end_call"
-                android:layout_width="72dp"
-                android:layout_height="72dp"
-                android:layout_marginHorizontal="24dp"
-                android:background="@drawable/circle_red_button_bg"
-                android:src="@drawable/ic_phone_decline"
-                android:contentDescription="Kết thúc cuộc gọi"
-                android:elevation="4dp" />
-
-            <!-- Speaker circular button -->
             <ImageButton
                 android:id="@+id/btn_speaker_circle"
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:background="@drawable/circle_blue_button_bg"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginHorizontal="10dp"
+                android:background="@drawable/bg_call_btn"
+                android:backgroundTint="#29FFFFFF"
+                android:padding="14dp"
+                android:scaleType="fitCenter"
                 android:src="@drawable/ic_speaker"
                 android:contentDescription="Loa ngoài" />
 
+            <ImageButton
+                android:id="@+id/btn_keypad_circle"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginHorizontal="10dp"
+                android:background="@drawable/bg_call_btn"
+                android:backgroundTint="#29FFFFFF"
+                android:padding="14dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_hold"
+                android:contentDescription="Giữ cuộc gọi" />
+
+            <ImageButton
+                android:id="@+id/btn_end_call"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginHorizontal="10dp"
+                android:background="@drawable/bg_call_btn_end"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_phone_decline"
+                android:contentDescription="Kết thúc cuộc gọi" />
         </LinearLayout>
 
         <!-- Ringing Call controls: Dual Swipe Circles (Slide to Answer / Reject) -->
@@ -344,18 +249,26 @@
             android:orientation="horizontal"
             app:layout_constraintGuide_percent="0.82" />
 
-        <!-- Exit Mini-App / Return to Menu Button -->
+        <!-- Exit Mini-App / Return to Menu: small frosted pill on the top bar -->
         <Button
             android:id="@+id/btn_exit_miniapp"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Quay lại Menu"
-            android:textSize="12sp"
+            android:layout_height="34dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="0dp"
+            android:text="‹ Menu"
+            android:textAllCaps="false"
+            android:textSize="13sp"
             android:textColor="#FFFFFFFF"
-            android:textStyle="bold"
-            android:backgroundTint="#E64A19"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_call_menu_pill"
+            app:backgroundTint="@null"
+            android:stateListAnimator="@null"
             android:visibility="gone"
-            android:layout_margin="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="45dp"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 

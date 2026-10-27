@@ -18,7 +18,10 @@ All notable changes to this project will be documented in this file.
   - Booked seats are shared between callers (per flight and date, in memory until DCAS restarts). If two callers confirm the same seat, the second gets `code: "seat_taken"` with a fresh seat map and a new agent suggestion. On a phone a missing confirm reply is an error after 10 s; only the browser preview books locally.
   - Airline hotline **1900**: dialing it is answered by the network like 198 (voice-only) and auto-opens flight-booking. Hotline numbers now live in one table (`go-mf/internal/config/hotline.go`, mirrored in `CallActivity.HOTLINE_APPS`).
 
+- **Messenger-style call screen (Android):** compact top bar (avatar, name, status · timer), large pulsing avatar while connecting, and a frosted control pill with round Mute / Speaker / Hold / End buttons that turn white when active. The speaker button now reflects the real speaker state. The exit button is a small "‹ Menu" pill. SkyLotus Air now uses the full screen above the controls.
+
 ### Fixed
+- Hotline app re-INVITE (e.g. 1900 → flight-booking): IMS-AS answered the phone with the callee-leg ADC credentials, so the ADC stayed CONNECTING and DCAS never got search/select/confirm. The answer now carries MF's caller-side ADC transport.
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 
 ## [16.0.0] - 2026-08-20
