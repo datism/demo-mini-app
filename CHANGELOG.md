@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Declining an incoming call from the notification left MT on the ringing screen while MO had already hung up. Declining now ends the call locally on MT too.
 - Video sent from some phones (e.g. OPPO / MediaTek) showed black-and-white on the far end: the encoder is now fed through `getInputImage()` so each chip's colour layout is honoured.
 - Choppy received video: incomplete FU-A NALUs are dropped instead of decoded, the decoder gets more time for input, the video socket buffer is larger, and outgoing RTP now has correct sequence numbers and marker bits.
+- Smeared/blocky video after packet loss: the receiver now counts every RTP gap and freezes on the last good frame until the next keyframe instead of decoding broken frames; failed sends are logged and the video socket send buffer is larger.
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 
 ## [16.0.0] - 2026-08-20

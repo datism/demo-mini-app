@@ -61,6 +61,7 @@ class RtpMediaManager(
     private var videoPacketsSent = 0
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
+    private var videoSendErrors = 0
     private var videoFramesDecoded = 0
 
     // WebRTC connection tracking
@@ -248,6 +249,7 @@ class RtpMediaManager(
                     reuseAddress = true
                     // An IDR frame arrives as a burst of ~30-60 packets; the default buffer can overflow.
                     try { receiveBufferSize = 1 shl 20 } catch (_: Exception) {}
+                    try { sendBufferSize = 1 shl 20 } catch (_: Exception) {}
                     try {
                         bind(bindVideoAddr)
                     } catch (e: Exception) {
@@ -779,7 +781,7 @@ class RtpMediaManager(
                         Log.d(TAG, "📊 Video Packets Sent (Single NAL): $videoPacketsSent to $ipStr:$remoteVideoPort")
                     }
                 } catch (e: Exception) {
-                    // Ignore
+                    noteVideoSendError(e)
                 }
                 seqNum = (seqNum + 1) and 0xFFFF
             } else {
@@ -821,7 +823,7 @@ class RtpMediaManager(
                             Log.d(TAG, "📊 Video Packets Sent (FU-A): $videoPacketsSent to $ipStr:$remoteVideoPort")
                         }
                     } catch (e: Exception) {
-                        // Ignore
+                        noteVideoSendError(e)
                     }
                     seqNum = (seqNum + 1) and 0xFFFF
                     sentBytes += chunkSize
@@ -829,6 +831,14 @@ class RtpMediaManager(
             }
         }
         return seqNum
+    }
+
+    // A failed send is a lost packet for the far end; it used to be swallowed silently.
+    private fun noteVideoSendError(e: Exception) {
+        videoSendErrors++
+        if (videoSendErrors == 1 || videoSendErrors % 20 == 0) {
+            Log.w(TAG, "⚠️ Video RTP send failed $videoSendErrors times (last: ${e.message})")
+        }
     }
 
     // Copies tightly packed I420 planes into an encoder input Image, honouring its strides.
@@ -935,7 +945,26 @@ class RtpMediaManager(
             val naluStream = ByteArrayOutputStream()
             var lastFuTimestamp = -1L
             var lastSeq = -1
-            var droppedNalus = 0
+            var lostPackets = 0
+            var waitingForKeyframe = false
+            var skippedNalus = 0
+
+            // After any loss, later frames reference the missing data and decode as smeared
+            // blocks. Freeze on the last good picture until the next keyframe (SPS/IDR) instead.
+            fun deliver(nalu: ByteArray, ptsMs: Long) {
+                val type = if (nalu.size > 4) nalu[4].toInt() and 0x1F else 0
+                if (waitingForKeyframe) {
+                    if (type == 5 || type == 7) {
+                        waitingForKeyframe = false
+                        Log.i(TAG, "🔑 Keyframe received, video resumes (skipped $skippedNalus NALUs)")
+                        skippedNalus = 0
+                    } else {
+                        skippedNalus++
+                        return
+                    }
+                }
+                if (!feedDecoder(nalu, ptsMs) && videoDecoder != null) waitingForKeyframe = true
+            }
 
             Log.i(TAG, "Video receiver thread started, listening on socket...")
             while (isRunning && socket != null && !socket.isClosed) {
@@ -960,6 +989,14 @@ class RtpMediaManager(
 
                     val seq = ((packetBuf[2].toInt() and 0xFF) shl 8) or (packetBuf[3].toInt() and 0xFF)
                     val inOrder = lastSeq < 0 || seq == ((lastSeq + 1) and 0xFFFF)
+                    if (!inOrder) {
+                        val gap = (seq - lastSeq - 1) and 0xFFFF
+                        lostPackets += if (gap in 1..1000) gap else 1
+                        Log.w(TAG, "⚠️ Video RTP loss: expected ${(lastSeq + 1) and 0xFFFF}, got $seq (total lost $lostPackets of $videoPacketsReceived) — freezing until keyframe")
+                        waitingForKeyframe = true
+                        lastFuTimestamp = -1L
+                        naluStream.reset()
+                    }
                     lastSeq = seq
 
                     val payloadHeader = packetBuf[12].toInt() and 0xFF
@@ -982,16 +1019,6 @@ class RtpMediaManager(
                             lastFuTimestamp = timestamp
                         }
 
-                        if (!isStart && !inOrder && lastFuTimestamp != -1L) {
-                            // A fragment of this NALU was lost: feeding the rest corrupts the picture.
-                            lastFuTimestamp = -1L
-                            naluStream.reset()
-                            droppedNalus++
-                            if (droppedNalus == 1 || droppedNalus % 20 == 0) {
-                                Log.w(TAG, "⚠️ Dropped $droppedNalus incomplete video NALUs (RTP loss)")
-                            }
-                        }
-
                         if (timestamp == lastFuTimestamp) {
                             // Append fragment payload
                             naluStream.write(packetBuf, 14, len - 14)
@@ -999,7 +1026,7 @@ class RtpMediaManager(
 
                         if (isEnd && timestamp == lastFuTimestamp) {
                             val completeNalu = naluStream.toByteArray()
-                            feedDecoder(completeNalu, timestamp / 90) // Convert 90kHz timestamp to milliseconds
+                            deliver(completeNalu, timestamp / 90) // Convert 90kHz timestamp to milliseconds
                             naluStream.reset()
                         }
                     } else if (naluType in 1..23) {
@@ -1009,7 +1036,7 @@ class RtpMediaManager(
                         naluStream.write(byteArrayOf(0, 0, 0, 1))
                         naluStream.write(packetBuf, 12, len - 12)
                         
-                        feedDecoder(naluStream.toByteArray(), timestamp / 90)
+                        deliver(naluStream.toByteArray(), timestamp / 90)
                         naluStream.reset()
                     }
                 } catch (e: Exception) {
@@ -1020,17 +1047,19 @@ class RtpMediaManager(
         }.apply { start() }
     }
 
-    private fun feedDecoder(nalu: ByteArray, ptsMs: Long) {
-        val decoder = videoDecoder ?: return
+    // Returns false when the NALU could not be queued, so the caller can resync on a keyframe.
+    private fun feedDecoder(nalu: ByteArray, ptsMs: Long): Boolean {
+        val decoder = videoDecoder ?: return false
         val surface = decoderSurface
-        if (surface == null || !surface.isValid) return  // Surface not valid or destroyed
+        if (surface == null || !surface.isValid) return false  // Surface not valid or destroyed
+        var queued = false
 
         try {
             // Wait up to 10 ms: a NALU dropped here breaks every frame until the next keyframe.
             val inputBufferIndex = decoder.dequeueInputBuffer(10000)
             if (inputBufferIndex < 0) Log.w(TAG, "Decoder input busy, video NALU dropped")
             if (inputBufferIndex >= 0) {
-                val inputBuffer = decoder.getInputBuffer(inputBufferIndex) ?: return
+                val inputBuffer = decoder.getInputBuffer(inputBufferIndex) ?: return false
                 inputBuffer.clear()
                 inputBuffer.put(nalu)
                 decoder.queueInputBuffer(
@@ -1040,6 +1069,7 @@ class RtpMediaManager(
                     ptsMs * 1000,
                     0
                 )
+                queued = true
             }
 
             // Flush decoded buffers to surface immediately
@@ -1060,6 +1090,7 @@ class RtpMediaManager(
         } catch (e: Exception) {
             Log.e(TAG, "feedDecoder error: ${e.message}", e)
         }
+        return queued
     }
 
     // ─── RELEASE HELPERS ─────────────────────────────────────────────────────
