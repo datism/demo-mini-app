@@ -1,6 +1,9 @@
 package com.demo.imsdc.sip
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.util.Log
 import com.demo.imsdc.media.RtpPorts
 import com.demo.imsdc.notification.IncomingCallNotificationManager
@@ -23,6 +26,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
 private const val TAG = "SipManager"
+// Wait for a new network to settle before comparing IPs, so a short flap does not end the call.
+private const val IP_CHECK_DELAY_MS = 1500L
 
 /**
  * SipManager — SIP stack tối giản cho PoC IMS DC
@@ -62,6 +67,8 @@ class SipManager(
     var onCancelReceived: (() -> Unit)? = null
     var onAckWithSdp: ((sdpBody: String, rawSdp: String) -> Unit)? = null
     var onReInviteResponse: ((sdpAnswer: String?, rawSdp: String?) -> Unit)? = null
+    // The phone's IP changed during a call: SIP has moved to the new IP, the UI must end the call.
+    var onIpChangedDuringCall: (() -> Unit)? = null
 
     // ─── State ──────────────────────────────────────────────────────────────
     private var appContext: Context? = null
@@ -86,6 +93,10 @@ class SipManager(
     var isCallActive: Boolean = false
         private set
     private val sipScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var ipCheckJob: kotlinx.coroutines.Job? = null
+    // IP announced in the current call's SDP; the call's RTP is tied to it.
+    private var callLocalIp: String? = null
 
     private fun getTag(headerVal: String): String? {
         val idx = headerVal.indexOf(";tag=")
@@ -168,6 +179,7 @@ class SipManager(
             Log.i(TAG, "SIP TCP socket opened on port $localPort with local IP $localIp")
             startReceiveLoop()
             startKeepAliveLoop()
+            watchNetwork()
         } catch (e: Exception) {
             Log.e(TAG, "Cannot open TCP connection to $sipServerHost:$sipServerPort: ${e.message}")
             throw e
@@ -211,6 +223,7 @@ class SipManager(
 
     fun stop() {
         isRunning = false
+        unwatchNetwork()
         keepAliveThread?.interrupt()
         keepAliveThread = null
         initialRegRetryJob?.cancel()
@@ -255,6 +268,113 @@ class SipManager(
     }
 
     fun getLocalPort(): Int = localPort
+
+    // ─── Network change ──────────────────────────────────────────────────────
+
+    /**
+     * Watches the default network. When the IP used to reach the SIP server changes
+     * (Wi-Fi <-> mobile data, new carrier IP, VPN reconnect), the SIP TCP connection and the
+     * call's RTP are still tied to the old IP. SIP reconnects and REGISTERs from the new IP,
+     * and a call in progress is ended cleanly instead of being left frozen.
+     */
+    private fun watchNetwork() {
+        if (networkCallback != null) return
+        val cm = (appContext ?: Companion.appContext)
+            ?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = scheduleIpCheck()
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = scheduleIpCheck()
+            override fun onLost(network: Network) = scheduleIpCheck()
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot watch network changes: ${e.message}")
+        }
+    }
+
+    private fun unwatchNetwork() {
+        ipCheckJob?.cancel()
+        ipCheckJob = null
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            val cm = (appContext ?: Companion.appContext)
+                ?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.unregisterNetworkCallback(callback)
+        } catch (_: Exception) {}
+    }
+
+    private fun scheduleIpCheck() {
+        ipCheckJob?.cancel()
+        ipCheckJob = sipScope.launch {
+            delay(IP_CHECK_DELAY_MS)
+            checkLocalIp()
+        }
+    }
+
+    private suspend fun checkLocalIp() {
+        if (!isRunning) return
+        val newIp = NetworkUtils.getLocalIpAddress(appContext ?: Companion.appContext, sipServerHost)
+        // No usable network yet (e.g. right after onLost): wait for the next callback.
+        if (!isValidIpv4(newIp)) return
+
+        val sipIp = lastLocalIp
+        val callIp = callLocalIp
+        val sipMoved = isValidIpv4(sipIp) && newIp != sipIp
+        // Checked separately: a failed keep-alive may already have moved SIP to the new IP.
+        val callMoved = pendingCallId != null && isValidIpv4(callIp) && newIp != callIp
+        if (!sipMoved && !callMoved) return
+
+        Log.w(TAG, "Local IP changed to $newIp (SIP was $sipIp, call was $callIp)" +
+            (if (sipMoved) ": reconnecting SIP and re-registering" else "") +
+            (if (callMoved) ", ending the call" else ""))
+        if (sipMoved && reconnectFromNewIp()) {
+            register()
+        }
+
+        if (callMoved) {
+            val endCall = onIpChangedDuringCall
+            if (endCall != null) {
+                endCall()
+            } else {
+                bye(pendingRemoteUser ?: "unknown")
+            }
+        }
+    }
+
+    /** Replaces the SIP TCP connection, still bound to the old IP, with one from the current network. */
+    private fun reconnectFromNewIp(): Boolean = synchronized(this) {
+        val oldSocket = tcpSocket
+        // The old receive and keep-alive loops see a different socket and exit without reconnecting.
+        tcpSocket = null
+        tcpReader = null
+        tcpWriter = null
+        try { oldSocket?.close() } catch (_: Exception) {}
+
+        repeat(3) { attempt ->
+            if (!isRunning) return false
+            try {
+                val socket = Socket()
+                socket.connect(InetSocketAddress(sipServerHost, sipServerPort), 5000)
+                tcpSocket = socket
+                tcpReader = BufferedReader(InputStreamReader(socket.inputStream))
+                tcpWriter = socket.outputStream
+                localPort = socket.localPort
+                val rawIp = socket.localAddress?.hostAddress
+                lastLocalIp = if (isValidIpv4(rawIp)) rawIp!! else NetworkUtils.getLocalIpAddress(appContext, sipServerHost)
+                Log.i(TAG, "SIP TCP socket reconnected from new IP $lastLocalIp on port $localPort")
+                startReceiveLoop()
+                startKeepAliveLoop()
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "SIP reconnect after IP change failed (attempt ${attempt + 1}): ${e.message}")
+                try { Thread.sleep(1000) } catch (_: InterruptedException) {}
+            }
+        }
+        false
+    }
 
     // ─── Receive Loop ────────────────────────────────────────────────────────
 
@@ -622,6 +742,7 @@ class SipManager(
         pendingRemoteUser = null
         pendingCSeq = 1
         lastLocalOfferSdp = null
+        callLocalIp = null
         Log.i(TAG, "SIP call state reset successfully")
     }
 
@@ -754,6 +875,7 @@ class SipManager(
             initialInviteCSeq = cseq  // Track initial INVITE CSeq for Re-INVITE detection
             lastLocalOfferSdp = sdpBody
             lastLocalIp = effectiveIp
+            callLocalIp = effectiveIp
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
                 val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
@@ -841,6 +963,7 @@ class SipManager(
         withContext(Dispatchers.IO) {
             val localIp = getLocalIp()
             lastLocalIp = localIp
+            callLocalIp = localIp
             val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(

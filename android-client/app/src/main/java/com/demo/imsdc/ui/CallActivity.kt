@@ -969,6 +969,14 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
+        sipManager.onIpChangedDuringCall = {
+            lifecycleScope.launch(Dispatchers.Main) {
+                Log.w(TAG, "Local IP changed during the call, ending it")
+                Toast.makeText(this@CallActivity, "Mạng thay đổi – cuộc gọi đã kết thúc", Toast.LENGTH_LONG).show()
+                endCall()
+            }
+        }
+
         sipManager.onReInviteReceived = { sdp, rawMsg ->
             Log.i(TAG, "Handling incoming Re-INVITE automatically...")
             lifecycleScope.launch(Dispatchers.IO) {
@@ -1605,6 +1613,7 @@ class CallActivity : AppCompatActivity() {
         // NOTE: Redundant sipManager.resetCallState() removed to prevent wiping pendingCallId before sm.bye/sm.cancel sends packet
         sipManager.onInviteResponse = null
         sipManager.onCallEnded = null
+        sipManager.onIpChangedDuringCall = null
         sipManager.onAckWithSdp = null
         sipManager.onReInviteReceived = null
         sipManager.onReInviteResponse = null
