@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
   - One seat per passenger: with 2+ passengers the seat map takes that many seats (tap to add or remove; a new tap replaces the oldest once all are chosen), and Continue waits until all are picked. DCAS suggests seats side by side in one row, books the whole group or none (`seats` list; old `seat` field still accepted), and charges the extra-legroom fee per seat.
   - Airline hotline **1900**: dialing it is answered by the network like 198 (voice-only) and auto-opens flight-booking. Hotline numbers now live in one table (`go-mf/internal/config/hotline.go`, mirrored in `CallActivity.HOTLINE_APPS`).
 
+- **Minimal in-call app menu:** the operator menu is no longer a large card over the video. It is one frosted row of round app icons with short labels just above the call controls (swipe for more), and it collapses to a ✨ chip.
 - **Messenger-style call screen (Android):** compact top bar (avatar, name, status · timer), large pulsing avatar while connecting, and a frosted control pill with round Mute / Speaker / Hold / End buttons that turn white when active. The speaker button now reflects the real speaker state. The exit button is a small "‹ Menu" pill. SkyLotus Air now uses the full screen above the controls.
 
 ### Fixed

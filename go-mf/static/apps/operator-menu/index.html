@@ -5,132 +5,152 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>New Calling Services</title>
   <style>
-    body {
+    /* Messenger-style app tray: one compact row at the bottom, the call video stays visible above. */
+    html, body {
       margin: 0;
       padding: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      height: 100%;
       background: transparent;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       overflow: hidden;
-      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
     }
-    .portal-card {
-      width: 90%;
-      max-width: 380px;
-      max-height: 85vh;
-      overflow-y: auto;
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 28px;
-      padding: 28px 24px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
-      text-align: center;
-      opacity: 1;
-    }
-    .portal-card::-webkit-scrollbar {
-      display: none;
-    }
-    h2 {
-      margin: 0 0 8px 0;
-      font-size: 22px;
-      font-weight: 700;
-      background: linear-gradient(135deg, #38bdf8, #818cf8, #ec4899);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    p.subtitle {
-      margin: 0 0 24px 0;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.6);
-      line-height: 1.4;
-    }
-    .service-grid {
+    body {
       display: flex;
       flex-direction: column;
-      gap: 16px;
-    }
-    .service-item {
-      display: flex;
+      justify-content: flex-end;
       align-items: center;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 18px;
-      padding: 16px;
+      padding: 0 12px 10px;
+      box-sizing: border-box;
+    }
+    .tray {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      background: rgba(20, 20, 24, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 26px;
+      padding: 14px 6px 10px;
+      box-sizing: border-box;
+      transition: opacity .2s ease, transform .25s cubic-bezier(.2, .8, .2, 1);
+    }
+    .tray.hidden {
+      opacity: 0;
+      transform: translateY(16px) scale(.96);
+      pointer-events: none;
+    }
+    .handle {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 64px;
+      height: 14px;
+      border: 0;
+      padding: 0;
+      background: transparent;
       cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-      text-align: left;
     }
-    .service-item:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(255, 255, 255, 0.2);
-      transform: translateY(-2px);
+    .handle::after {
+      content: "";
+      position: absolute;
+      top: 5px;
+      left: 50%;
+      width: 32px;
+      height: 4px;
+      margin-left: -16px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.35);
     }
-    .service-item:active {
-      transform: scale(0.98);
-      background: rgba(255, 255, 255, 0.04);
+    .row {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+      scrollbar-width: none;
+      padding: 0 4px;
     }
-    .service-icon {
-      font-size: 28px;
-      margin-right: 16px;
-      width: 48px;
-      height: 48px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 14px;
+    .row::-webkit-scrollbar {
+      display: none;
+    }
+    .app {
+      flex: 0 0 auto;
+      width: 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      padding: 0;
+      background: none;
+      color: #fff;
+      cursor: pointer;
+      scroll-snap-align: start;
+    }
+    .app .ic {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
+      font-size: 25px;
+      background: rgba(255, 255, 255, 0.14);
+      transition: transform .12s ease, background .12s ease;
     }
-    .service-info {
-      flex-grow: 1;
+    .app:active .ic {
+      transform: scale(.9);
+      background: rgba(255, 255, 255, 0.28);
     }
-    .service-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: #ffffff;
-      margin-bottom: 2px;
+    .app .lbl {
+      font-size: 11.5px;
+      font-weight: 500;
+      line-height: 1.1;
+      color: rgba(255, 255, 255, 0.92);
+      white-space: nowrap;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .4);
     }
-    .service-desc {
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.45);
-      line-height: 1.3;
+    .app.soon {
+      opacity: .45;
     }
-    .badge {
-      font-size: 9px;
-      font-weight: 700;
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: white;
-      padding: 2px 6px;
-      border-radius: 8px;
-      margin-left: 8px;
-      vertical-align: middle;
-      display: inline-block;
+    .chip {
+      position: absolute;
+      bottom: 10px;
+      right: 16px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(20, 20, 24, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      font-size: 22px;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity .2s ease, transform .2s ease;
     }
-    .badge.soon {
-      background: linear-gradient(135deg, #6b7280, #4b5563);
-      color: rgba(255,255,255,0.8);
+    .chip.hidden {
+      opacity: 0;
+      transform: scale(.6);
+      pointer-events: none;
     }
     .toast {
       position: fixed;
-      bottom: 40px;
+      bottom: 128px;
       left: 50%;
-      transform: translateX(-50%) translateY(20px);
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 10px 20px;
-      border-radius: 20px;
+      transform: translateX(-50%) translateY(10px);
+      background: rgba(20, 20, 24, 0.85);
+      padding: 8px 16px;
+      border-radius: 18px;
       color: #fff;
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 500;
       opacity: 0;
       pointer-events: none;
-      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      z-index: 1000;
+      transition: all .25s ease;
       white-space: nowrap;
     }
     .toast.show {
@@ -140,69 +160,21 @@
   </style>
 </head>
 <body>
-  <div class="portal-card">
-    <h2>5G New Calling</h2>
-    <p class="subtitle">Khám phá các dịch vụ tương tác dữ liệu thế hệ mới</p>
-    <div class="service-grid">
-      <div class="service-item" onclick="launchApp('sketch-sync-app')">
-        <div class="service-icon" style="background: rgba(99, 102, 241, 0.15);">🎨</div>
-        <div class="service-info">
-          <div class="service-title">Bảng vẽ tương tác <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">Cùng vẽ và chia sẻ ý tưởng trực tiếp trên màn hình cuộc gọi.</div>
-        </div>
-      </div>
-      
-      <div class="service-item" onclick="launchApp('fun-calling-app')">
-        <div class="service-icon" style="background: rgba(236, 72, 153, 0.15);">❤️</div>
-        <div class="service-info">
-          <div class="service-title">Thả tim tương tác <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">Thả tim và biểu tượng cảm xúc bay bay đồng bộ trên màn hình video.</div>
-        </div>
-      </div>
-
-      <div class="service-item" onclick="launchApp('caro')">
-        <div class="service-icon" style="background: rgba(16, 185, 129, 0.15);">♟️</div>
-        <div class="service-info">
-          <div class="service-title">Game Cờ Caro <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">Đối kháng cờ Caro 9x9 trực tiếp trên màn hình cuộc gọi.</div>
-        </div>
-      </div>
-
-      <div class="service-item" onclick="launchApp('smart-menu')">
-        <div class="service-icon" style="background: rgba(56, 189, 248, 0.15);">📞</div>
-        <div class="service-info">
-          <div class="service-title">Tổng đài 198 <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">CSKH thông minh: Lời chào, xem video, giờ hệ thống.</div>
-        </div>
-      </div>
-
-      <div class="service-item" onclick="launchApp('flight-booking')">
-        <div class="service-icon" style="background: rgba(14, 165, 233, 0.15);">✈️</div>
-        <div class="service-info">
-          <div class="service-title">SkyLotus Air <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">Đặt vé máy bay ngay trong cuộc gọi cùng tổng đài viên.</div>
-        </div>
-      </div>
-
-      <div class="service-item" onclick="launchApp('enterprise-callerid')">
-        <div class="service-icon" style="background: rgba(0, 230, 118, 0.15);">🏢</div>
-        <div class="service-info">
-          <div class="service-title">Enterprise Caller ID <span class="badge">Sẵn sàng</span></div>
-          <div class="service-desc">Định danh doanh nghiệp xác thực, banner quảng cáo và mã QR.</div>
-        </div>
-      </div>
-      
-      <div class="service-item" onclick="showToast('Dịch vụ Screen Sharing đang được phát triển!')">
-        <div class="service-icon" style="background: rgba(236, 72, 153, 0.15);">📱</div>
-        <div class="service-info">
-          <div class="service-title">Chia sẻ màn hình <span class="badge soon">Soon</span></div>
-          <div class="service-desc">Chia sẻ màn hình điện thoại trực tiếp với chất lượng cao.</div>
-        </div>
-      </div>
+  <div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
+    <button class="handle" onclick="setOpen(false)" aria-label="Thu gọn"></button>
+    <div class="row">
+      <button class="app" onclick="launchApp('sketch-sync-app')"><span class="ic">🎨</span><span class="lbl">Vẽ</span></button>
+      <button class="app" onclick="launchApp('fun-calling-app')"><span class="ic">❤️</span><span class="lbl">Thả tim</span></button>
+      <button class="app" onclick="launchApp('caro')"><span class="ic">♟️</span><span class="lbl">Caro</span></button>
+      <button class="app" onclick="launchApp('smart-menu')"><span class="ic">📞</span><span class="lbl">198</span></button>
+      <button class="app" onclick="launchApp('flight-booking')"><span class="ic">✈️</span><span class="lbl">Đặt vé</span></button>
+      <button class="app" onclick="launchApp('enterprise-callerid')"><span class="ic">🏢</span><span class="lbl">Caller ID</span></button>
+      <button class="app soon" onclick="showToast('Chia sẻ màn hình sắp ra mắt!')"><span class="ic">📱</span><span class="lbl">Màn hình</span></button>
     </div>
   </div>
+  <button class="chip hidden" id="chip" onclick="setOpen(true)" aria-label="Mở ứng dụng">✨</button>
 
-  <div id="toast" class="toast">Dịch vụ sắp ra mắt!</div>
+  <div id="toast" class="toast"></div>
 
   <script>
     function launchApp(appId) {
@@ -212,19 +184,20 @@
         showToast("Không tìm thấy kết nối AndroidBridge!");
       }
     }
-    
+
+    function setOpen(open) {
+      document.getElementById('tray').classList.toggle('hidden', !open);
+      document.getElementById('chip').classList.toggle('hidden', open);
+    }
+
     let toastTimeout;
     function showToast(msg) {
       const toast = document.getElementById('toast');
       toast.innerText = msg;
       toast.classList.add('show');
       clearTimeout(toastTimeout);
-      toastTimeout = setTimeout(() => {
-        toast.classList.remove('show');
-      }, 2500);
+      toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
     }
   </script>
 </body>
 </html>
-
-
