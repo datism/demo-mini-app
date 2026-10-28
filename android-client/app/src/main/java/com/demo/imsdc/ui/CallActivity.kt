@@ -1075,8 +1075,9 @@ class CallActivity : AppCompatActivity() {
         webRtcManager.remoteVideoView = binding.remoteVideoView
 
         val isCallee = (intent.getStringExtra(EXTRA_INCOMING_INVITE) != null)
-        val localAudioPort = if (isCallee) 40006 else 40002
-        val localVideoPort = if (isCallee) 40008 else 40004
+        com.demo.imsdc.media.RtpPorts.allocate()
+        val localAudioPort = com.demo.imsdc.media.RtpPorts.audio
+        val localVideoPort = com.demo.imsdc.media.RtpPorts.video
         var effectiveLocalIp = sipManager.getLocalIp()
         if (effectiveLocalIp.isNullOrBlank() || effectiveLocalIp == "0.0.0.0" || effectiveLocalIp == "::" || effectiveLocalIp.contains(":")) {
             effectiveLocalIp = com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)

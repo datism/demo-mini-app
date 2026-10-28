@@ -193,6 +193,34 @@ class RtpMediaManager(
     }
 
     /**
+     * Bind a UDP socket to [addr], falling back to the wildcard address on [port].
+     * A failed bind() closes the socket, so the fallback needs a fresh one.
+     */
+    private fun bindRtpSocket(name: String, addr: InetSocketAddress, port: Int, bufferSize: Int = 0): DatagramSocket {
+        fun open(target: InetSocketAddress): DatagramSocket {
+            val socket = DatagramSocket(null)
+            try {
+                socket.reuseAddress = true
+                if (bufferSize > 0) {
+                    try { socket.receiveBufferSize = bufferSize } catch (_: Exception) {}
+                    try { socket.sendBufferSize = bufferSize } catch (_: Exception) {}
+                }
+                socket.bind(target)
+                return socket
+            } catch (e: Exception) {
+                socket.close()
+                throw e
+            }
+        }
+        return try {
+            open(addr)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to bind $name to $addr, falling back to wildcard: ${e.message}")
+            open(InetSocketAddress(port))
+        }
+    }
+
+    /**
      * Start audio and video RTP sender & receiver.
      */
     @Synchronized
@@ -237,27 +265,9 @@ class RtpMediaManager(
                     InetSocketAddress(localVideoPort)
                 }
 
-                audioSocket = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    try {
-                        bind(bindAudioAddr)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to bind audioSocket to $bindAudioAddr, falling back to wildcard: ${e.message}")
-                        bind(InetSocketAddress(localAudioPort))
-                    }
-                }
-                videoSocket = DatagramSocket(null).apply {
-                    reuseAddress = true
-                    // An IDR frame arrives as a burst of ~30-60 packets; the default buffer can overflow.
-                    try { receiveBufferSize = 1 shl 20 } catch (_: Exception) {}
-                    try { sendBufferSize = 1 shl 20 } catch (_: Exception) {}
-                    try {
-                        bind(bindVideoAddr)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to bind videoSocket to $bindVideoAddr, falling back to wildcard: ${e.message}")
-                        bind(InetSocketAddress(localVideoPort))
-                    }
-                }
+                audioSocket = bindRtpSocket("audioSocket", bindAudioAddr, localAudioPort)
+                // An IDR frame arrives as a burst of ~30-60 packets; the default buffer can overflow.
+                videoSocket = bindRtpSocket("videoSocket", bindVideoAddr, localVideoPort, 1 shl 20)
                 Log.i(TAG, "RTP Sockets bound successfully: Audio=${audioSocket?.localSocketAddress}, Video=${videoSocket?.localSocketAddress}")
                 isRunning = true
             } catch (e: Exception) {

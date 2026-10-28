@@ -2,6 +2,7 @@ package com.demo.imsdc.sip
 
 import android.content.Context
 import android.util.Log
+import com.demo.imsdc.media.RtpPorts
 import com.demo.imsdc.notification.IncomingCallNotificationManager
 import com.demo.imsdc.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
@@ -755,7 +756,7 @@ class SipManager(
             lastLocalIp = effectiveIp
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, activeReqAppId, isCallHoldActive)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("INVITE sip:$toUser@$sipServerHost SIP/2.0")
@@ -805,7 +806,7 @@ class SipManager(
 
             lastLocalOfferSdp = sdpBody
 
-            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive)
+            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
             val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
 
             val msg = buildString {
@@ -840,7 +841,7 @@ class SipManager(
         withContext(Dispatchers.IO) {
             val localIp = getLocalIp()
             lastLocalIp = localIp
-            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, activeReqAppId, isCallHoldActive, 40006, 40008)
+            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(
                 originalInvite, 200, "OK",
@@ -946,7 +947,7 @@ class SipManager(
             val localIp = getLocalIp()
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("ACK sip:$remoteUser@$sipServerHost:$sipServerPort SIP/2.0")

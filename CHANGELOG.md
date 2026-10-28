@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - Smeared/blocky video after packet loss: the receiver now counts every RTP gap and freezes on the last good frame until the next keyframe instead of decoding broken frames; failed sends are logged and the video socket send buffer is larger.
 - Blocky video on movement: the network delivers video RTP out of order (e.g. 1504, 1506, 1507, 1505), and fragments were joined in arrival order. The receiver now holds early packets for up to 60 ms and puts them back in sequence order. Only a gap that never fills counts as loss and triggers the keyframe freeze.
 - Long freezes after real packet loss: the receiver now sends an RTCP PLI keyframe request (repeated every 300 ms while frozen) and the sender forces a keyframe, so video recovers in about 0.1 s instead of up to 1 s. Large frames are also paced (1 ms pause every 4 packets) so keyframe bursts are not dropped by Wi-Fi/VPN queues.
+- No audio or video on either phone when an OPPO was the callee: the phone's own IMS stack held UDP 40008, the fixed callee video port, so binding failed and the app ran the call with no RTP sockets. The app now uses OS-assigned free RTP ports per call (announced in the SDP), and a failed bind to the announced IP now really falls back to the wildcard address (the retry reused the socket the failed bind had closed).
 - Garbled (mojibake) Vietnamese error messages sent by DCAS for invalid Caro moves.
 
 ## [16.0.0] - 2026-08-20
