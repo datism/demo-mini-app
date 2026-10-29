@@ -114,3 +114,8 @@ __pycache__/
 # Caro headless UI check
 go-mf/test/caro_ui/node_modules/
 go-mf/test/caro_ui/out/
+
+# Dependencies (restore with `go mod vendor` / rebar3)
+go-mf/vendor/
+erlang-sip/local_deps/
+node_modules/
