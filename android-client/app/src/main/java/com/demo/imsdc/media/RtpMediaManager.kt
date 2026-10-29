@@ -574,11 +574,30 @@ class RtpMediaManager(
 
     // ─── VIDEO SENDER (Camera Feed -> H.264 Encoder -> FU-A -> RTP) ──────────
 
+    // EXPERIMENT: OPPO/MediaTek hardware encoder output is grey with a green right-edge band even though
+    // the Image planes we write read back correctly. Use the software encoder there to isolate the cause.
+    private val preferSoftwareEncoderOnMtk = true
+
+    private fun createVideoEncoder(): MediaCodec {
+        val hw = MediaCodec.createEncoderByType("video/avc")
+        val hwName = hw.name
+        if (!preferSoftwareEncoderOnMtk || !hwName.contains("mtk", ignoreCase = true)) return hw
+        return try {
+            val sw = MediaCodec.createByCodecName("c2.android.avc.encoder")
+            hw.release()
+            Log.i(TAG, "🔬 Using software encoder ${sw.name} instead of $hwName")
+            sw
+        } catch (e: Exception) {
+            Log.w(TAG, "Software encoder unavailable (${e.message}), keeping $hwName")
+            hw
+        }
+    }
+
     private fun startVideoSender() {
         if (videoEncoder != null) return
         val track = localVideoTrack ?: return
         try {
-            videoEncoder = MediaCodec.createEncoderByType("video/avc")
+            videoEncoder = createVideoEncoder()
             val format = MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) // NV12
                 setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
