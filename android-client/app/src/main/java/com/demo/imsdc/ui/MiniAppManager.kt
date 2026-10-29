@@ -345,6 +345,7 @@ class MiniAppManager(val activity: CallActivity) {
 
             if (targetId == "operator-menu") {
                 Log.i(TAG, "Exiting mini-app and returning to operator-menu")
+                activity.dcManager.cancelPendingDownload()
                 activity.dcManager.targetAppId = "operator-menu"
                 activity.binding.btnExitMiniapp.visibility = View.GONE
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
@@ -446,6 +447,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private var isReInviteInProgress: Boolean = false
+    private val APP_DOWNLOAD_WAIT_MS = 3000L
 
     fun triggerAppNegotiationReInvite(appId: String) {
         val targetId = when {
@@ -460,6 +462,11 @@ class MiniAppManager(val activity: CallActivity) {
         isReInviteInProgress = true
         activity.lifecycleScope.launch(Dispatchers.Main) {
             try {
+                if (targetId != "operator-menu") {
+                    // The Re-INVITE re-negotiates media and can close the BDC; let the app package
+                    // requested for this launch arrive first (bounded, proceeds on timeout).
+                    activity.dcManager.awaitAppDownload(targetId, APP_DOWNLOAD_WAIT_MS)
+                }
                 activity.sipManager.activeReqAppId = targetId
                 // Always close existing ADC first to isolate sessions
                 activity.webRtcManager.closeADC()
