@@ -62,7 +62,7 @@ class RtpMediaManager(
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
     private var encoderDiagFrames = 0
-    private var encoderOutDiag = 0
+    @Volatile private var spsPpsConfig: ByteArray? = null
     private var videoSendErrors = 0
     @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
@@ -574,8 +574,8 @@ class RtpMediaManager(
 
     // ─── VIDEO SENDER (Camera Feed -> H.264 Encoder -> FU-A -> RTP) ──────────
 
-    // EXPERIMENT: OPPO/MediaTek hardware encoder output is grey with a green right-edge band even though
-    // the Image planes we write read back correctly. Use the software encoder there to isolate the cause.
+    // The MediaTek hardware H.264 encoder (e.g. OPPO Reno13) produces grey video with a green right-edge
+    // band even though the Image planes we write read back correctly. Use the software encoder there.
     private val preferSoftwareEncoderOnMtk = true
 
     private fun createVideoEncoder(): MediaCodec {
@@ -602,7 +602,7 @@ class RtpMediaManager(
             if (prepend) setInteger("prepend-sps-pps-to-idr-frames", 1)
         }
 
-    /** EXPERIMENT: the software encoder rejects the full format on this device; find what it accepts and log why. */
+    /** The software encoder rejects "prepend-sps-pps-to-idr-frames"; fall back to the formats it accepts. */
     private fun configureEncoderWithFallbacks() {
         var enc = videoEncoder ?: return
         val flex = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
@@ -643,6 +643,7 @@ class RtpMediaManager(
         if (videoEncoder != null) return
         val track = localVideoTrack ?: return
         try {
+            spsPpsConfig = null
             videoEncoder = createVideoEncoder()
             configureEncoderWithFallbacks()
             videoEncoder?.start()
@@ -673,14 +674,20 @@ class RtpMediaManager(
                             val naluBytes = ByteArray(bufferInfo.size)
                             outputBuffer.position(bufferInfo.offset)
                             outputBuffer.get(naluBytes)
-                            if (encoderOutDiag < 6) {
-                                encoderOutDiag++
-                                val head = naluBytes.take(48).joinToString("") { "%02x".format(it) }
-                                Log.i(TAG, "🔬 EncOut buf#$encoderOutDiag flags=${bufferInfo.flags} size=${bufferInfo.size} head=$head")
-                            }
 
                             // Find and packetize H.264 NALUs from the byte stream
                             val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                            if (isConfig) {
+                                spsPpsConfig = naluBytes
+                            } else if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                                // Software encoders emit SPS/PPS once at start; a receiver that missed
+                                // them can never decode, so repeat them before every keyframe.
+                                val cfg = spsPpsConfig
+                                val startsWithSps = naluBytes.size > 4 && (naluBytes[4].toInt() and 0x1F) == 7
+                                if (cfg != null && !startsWithSps) {
+                                    seqNum = packetizeAndSendH264(cfg, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, false)
+                                }
+                            }
                             seqNum = packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, !isConfig)
                         }
                         encoder.releaseOutputBuffer(outputBufferIndex, false)
