@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - **Messenger-style call screen (Android):** compact top bar (avatar, name, status · timer), large pulsing avatar while connecting, and a frosted control pill with round Mute / Speaker / Hold / End buttons that turn white when active. The speaker button now reflects the real speaker state. The exit button is a small "‹ Menu" pill. SkyLotus Air now uses the full screen above the controls.
 
 ### Fixed
+- Photo-share showed `ERR_NAME_NOT_RESOLVED` when opened from the operator-menu: it was the only mini-app not bundled in the APK, and its package download over the BDC was cut off by the app's own Re-INVITE (which closes the BDC) before the zip arrived. A bundled copy now exists at `assets/miniapps/photo-share/` (identical to `go-mf/static/apps/photo-share/`) and is used until a downloaded copy is cached.
 - Hotline app re-INVITE (e.g. 1900 → flight-booking): IMS-AS answered the phone with the callee-leg ADC credentials, so the ADC stayed CONNECTING and DCAS never got search/select/confirm. The answer now carries MF's caller-side ADC transport.
 - Declining an incoming call from the notification left MT on the ringing screen while MO had already hung up. Declining now ends the call locally on MT too.
 - Video sent from some phones (e.g. OPPO / MediaTek) showed black-and-white on the far end: the encoder is now fed through `getInputImage()` so each chip's colour layout is honoured.
