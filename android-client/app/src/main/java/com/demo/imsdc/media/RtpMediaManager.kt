@@ -61,6 +61,7 @@ class RtpMediaManager(
     private var videoPacketsSent = 0
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
+    private var encoderDiagFrames = 0
     private var videoSendErrors = 0
     @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
@@ -690,6 +691,10 @@ class RtpMediaManager(
                     }
                     val written = try {
                         writeI420ToImage(image, rotatedY, rotatedU, rotatedV, nv12Width, nv12Height)
+                        if (encoderDiagFrames < 3 || encoderDiagFrames % 150 == 0) {
+                            logEncoderInputDiag(frame.rotation, i420.width, i420.height, image, nv12Width, nv12Height)
+                        }
+                        encoderDiagFrames++
                         true
                     } catch (e: Exception) {
                         Log.e(TAG, "Encoder image write failed: ${e.message}")
@@ -899,6 +904,41 @@ class RtpMediaManager(
         copyPlane(y, srcW, planes[0], w, h)
         copyPlane(u, srcW / 2, planes[1], w / 2, h / 2)
         copyPlane(v, srcW / 2, planes[2], w / 2, h / 2)
+    }
+
+    /** Mean of a sampled grid of a plane (honours row/pixel stride), or -1 if nothing could be read. */
+    private fun samplePlaneMean(buf: ByteBuffer, rowStride: Int, pixelStride: Int, w: Int, h: Int): Int {
+        var sum = 0L
+        var n = 0
+        val limit = buf.limit()
+        for (r in 0 until h step maxOf(1, h / 16)) {
+            for (c in 0 until w step maxOf(1, w / 16)) {
+                val idx = r * rowStride + c * pixelStride
+                if (idx < limit) { sum += buf.get(idx).toInt() and 0xFF; n++ }
+            }
+        }
+        return if (n == 0) -1 else (sum / n).toInt()
+    }
+
+    /**
+     * Diagnostic for grey / green-edge video from MediaTek encoders. Compares what we rotated
+     * (source) with what the encoder's Image planes hold after the write: a source chroma mean far
+     * from 128 with an Image chroma mean of 128 or 0 means the colour never reached the encoder.
+     */
+    private fun logEncoderInputDiag(rotation: Int, camW: Int, camH: Int, image: android.media.Image, outW: Int, outH: Int) {
+        val pl = image.planes
+        val srcY = samplePlaneMean(rotatedY, outW, 1, outW, outH)
+        val srcU = samplePlaneMean(rotatedU, outW / 2, 1, outW / 2, outH / 2)
+        val srcV = samplePlaneMean(rotatedV, outW / 2, 1, outW / 2, outH / 2)
+        val dstY = samplePlaneMean(pl[0].buffer, pl[0].rowStride, pl[0].pixelStride, minOf(outW, image.width), minOf(outH, image.height))
+        val dstU = samplePlaneMean(pl[1].buffer, pl[1].rowStride, pl[1].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
+        val dstV = samplePlaneMean(pl[2].buffer, pl[2].rowStride, pl[2].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
+        Log.i(TAG, "🔬 EncDiag rot=$rotation cam=${camW}x$camH out=${outW}x$outH img=${image.width}x${image.height} " +
+                "srcYUV=$srcY/$srcU/$srcV dstYUV=$dstY/$dstU/$dstV " +
+                "bufY(pos=${pl[0].buffer.position()} lim=${pl[0].buffer.limit()} cap=${pl[0].buffer.capacity()}) " +
+                "bufU(pos=${pl[1].buffer.position()} lim=${pl[1].buffer.limit()} cap=${pl[1].buffer.capacity()}) " +
+                "bufV(pos=${pl[2].buffer.position()} lim=${pl[2].buffer.limit()} cap=${pl[2].buffer.capacity()}) " +
+                "uvSameBacking=${pl[1].buffer === pl[2].buffer}")
     }
 
     private fun copyPlane(src: ByteBuffer, srcStride: Int, plane: android.media.Image.Plane, w: Int, h: Int) {
