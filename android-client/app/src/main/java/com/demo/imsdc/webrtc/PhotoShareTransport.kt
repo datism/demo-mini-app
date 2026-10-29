@@ -293,8 +293,11 @@ class PhotoShareTransport(
         photoId: String
     ): Pair<Int, Int>? = withContext(Dispatchers.IO) {
         try {
-            val source = context.contentResolver.openInputStream(uri) ?: return@withContext null
-            val bmp = source.use { BitmapFactory.decodeStream(it) } ?: return@withContext null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            val opts = BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight) }
+            val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+                ?: return@withContext null
 
             // EXIF orientation — WebView <img> không tự áp EXIF, phải xoay thủ công.
             val rotated = applyExifRotation(context, uri, bmp)
@@ -331,7 +334,10 @@ class PhotoShareTransport(
         photoId: String
     ): Pair<Int, Int>? = withContext(Dispatchers.IO) {
         try {
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val opts = BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight) }
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                 ?: return@withContext null
 
             // EXIF orientation từ segment JPEG/HEIC gốc (nếu đọc được).
@@ -396,6 +402,17 @@ class PhotoShareTransport(
             Log.w(TAG, "EXIF read failed, using original: ${e.message}")
             bmp
         }
+    }
+
+    /**
+     * Power-of-two inSampleSize so a 12-50 MP photo is never decoded at full size (a 50 MP ARGB bitmap
+     * is ~200 MB and freezes or kills the app); the result still has a long side >= MAX_DIMEN.
+     */
+    private fun sampleSizeFor(width: Int, height: Int): Int {
+        val longSide = maxOf(width, height)
+        var sample = 1
+        while (longSide / (sample * 2) >= MAX_DIMEN) sample *= 2
+        return sample
     }
 
     private fun scaleTo(src: Bitmap, maxDimen: Int): Bitmap {
