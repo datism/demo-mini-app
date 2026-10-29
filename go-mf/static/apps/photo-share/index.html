@@ -23,7 +23,8 @@
             overflow: hidden; background: #010409; touch-action: none; }
   #imgCanvasWrap { position: absolute; top: 0; bottom: 0; left: 0; right: 0;
                    display: flex; align-items: center; justify-content: center; }
-  #photoImg { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none;
+  /* Kích thước do sizeCanvas() tính (fit vào #viewer) — max-width/height % không hoạt động vì #stage co theo ảnh. */
+  #photoImg { object-fit: contain; user-select: none;
               -webkit-user-drag: none; }
   #drawCanvas { position: absolute; pointer-events: none; }
 
@@ -173,6 +174,8 @@ function renderStrip() {
 function showPhoto(p) {
   $('empty').style.display = 'none';
   const img = $('photoImg');
+  // Ảnh mới (thumb -> full, hoặc ảnh khác) đổi kích thước tự nhiên: fit lại khi tải xong.
+  img.onload = () => { sizeCanvas(); redrawStrokes(); };
   img.src = p.url; img.style.display = 'block';
   requestAnimationFrame(() => { sizeCanvas(); redrawStrokes(); });
 }
@@ -180,7 +183,13 @@ function showPhoto(p) {
 function sizeCanvas() {
   const img = $('photoImg'); const c = $('drawCanvas');
   if (!img.naturalWidth) return;
-  const rect = img.getBoundingClientRect();
+  // Fit (contain) vào #viewer: cả thumb 256px lẫn ảnh 1920px đều hiện đúng khung, hai bên giống nhau.
+  const viewer = $('viewer');
+  if (!viewer.clientWidth || !viewer.clientHeight) return;
+  const k = Math.min(viewer.clientWidth / img.naturalWidth, viewer.clientHeight / img.naturalHeight);
+  const rect = { width: Math.max(1, Math.floor(img.naturalWidth * k)), height: Math.max(1, Math.floor(img.naturalHeight * k)) };
+  img.style.width = rect.width + 'px';
+  img.style.height = rect.height + 'px';
   const stage = $('stage');
   stage.style.width = rect.width + 'px';
   stage.style.height = rect.height + 'px';
