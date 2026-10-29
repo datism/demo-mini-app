@@ -70,6 +70,9 @@ dependencies {
     // ─── JSON ────────────────────────────────────────────────────
     implementation("org.json:json:20231013")
 
+    // ─── EXIF (photo-share: xoay ảnh theo orientation khi import từ album) ──
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // Desugaring dependency
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.2.2")
 }

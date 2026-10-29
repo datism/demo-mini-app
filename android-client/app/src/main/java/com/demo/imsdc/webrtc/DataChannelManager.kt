@@ -57,6 +57,9 @@ class DataChannelManager(
     // ─── SDK ref để chuyển dữ liệu GSMA ──────────────────────────────────────
     var imsDcSdk: ImsDcSdk? = null
 
+    // ─── Photo-share transport (chunk binary qua ADC 1000) ──────────────────
+    var photoShare: PhotoShareTransport? = null
+
     // ─── AppId để tải mini-app cụ thể qua BDC ─────────────────────────────
     // Mặc định: operator-menu. Khi SDK gọi startMiniApp, đặt vào đây trước khi BDC mở.
     var targetAppId: String = "operator-menu"
@@ -424,6 +427,14 @@ class DataChannelManager(
                         val bytes = ByteArray(byteBuffer.remaining())
                         byteBuffer.get(bytes)
                         Log.i(TAG, "ADC received ${bytes.size} bytes (binary=${buffer.binary})")
+
+                        // Photo-share binary DATA_CHUNK (byte đầu = 0x01): transport
+                        // tự ghép chunks rồi đẩy lên JS khi đủ — KHÔNG đi đường
+                        // notifyMessageReceived cho từng mảnh (tiết kiệm b64 khổng lồ).
+                        if (photoShare?.onIncomingBytes(bytes) == true) {
+                            return
+                        }
+
                         imsDcSdk?.notifyMessageReceived(bytes)
                         try {
                             val data = String(bytes, Charsets.UTF_8)

@@ -31,6 +31,12 @@ class AndroidBridgeInterface(
     var onJsRequestedAdc: ((String) -> Unit)? = null
 
     /**
+     * Photo-share transport (chunk 16KB + flow control + transcode album).
+     * Khởi tạo bởi CallActivity cùng lúc với DataChannelManager — nullable an toàn.
+     */
+    var photoShare: PhotoShareTransport? = null
+
+    /**
      * Được gọi bởi JavaScript để kích hoạt khởi chạy Mini-app mới.
      * Ví dụ: AndroidBridge.startMiniApp('0003210000000038')
      */
@@ -147,6 +153,122 @@ class AndroidBridgeInterface(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to execute playAgentAudio: ${e.message}", e)
+        }
+    }
+
+    // ═══════════════ PHOTO-SHARE BRIDGE ═══════════════
+
+    /**
+     * Đưa 1 ảnh album (content:// URI) vào photostore sau transcode
+     * (EXIF rotate → scale 1920 → JPEG q80 + thumbnail 256px).
+     *
+     * @param payload JSON: {"uri":"content://...","id":"p1"}
+     * @return JSON kết quả: {"ok":true,"id":"p1","bytes":412000,"thumbBytes":9800,
+     *                        "hash":"<sha256-hex>"} hoặc {"ok":false,"error":"..."}
+     */
+    @JavascriptInterface
+    fun importPhoto(payload: String): String {
+        val transport = photoShare ?: return """{"ok":false,"error":"transport_not_ready"}"""
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val obj = org.json.JSONObject(payload)
+            val uri = obj.optString("uri")
+            val id = obj.optString("id")
+            if (uri.isEmpty() || id.isEmpty()) {
+                return """{"ok":false,"error":"uri_or_id_missing"}"""
+            }
+            val result = kotlinx.coroutines.runBlocking {
+                transport.importFromUri(context, android.net.Uri.parse(uri), id)
+            }
+            if (result == null) {
+                """{"ok":false,"error":"decode_failed"}"""
+            } else {
+                val (fullBytes, thumbBytes) = result
+                val hash = transport.fileFor(context, id).let { f ->
+                    if (f.exists()) transport.sha256Hex(f.readBytes()) else ""
+                }
+                """{"ok":true,"id":"$id","bytes":$fullBytes,"thumbBytes":$thumbBytes,"hash":"$hash"}"""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "importPhoto failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
+    /**
+     * Bắt đầu stream 1 ảnh đã import tới đầu xa (binary chunks qua ADC 1000).
+     * JS phải gửi msg JSON {"t":"begin",...} riêng qua sendData().
+     *
+     * @param payload JSON: {"id":"p1"}
+     * @return JSON: {"ok":true,"chunks":N,"bytes":M} — N tổng chunk sẽ đi trên dây.
+     */
+    @JavascriptInterface
+    fun sendPhoto(payload: String): String {
+        val transport = photoShare ?: return """{"ok":false,"error":"transport_not_ready"}"""
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val obj = org.json.JSONObject(payload)
+            val id = obj.optString("id")
+            if (id.isEmpty()) return """{"ok":false,"error":"id_missing"}"""
+            val total = transport.enqueueFile(context, id)
+            if (total == null) {
+                """{"ok":false,"error":"file_not_found"}"""
+            } else {
+                val bytes = transport.fileFor(context, id).length().toInt()
+                """{"ok":true,"chunks":$total,"bytes":$bytes}"""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "sendPhoto failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
+    /**
+     * URL để <img> hiển thị ảnh local trong WebView (serve bằng shouldInterceptRequest).
+     * @param id photoId; @param thumb true nếu muốn bản thumbnail
+     */
+    @JavascriptInterface
+    fun mediaUrl(id: String, thumb: Boolean): String {
+        return if (thumb) "https://miniapp/media/${id}_t.jpg" else "https://miniapp/media/$id.jpg"
+    }
+
+    /**
+     * Nhận ảnh dạng base64 từ WebView (từ <input type=file> — WebView chỉ trả
+     * File/blob, không truy cập được content:// URI của Photo Picker native).
+     * Native transcode (EXIF xoay nếu decode được, scale, JPEG) rồi lưu photostore.
+     *
+     * @param payload JSON: {"id":"p1","data":"<base64>","type":"image/jpeg"}
+     */
+    @JavascriptInterface
+    fun importPhotoB64(payload: String): String {
+        val transport = photoShare ?: return """{"ok":false,"error":"transport_not_ready"}"""
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val obj = org.json.JSONObject(payload)
+            val id = obj.optString("id")
+            val data = obj.optString("data")
+            if (id.isEmpty() || data.isEmpty()) {
+                return """{"ok":false,"error":"id_or_data_missing"}"""
+            }
+            val bytes = android.util.Base64.decode(data, android.util.Base64.NO_WRAP)
+            val result = kotlinx.coroutines.runBlocking {
+                transport.importFromBytes(context, bytes, id)
+            }
+            if (result == null) {
+                """{"ok":false,"error":"decode_failed"}"""
+            } else {
+                val (fullBytes, thumbBytes) = result
+                val hash = transport.fileFor(context, id).let { f ->
+                    if (f.exists()) transport.sha256Hex(f.readBytes()) else ""
+                }
+                """{"ok":true,"id":"$id","bytes":$fullBytes,"thumbBytes":$thumbBytes,"hash":"$hash"}"""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "importPhotoB64 failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
         }
     }
 }

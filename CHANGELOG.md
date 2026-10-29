@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Added & Enhanced
+- **Photo-share Mini-App (new, P2A2P):** share photos from the album during a call over the ADC (`photo-share/index.html`, `PhotoShareTransport.kt`). Photos are EXIF-rotated on import, kept in `cacheDir/photostore`, served to the WebView at `/media/`, and cleared when the call ends. Added a 📷 button to the operator-menu tray.
+
 - **Caro Mini-App Demo Upgrade:**
   - New layout: board in a frosted bottom panel, remote video clearly visible in the top part of the screen (`caro/index.html`).
   - Move feedback: pop animation, synthesized sound, vibration; rejected moves now shake the board and show a toast, with optimistic moves rolled back.

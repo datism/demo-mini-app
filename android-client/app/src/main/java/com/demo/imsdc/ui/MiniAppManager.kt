@@ -96,7 +96,27 @@ class MiniAppManager(val activity: CallActivity) {
                         else -> rawAppId
                     }
                     val cachedAppDir = java.io.File(activity.cacheDir, "miniapps/$appId")
-                    
+
+                    // ─── Photo-share media serving (trước mọi resolve app file) ───
+                    // Ảnh nằm trong cacheDir/photostore — NGOÀI miniapps/ để không bị
+                    // deleteRecursively khi ZIP app mới được giải nén.
+                    if (path.startsWith("/media/")) {
+                        val mediaName = path.removePrefix("/media/").replace("..", "").replace("/", "")
+                        val mediaFile = java.io.File(java.io.File(activity.cacheDir, "photostore"), mediaName)
+                        val mime = when {
+                            mediaName.endsWith(".jpg") || mediaName.endsWith(".jpeg") -> "image/jpeg"
+                            mediaName.endsWith(".png") -> "image/png"
+                            else -> "application/octet-stream"
+                        }
+                        if (mediaFile.exists() && mediaFile.isFile) {
+                            Log.d(TAG, "Serving photostore media: ${mediaFile.absolutePath}")
+                            return android.webkit.WebResourceResponse(mime, "UTF-8", java.io.FileInputStream(mediaFile))
+                        }
+                        Log.w(TAG, "photostore media not found: $mediaName → 404")
+                        return android.webkit.WebResourceResponse(mime, "UTF-8", 404, "Not Found",
+                            emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+
                     if (path.startsWith("/dcar/")) {
                         // Proxy API request to DCSF backend server (DC1/DC3 interface)
                         val sipServerIp = activity.sipManager.sipServerHost

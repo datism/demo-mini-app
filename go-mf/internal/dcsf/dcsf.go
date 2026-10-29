@@ -443,7 +443,7 @@ func (s *DCSFServer) handleMediaChangeRequest(w http.ResponseWriter, r *http.Req
 	// For specific apps, if connectionPolicy is P2P (like caro, whiteboard) we use P2P.
 	// For fun-calling-app, it requires symmetric P2A2P setup.
 	// For operator-menu, it's P2A (HTTP_PROXY).
-	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" {
+	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" || reqAppId == "photo-share" {
 		connectionPolicy = "P2P"
 	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
 		connectionPolicy = "P2A" // Anchored via DCAS server
@@ -496,7 +496,7 @@ func (s *DCSFServer) handleMediaChangeRequest(w http.ResponseWriter, r *http.Req
 
 	adcType := "P2A2P"
 	mediaProxyConfig := ""
-	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" {
+	if reqAppId == "whiteboard" || reqAppId == "sketch-sync-app" || reqAppId == "0003210000000038" || reqAppId == "tuyaapp" || reqAppId == "photo-share" {
 		adcType = "P2A2P"
 		mediaProxyConfig = ""
 	} else if reqAppId == "caro" || reqAppId == "tic-tac-toe-app" || reqAppId == "fun-calling-app" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {

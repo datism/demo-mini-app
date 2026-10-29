@@ -1,4 +1,4 @@
-FROM golang:1.21.9-alpine3.19 AS builder
+FROM 172.20.1.22/proxy-cache/library/golang:1.21.9-alpine3.19 AS builder
 
 WORKDIR /app
 COPY . .
@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /pcap-exporter ./cmd/pcap-e
 RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /dc-test-tool ./cmd/dc-test-tool
 
 # ---
-FROM alpine:3.19.1
+FROM 172.20.1.22/proxy-cache/library/alpine:3.19.1
 
 WORKDIR /app
 COPY --from=builder /ims-as .

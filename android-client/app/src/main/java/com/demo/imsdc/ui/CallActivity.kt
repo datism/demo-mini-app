@@ -1173,6 +1173,13 @@ class CallActivity : AppCompatActivity() {
         binding.webviewMiniapp.addJavascriptInterface(androidBridge, "ImsDcBridge")
         binding.webviewMiniapp.addJavascriptInterface(sdkBridge, "_dsbridge")
 
+        // Photo-share transport: chunk 16KB + flow control qua ADC 1000 (P2P relay).
+        // Khởi tạo SAU imsDcSdk để deliverToJs có đường đẩy lên WebView ngay lập tức.
+        val photoShare = com.demo.imsdc.webrtc.PhotoShareTransport(webRtcManager, lifecycleScope, imsDcSdk)
+        photoShare.webView = binding.webviewMiniapp
+        dcManager.photoShare = photoShare
+        androidBridge.photoShare = photoShare
+
         // Callback: PeerConnection connected ? m? DataChannels v� kh?i d?ng Mini-app
         webRtcManager.onPeerConnected = {
             Log.i(TAG, "?? PeerConnection CONNECTED to MF!")
@@ -1533,6 +1540,8 @@ class CallActivity : AppCompatActivity() {
         isDataChannelsOpened = false
         stopCallTimer()
         rtpMediaManager?.stop()
+        // Photo-share: dọn photostore theo vòng đời cuộc gọi (GSMA TS.66 container lifecycle).
+        dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()
         val cId = callId ?: sipManager.currentCallId
         val fTag = sipManager.currentFromTag
@@ -1588,6 +1597,8 @@ class CallActivity : AppCompatActivity() {
         }
         stopCallTimer()
         rtpMediaManager?.stop()
+        // Photo-share: dọn photostore theo vòng đời cuộc gọi (GSMA TS.66 container lifecycle).
+        dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()
         // Ensure remote peer is released if call was in progress or ringing
         if (!isEndingCall && (callId != null || SipManager.shared?.currentCallId != null)) {
