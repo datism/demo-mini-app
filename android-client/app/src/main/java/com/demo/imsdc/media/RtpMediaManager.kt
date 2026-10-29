@@ -62,6 +62,7 @@ class RtpMediaManager(
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
     private var encoderDiagFrames = 0
+    private var encoderOutDiag = 0
     private var videoSendErrors = 0
     @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
@@ -605,12 +606,20 @@ class RtpMediaManager(
                 val ipStr = remoteIP
                 try {
                     val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                    if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        Log.i(TAG, "🔬 EncOut format: ${encoder.outputFormat}")
+                    }
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
                         if (outputBuffer != null && bufferInfo.size > 0 && ipStr != null) {
                             val naluBytes = ByteArray(bufferInfo.size)
                             outputBuffer.position(bufferInfo.offset)
                             outputBuffer.get(naluBytes)
+                            if (encoderOutDiag < 6) {
+                                encoderOutDiag++
+                                val head = naluBytes.take(48).joinToString("") { "%02x".format(it) }
+                                Log.i(TAG, "🔬 EncOut buf#$encoderOutDiag flags=${bufferInfo.flags} size=${bufferInfo.size} head=$head")
+                            }
 
                             // Find and packetize H.264 NALUs from the byte stream
                             val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
@@ -933,7 +942,13 @@ class RtpMediaManager(
         val dstY = samplePlaneMean(pl[0].buffer, pl[0].rowStride, pl[0].pixelStride, minOf(outW, image.width), minOf(outH, image.height))
         val dstU = samplePlaneMean(pl[1].buffer, pl[1].rowStride, pl[1].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
         val dstV = samplePlaneMean(pl[2].buffer, pl[2].rowStride, pl[2].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
-        Log.i(TAG, "🔬 EncDiag rot=$rotation cam=${camW}x$camH out=${outW}x$outH img=${image.width}x${image.height} " +
+        fun range(b: ByteBuffer, n: Int): String {
+            var lo = 255; var hi = 0
+            for (i in 0 until n step 97) { val v = b.get(i).toInt() and 0xFF; if (v < lo) lo = v; if (v > hi) hi = v }
+            return "$lo-$hi"
+        }
+        val ranges = "rangeYUV=${range(rotatedY, outW * outH)}/${range(rotatedU, outW * outH / 4)}/${range(rotatedV, outW * outH / 4)}"
+        Log.i(TAG, "🔬 EncDiag $ranges rot=$rotation cam=${camW}x$camH out=${outW}x$outH img=${image.width}x${image.height} " +
                 "srcYUV=$srcY/$srcU/$srcV dstYUV=$dstY/$dstU/$dstV " +
                 "bufY(pos=${pl[0].buffer.position()} lim=${pl[0].buffer.limit()} cap=${pl[0].buffer.capacity()}) " +
                 "bufU(pos=${pl[1].buffer.position()} lim=${pl[1].buffer.limit()} cap=${pl[1].buffer.capacity()}) " +
