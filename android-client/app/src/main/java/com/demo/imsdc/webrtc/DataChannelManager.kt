@@ -54,6 +54,19 @@ class DataChannelManager(
     private var bdcHeadersSize = -1
     private var currentTargetEtag = ""
 
+    // ─── Pending mini-app package request ────────────────────────────────────
+    // targetAppId is overwritten by unrelated launches (e.g. back to operator-menu), so the app whose
+    // package is being fetched is tracked separately:
+    //  - downloadAppId: set until its response arrives; survives a BDC teardown and is re-sent when
+    //    the channel reopens.
+    //  - inFlightRequests: one entry per GET sent, so each response (BDC replies arrive in request
+    //    order) is installed for the app that was actually requested.
+    @Volatile private var downloadAppId: String? = null
+    private var downloadDone: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+    private val inFlightRequests = java.util.ArrayDeque<String>()
+    private var bdcResponseAppId: String? = null
+    private var bdcResponseFailed = false
+
     // ─── SDK ref để chuyển dữ liệu GSMA ──────────────────────────────────────
     var imsDcSdk: ImsDcSdk? = null
 
@@ -101,6 +114,12 @@ class DataChannelManager(
                             DataChannel.State.CLOSING,
                             DataChannel.State.CLOSED -> {
                                 Log.i(TAG, "BDC (id=${bdc.id()}) closed")
+                                // Replies to requests sent on this channel will never arrive; the pending
+                                // download (downloadAppId) is re-sent when the channel reopens.
+                                val current = webRtcManager.bdcChannel
+                                if (current == null || current === bdc) {
+                                    synchronized(inFlightRequests) { inFlightRequests.clear() }
+                                }
                             }
                             else -> {}
                         }
@@ -158,7 +177,7 @@ class DataChannelManager(
      * MF sẽ phân tích request này và trả về nội dung index.html của app.
      */
     private fun sendHttpGetRequest(bdc: DataChannel) {
-        val rawAppId = targetAppId
+        val rawAppId = downloadAppId ?: targetAppId
         val appId = when {
             rawAppId.contains("0003210000000038") || rawAppId.contains("tuyaapp") || rawAppId.contains("sketch-sync-app") -> "sketch-sync-app"
             rawAppId.contains("sketch-sync-app") || rawAppId.contains("tuyaapp") || rawAppId.contains("sketch-sync-app") -> "sketch-sync-app"
@@ -177,7 +196,44 @@ class DataChannelManager(
         val bytes = request.toByteArray(Charsets.UTF_8)
         val buf = ByteBuffer.wrap(bytes)
         val success = bdc.send(DataChannel.Buffer(buf, false))
+        if (success) synchronized(inFlightRequests) { inFlightRequests.addLast(rawAppId) }
         Log.i(TAG, "BDC (id=${bdc.id()}): HTTP GET sent ($success): $request")
+    }
+
+    /**
+     * Wait (bounded) until the package requested for [appId] has been installed, so the SIP Re-INVITE
+     * that follows does not tear the BDC down mid-download. Returns true when there is nothing to wait
+     * for (no request in flight) or the download completed OK; false on timeout or failure (the caller proceeds anyway and the
+     * pending request is re-sent when the BDC reopens).
+     */
+    suspend fun awaitAppDownload(appId: String, timeoutMs: Long): Boolean {
+        val done = synchronized(this) { if (downloadAppId == appId) downloadDone else null } ?: return true
+        // Only worth waiting if the GET actually went out; with the BDC closed the old behaviour applies.
+        if (synchronized(inFlightRequests) { !inFlightRequests.contains(appId) }) return true
+        val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { done.await() }
+        Log.i(TAG, "awaitAppDownload($appId): ${when (ok) { true -> "done"; false -> "failed"; null -> "timed out" }}")
+        return ok == true
+    }
+
+    /** Forget a pending download, e.g. when the user goes back to the operator-menu. */
+    fun cancelPendingDownload() {
+        synchronized(this) {
+            val appId = downloadAppId ?: return
+            Log.i(TAG, "Cancelling pending download of $appId")
+            downloadAppId = null
+            downloadDone?.complete(false)
+            downloadDone = null
+        }
+    }
+
+    private fun completeDownload(appId: String?, ok: Boolean) {
+        synchronized(this) {
+            if (appId != null && downloadAppId == appId) {
+                downloadAppId = null
+                downloadDone?.complete(ok)
+                downloadDone = null
+            }
+        }
     }
 
     /**
@@ -187,6 +243,11 @@ class DataChannelManager(
     fun sendAppRequest(appId: String, etag: String = "") {
         targetAppId = appId
         currentTargetEtag = etag
+        synchronized(this) {
+            downloadDone?.complete(false)
+            downloadAppId = appId
+            downloadDone = kotlinx.coroutines.CompletableDeferred()
+        }
         val channels = listOfNotNull(webRtcManager.bdcChannel)
         if (channels.isEmpty()) {
             Log.w(TAG, "BDC channels chưa tạo, sẽ gửi request khi BDC mở (targetAppId=$appId)")
@@ -226,11 +287,18 @@ class DataChannelManager(
                 bdcHeadersSize = separatorIdx + 4
                 val headers = String(currentData.copyOfRange(0, separatorIdx), Charsets.UTF_8)
                 Log.d(TAG, "Parsed headers:\n$headers")
-                
+                val respAppId = synchronized(inFlightRequests) { inFlightRequests.pollFirst() } ?: (downloadAppId ?: targetAppId)
+                bdcResponseAppId = respAppId
+
+                // Error replies still carry a body; let it arrive so it cannot bleed into the next response.
+                bdcResponseFailed = headers.startsWith("HTTP/1.1 4") || headers.startsWith("HTTP/1.1 5")
+                if (bdcResponseFailed) Log.w(TAG, "BDC response for $respAppId failed: ${headers.lineSequence().first()}")
+
                 if (headers.startsWith("HTTP/1.1 304")) {
                     Log.i(TAG, "Received 304 Not Modified. Using local cache.")
                     resetBdcBuffer()
-                    loadCachedMiniApp()
+                    loadCachedMiniApp(respAppId)
+                    completeDownload(respAppId, true)
                     return
                 }
                 
@@ -245,8 +313,9 @@ class DataChannelManager(
                 if (etagMatch != null) {
                     val newEtag = etagMatch.groupValues[1].trim()
                     val prefs = webView?.context?.getSharedPreferences("miniapps_etag", android.content.Context.MODE_PRIVATE)
-                    prefs?.edit()?.putString(targetAppId, newEtag)?.apply()
-                    Log.i(TAG, "Saved new ETag for $targetAppId: $newEtag")
+                    val etagAppId = bdcResponseAppId ?: targetAppId
+                    prefs?.edit()?.putString(etagAppId, newEtag)?.apply()
+                    Log.i(TAG, "Saved new ETag for $etagAppId: $newEtag")
                 }
             }
         }
@@ -256,16 +325,24 @@ class DataChannelManager(
             Log.d(TAG, "BDC chunk received. Body progress: $receivedBodySize / $bdcExpectedBodySize")
             if (receivedBodySize >= bdcExpectedBodySize || bdcExpectedBodySize <= 0) {
                 val bodyBytes = currentData.copyOfRange(bdcHeadersSize, currentData.size)
+                val respAppId = bdcResponseAppId ?: targetAppId
+                val failed = bdcResponseFailed
                 resetBdcBuffer()
-                
+
+                if (failed) {
+                    completeDownload(respAppId, false)
+                    return
+                }
+
                 if (bodyBytes.isEmpty()) {
                     Log.e(TAG, "Body is empty after full reception!")
+                    completeDownload(respAppId, false)
                     return
                 }
 
                 val isZip = bodyBytes.size > 4 && bodyBytes[0] == 0x50.toByte() && bodyBytes[1] == 0x4B.toByte()
                 if (isZip) {
-                    val cachedAppDir = java.io.File(webView?.context?.cacheDir, "miniapps/$targetAppId")
+                    val cachedAppDir = java.io.File(webView?.context?.cacheDir, "miniapps/$respAppId")
                     cachedAppDir.deleteRecursively()
                     cachedAppDir.mkdirs()
                     try {
@@ -290,10 +367,12 @@ class DataChannelManager(
                             }
                             zis.closeEntry()
                         }
-                        Log.i(TAG, "Extracted ZIP successfully. Reloading WebView.")
-                        loadCachedMiniApp()
+                        Log.i(TAG, "Extracted ZIP for $respAppId successfully. Reloading WebView.")
+                        loadCachedMiniApp(respAppId)
+                        completeDownload(respAppId, true)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to unzip: ${e.message}")
+                        completeDownload(respAppId, false)
                     }
                 } else {
                     val htmlStr = String(bodyBytes, Charsets.UTF_8)
@@ -317,6 +396,7 @@ class DataChannelManager(
                         }
                         onHtmlReceived?.invoke(htmlStr)
                     }
+                    completeDownload(respAppId, true)
                 }
             }
         }
@@ -328,8 +408,13 @@ class DataChannelManager(
         bdcExpectedBodySize = -1
     }
     
-    private fun loadCachedMiniApp() {
-        val cachedAppDir = java.io.File(webView?.context?.cacheDir, "miniapps/$targetAppId")
+    private fun loadCachedMiniApp(appId: String) {
+        // A late package for an app the user already left must not reload the page now on screen.
+        if (appId != targetAppId) {
+            Log.i(TAG, "Installed $appId but current app is $targetAppId — not reloading WebView")
+            return
+        }
+        val cachedAppDir = java.io.File(webView?.context?.cacheDir, "miniapps/$appId")
         val localIndex = java.io.File(cachedAppDir, "index.html")
         if (localIndex.exists()) {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
