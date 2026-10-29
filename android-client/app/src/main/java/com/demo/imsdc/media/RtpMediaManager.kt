@@ -593,19 +593,58 @@ class RtpMediaManager(
         }
     }
 
+    private fun buildEncoderFormat(prepend: Boolean, iFrame: Boolean, color: Int): MediaFormat =
+        MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
+            setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
+            setInteger(MediaFormat.KEY_FRAME_RATE, 25)
+            if (iFrame) setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            if (prepend) setInteger("prepend-sps-pps-to-idr-frames", 1)
+        }
+
+    /** EXPERIMENT: the software encoder rejects the full format on this device; find what it accepts and log why. */
+    private fun configureEncoderWithFallbacks() {
+        var enc = videoEncoder ?: return
+        val flex = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+        val variants = listOf(
+            Triple("full", true, true) to flex,
+            Triple("no-prepend", false, true) to flex,
+            Triple("no-prepend-no-iframe", false, false) to flex,
+            Triple("planar", false, true) to MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
+            Triple("semiplanar", false, true) to MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+        )
+        var lastError: Exception? = null
+        for ((v, color) in variants) {
+            try {
+                enc.configure(buildEncoderFormat(v.second, v.third, color), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                Log.i(TAG, "🔬 Encoder ${enc.name} configured with variant '${v.first}' color=$color")
+                videoEncoder = enc
+                return
+            } catch (e: IllegalArgumentException) {
+                lastError = e
+                Log.w(TAG, "🔬 Encoder ${enc.name} rejected variant '${v.first}' color=$color: ${e.message}")
+                try {
+                    val caps = enc.codecInfo.getCapabilitiesForType("video/avc")
+                    val vc = caps.videoCapabilities
+                    Log.w(TAG, "🔬 caps colorFormats=${caps.colorFormats.toList()} bitrate=${vc.bitrateRange} " +
+                            "w=${vc.supportedWidths} h=${vc.supportedHeights} fps=${vc.supportedFrameRates} " +
+                            "align=${vc.widthAlignment}x${vc.heightAlignment}")
+                } catch (_: Exception) {}
+                val name = enc.name
+                try { enc.release() } catch (_: Exception) {}
+                enc = MediaCodec.createByCodecName(name)
+                videoEncoder = enc
+            }
+        }
+        throw lastError ?: IllegalStateException("no encoder variant accepted")
+    }
+
     private fun startVideoSender() {
         if (videoEncoder != null) return
         val track = localVideoTrack ?: return
         try {
             videoEncoder = createVideoEncoder()
-            val format = MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) // NV12
-                setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
-                setInteger(MediaFormat.KEY_FRAME_RATE, 25)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                setInteger("prepend-sps-pps-to-idr-frames", 1)
-            }
-            videoEncoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            configureEncoderWithFallbacks()
             videoEncoder?.start()
             Log.i(TAG, "H.264 Video Encoder initialized.")
         } catch (e: Exception) {
