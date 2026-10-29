@@ -296,8 +296,35 @@ function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31
 /* ─────────────── Chọn ảnh (máy mình là nguồn) ─────────────── */
 $('btnPick').onclick = () => $('fileInput').click();
 
+function blobToB64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(r.error || new Error('read_failed'));
+    r.readAsDataURL(blob);
+  });
+}
+
+/** File ảnh -> base64 JPEG đã thu nhỏ (EXIF đã được áp khi decode). Lỗi decode: chỉ nhận file nhỏ nguyên bản. */
+async function fileToJpegB64(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const MAX = 1920, k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(bmp.width * k));
+    c.height = Math.max(1, Math.round(bmp.height * k));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+    if (blob) return await blobToB64(blob);
+  } catch (e) { /* rơi xuống bản gốc */ }
+  if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
+  return await blobToB64(file);
+}
+
 $('fileInput').onchange = async () => {
   const files = Array.from($('fileInput').files || []);
+  $('fileInput').value = ''; // cho phép chọn lại đúng ảnh đó lần sau
   if (!files.length) return;
   if (!window.AndroidBridge || !window.AndroidBridge.importPhoto) {
     toast('Thiết bị không hỗ trợ chọn ảnh'); return;
@@ -305,18 +332,13 @@ $('fileInput').onchange = async () => {
   const offered = [];
   for (let i = 0; i < files.length; i++) {
     const id = 'p' + Date.now() + '_' + i;
-    // WebView <input type=file> trả File object — đọc bytes trong JS và đẩy
-    // xuống native bằng base64 (native transcode EXIF/scale/JPEG rồi lưu photostore).
-    const buf = await files[i].arrayBuffer();
-    const u8 = new Uint8Array(buf);
-    let bin = '';
-    const CHUNK = 0x8000;
-    for (let j = 0; j < u8.length; j += CHUNK) {
-      bin += String.fromCharCode.apply(null, u8.subarray(j, j + CHUNK));
-    }
-    const b64 = btoa(bin);
+    // WebView <input type=file> trả File object. Thu nhỏ ngay trong trang (canvas, cạnh dài 1920, JPEG):
+    // ảnh 12-50 MP dạng base64 qua JS bridge nặng hàng chục MB và làm treo cả app.
+    let b64;
+    try { b64 = await fileToJpegB64(files[i]); }
+    catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); continue; }
     const res = JSON.parse(window.AndroidBridge.importPhotoB64 ?
-        window.AndroidBridge.importPhotoB64(JSON.stringify({ id: id, data: b64, type: files[i].type || 'image/jpeg' })) :
+        window.AndroidBridge.importPhotoB64(JSON.stringify({ id: id, data: b64, type: 'image/jpeg' })) :
         JSON.stringify({ ok: false, error: 'importPhotoB64_missing' }));
     if (res.ok) {
       state.photos[id] = {
