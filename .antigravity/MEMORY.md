@@ -310,11 +310,3 @@
         - **Trạng thái Git**: KHÔNG commit, KHÔNG push lên Git (tuân thủ nghiêm ngặt quy tắc).
 
 
-
-
-## 2026-10-30 — Photo/video sharing source changes (not deployed)
-- Corrected viewer geometry, persistent full-file references, EXIF rotation/reflection, high-DPI drawing and synchronized navigation/ink/clear. Server and APK pages/menu are synchronized; PhotoShare manifest is 1.1.0.
-- Added native asynchronous URI import and photo/video streaming (wire v2 full IDs, disk reception, SHA-256, <=50 MiB, retry/backpressure), video MIME/range serving and muted inline playback. Both UEs need the updated APK; video controls are local.
-- Added picker lifecycle recovery: avoid explicit camera pause for an active picker, force capture recovery on return, restore call audio mode/playback, rebind decoder surface and request keyframes. Actual freeze recovery is NOT verified on devices.
-- Verification: 34 standalone Kotlin assertions and 36 two-UE browser assertions passed; git diff --check passed. Full Android Gradle compilation blocked offline by uncached org.gradle.kotlin.kotlin-dsl plugin 4.1.2. No APK produced, no device/cluster deployment, no commit/push.
-- Test entry points and remaining physical-device checklist: go-mf/test/photo_share/README.md.

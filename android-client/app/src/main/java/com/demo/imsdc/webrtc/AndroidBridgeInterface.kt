@@ -158,12 +158,6 @@ class AndroidBridgeInterface(
 
     // ═══════════════ PHOTO-SHARE BRIDGE ═══════════════
 
-    @JavascriptInterface
-    fun pickMedia() {
-        val activity = dataChannelManager.webView?.context as? com.demo.imsdc.ui.CallActivity ?: return
-        activity.runOnUiThread { activity.launchSharedMediaPicker() }
-    }
-
     /**
      * Đưa 1 ảnh album (content:// URI) vào photostore sau transcode
      * (EXIF rotate → scale 1920 → JPEG q80 + thumbnail 256px).

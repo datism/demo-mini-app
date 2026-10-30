@@ -106,15 +106,11 @@ class MiniAppManager(val activity: CallActivity) {
                         val mime = when {
                             mediaName.endsWith(".jpg") || mediaName.endsWith(".jpeg") -> "image/jpeg"
                             mediaName.endsWith(".png") -> "image/png"
-                            mediaName.endsWith(".mp4") -> "video/mp4"
-                            mediaName.endsWith(".webm") -> "video/webm"
-                            mediaName.endsWith(".3gp") -> "video/3gpp"
                             else -> "application/octet-stream"
                         }
                         if (mediaFile.exists() && mediaFile.isFile) {
                             Log.d(TAG, "Serving photostore media: ${mediaFile.absolutePath}")
-                            return serveSharedMedia(mediaFile, mime, request.requestHeaders.entries
-                                .firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value)
+                            return android.webkit.WebResourceResponse(mime, "UTF-8", java.io.FileInputStream(mediaFile))
                         }
                         Log.w(TAG, "photostore media not found: $mediaName → 404")
                         return android.webkit.WebResourceResponse(mime, "UTF-8", 404, "Not Found",
@@ -314,22 +310,6 @@ class MiniAppManager(val activity: CallActivity) {
 
         // Enable WebView debugging (Android 4.4+)
         WebView.setWebContentsDebuggingEnabled(true)
-    }
-
-    /** WebView video seeking requires byte ranges; keep the response bounded to the requested slice. */
-    private fun serveSharedMedia(file: java.io.File, mime: String, range: String?): android.webkit.WebResourceResponse {
-        val slice = try { com.demo.imsdc.webrtc.SharedMediaRange.parse(file.length(), range) }
-        catch (e: IllegalArgumentException) { null }
-        catch (e: IllegalStateException) { null }
-        if (slice == null) {
-            return android.webkit.WebResourceResponse(mime, null, 416, "Range Not Satisfiable",
-                mapOf("Content-Range" to "bytes */${file.length()}"), java.io.ByteArrayInputStream(ByteArray(0)))
-        }
-        val headers = mutableMapOf("Accept-Ranges" to "bytes", "Cache-Control" to "no-store",
-            "Content-Length" to slice.length.toString())
-        if (slice.partial) headers["Content-Range"] = "bytes ${slice.start}-${slice.end}/${slice.total}"
-        return android.webkit.WebResourceResponse(mime, null, if (slice.partial) 206 else 200,
-            if (slice.partial) "Partial Content" else "OK", headers, slice.open(file))
     }
 
     // Flight-booking is a full-height sheet with its own header and call timer, so it gets
