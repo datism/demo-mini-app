@@ -61,6 +61,8 @@ class RtpMediaManager(
     private var videoPacketsSent = 0
     private var videoPacketsReceived = 0
     private var loggedEncoderLayout = false
+    private var encoderDiagFrames = 0
+    @Volatile private var spsPpsConfig: ByteArray? = null
     private var videoSendErrors = 0
     @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
@@ -572,19 +574,78 @@ class RtpMediaManager(
 
     // ─── VIDEO SENDER (Camera Feed -> H.264 Encoder -> FU-A -> RTP) ──────────
 
+    // The MediaTek hardware H.264 encoder (e.g. OPPO Reno13) produces grey video with a green right-edge
+    // band even though the Image planes we write read back correctly. Use the software encoder there.
+    private val preferSoftwareEncoderOnMtk = true
+
+    private fun createVideoEncoder(): MediaCodec {
+        val hw = MediaCodec.createEncoderByType("video/avc")
+        val hwName = hw.name
+        if (!preferSoftwareEncoderOnMtk || !hwName.contains("mtk", ignoreCase = true)) return hw
+        return try {
+            val sw = MediaCodec.createByCodecName("c2.android.avc.encoder")
+            hw.release()
+            Log.i(TAG, "🔬 Using software encoder ${sw.name} instead of $hwName")
+            sw
+        } catch (e: Exception) {
+            Log.w(TAG, "Software encoder unavailable (${e.message}), keeping $hwName")
+            hw
+        }
+    }
+
+    private fun buildEncoderFormat(prepend: Boolean, iFrame: Boolean, color: Int): MediaFormat =
+        MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
+            setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
+            setInteger(MediaFormat.KEY_FRAME_RATE, 25)
+            if (iFrame) setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            if (prepend) setInteger("prepend-sps-pps-to-idr-frames", 1)
+        }
+
+    /** The software encoder rejects "prepend-sps-pps-to-idr-frames"; fall back to the formats it accepts. */
+    private fun configureEncoderWithFallbacks() {
+        var enc = videoEncoder ?: return
+        val flex = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+        val variants = listOf(
+            Triple("full", true, true) to flex,
+            Triple("no-prepend", false, true) to flex,
+            Triple("no-prepend-no-iframe", false, false) to flex,
+            Triple("planar", false, true) to MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
+            Triple("semiplanar", false, true) to MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+        )
+        var lastError: Exception? = null
+        for ((v, color) in variants) {
+            try {
+                enc.configure(buildEncoderFormat(v.second, v.third, color), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                Log.i(TAG, "🔬 Encoder ${enc.name} configured with variant '${v.first}' color=$color")
+                videoEncoder = enc
+                return
+            } catch (e: IllegalArgumentException) {
+                lastError = e
+                Log.w(TAG, "🔬 Encoder ${enc.name} rejected variant '${v.first}' color=$color: ${e.message}")
+                try {
+                    val caps = enc.codecInfo.getCapabilitiesForType("video/avc")
+                    val vc = caps.videoCapabilities
+                    Log.w(TAG, "🔬 caps colorFormats=${caps.colorFormats.toList()} bitrate=${vc.bitrateRange} " +
+                            "w=${vc.supportedWidths} h=${vc.supportedHeights} fps=${vc.supportedFrameRates} " +
+                            "align=${vc.widthAlignment}x${vc.heightAlignment}")
+                } catch (_: Exception) {}
+                val name = enc.name
+                try { enc.release() } catch (_: Exception) {}
+                enc = MediaCodec.createByCodecName(name)
+                videoEncoder = enc
+            }
+        }
+        throw lastError ?: IllegalStateException("no encoder variant accepted")
+    }
+
     private fun startVideoSender() {
         if (videoEncoder != null) return
         val track = localVideoTrack ?: return
         try {
-            videoEncoder = MediaCodec.createEncoderByType("video/avc")
-            val format = MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) // NV12
-                setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
-                setInteger(MediaFormat.KEY_FRAME_RATE, 25)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                setInteger("prepend-sps-pps-to-idr-frames", 1)
-            }
-            videoEncoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            spsPpsConfig = null
+            videoEncoder = createVideoEncoder()
+            configureEncoderWithFallbacks()
             videoEncoder?.start()
             Log.i(TAG, "H.264 Video Encoder initialized.")
         } catch (e: Exception) {
@@ -604,6 +665,9 @@ class RtpMediaManager(
                 val ipStr = remoteIP
                 try {
                     val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                    if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        Log.i(TAG, "🔬 EncOut format: ${encoder.outputFormat}")
+                    }
                     if (outputBufferIndex >= 0) {
                         val outputBuffer = encoder.getOutputBuffer(outputBufferIndex)
                         if (outputBuffer != null && bufferInfo.size > 0 && ipStr != null) {
@@ -613,6 +677,17 @@ class RtpMediaManager(
 
                             // Find and packetize H.264 NALUs from the byte stream
                             val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                            if (isConfig) {
+                                spsPpsConfig = naluBytes
+                            } else if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                                // Software encoders emit SPS/PPS once at start; a receiver that missed
+                                // them can never decode, so repeat them before every keyframe.
+                                val cfg = spsPpsConfig
+                                val startsWithSps = naluBytes.size > 4 && (naluBytes[4].toInt() and 0x1F) == 7
+                                if (cfg != null && !startsWithSps) {
+                                    seqNum = packetizeAndSendH264(cfg, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, false)
+                                }
+                            }
                             seqNum = packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, !isConfig)
                         }
                         encoder.releaseOutputBuffer(outputBufferIndex, false)
@@ -690,6 +765,10 @@ class RtpMediaManager(
                     }
                     val written = try {
                         writeI420ToImage(image, rotatedY, rotatedU, rotatedV, nv12Width, nv12Height)
+                        if (encoderDiagFrames < 3 || encoderDiagFrames % 150 == 0) {
+                            logEncoderInputDiag(frame.rotation, i420.width, i420.height, image, nv12Width, nv12Height)
+                        }
+                        encoderDiagFrames++
                         true
                     } catch (e: Exception) {
                         Log.e(TAG, "Encoder image write failed: ${e.message}")
@@ -899,6 +978,47 @@ class RtpMediaManager(
         copyPlane(y, srcW, planes[0], w, h)
         copyPlane(u, srcW / 2, planes[1], w / 2, h / 2)
         copyPlane(v, srcW / 2, planes[2], w / 2, h / 2)
+    }
+
+    /** Mean of a sampled grid of a plane (honours row/pixel stride), or -1 if nothing could be read. */
+    private fun samplePlaneMean(buf: ByteBuffer, rowStride: Int, pixelStride: Int, w: Int, h: Int): Int {
+        var sum = 0L
+        var n = 0
+        val limit = buf.limit()
+        for (r in 0 until h step maxOf(1, h / 16)) {
+            for (c in 0 until w step maxOf(1, w / 16)) {
+                val idx = r * rowStride + c * pixelStride
+                if (idx < limit) { sum += buf.get(idx).toInt() and 0xFF; n++ }
+            }
+        }
+        return if (n == 0) -1 else (sum / n).toInt()
+    }
+
+    /**
+     * Diagnostic for grey / green-edge video from MediaTek encoders. Compares what we rotated
+     * (source) with what the encoder's Image planes hold after the write: a source chroma mean far
+     * from 128 with an Image chroma mean of 128 or 0 means the colour never reached the encoder.
+     */
+    private fun logEncoderInputDiag(rotation: Int, camW: Int, camH: Int, image: android.media.Image, outW: Int, outH: Int) {
+        val pl = image.planes
+        val srcY = samplePlaneMean(rotatedY, outW, 1, outW, outH)
+        val srcU = samplePlaneMean(rotatedU, outW / 2, 1, outW / 2, outH / 2)
+        val srcV = samplePlaneMean(rotatedV, outW / 2, 1, outW / 2, outH / 2)
+        val dstY = samplePlaneMean(pl[0].buffer, pl[0].rowStride, pl[0].pixelStride, minOf(outW, image.width), minOf(outH, image.height))
+        val dstU = samplePlaneMean(pl[1].buffer, pl[1].rowStride, pl[1].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
+        val dstV = samplePlaneMean(pl[2].buffer, pl[2].rowStride, pl[2].pixelStride, minOf(outW, image.width) / 2, minOf(outH, image.height) / 2)
+        fun range(b: ByteBuffer, n: Int): String {
+            var lo = 255; var hi = 0
+            for (i in 0 until n step 97) { val v = b.get(i).toInt() and 0xFF; if (v < lo) lo = v; if (v > hi) hi = v }
+            return "$lo-$hi"
+        }
+        val ranges = "rangeYUV=${range(rotatedY, outW * outH)}/${range(rotatedU, outW * outH / 4)}/${range(rotatedV, outW * outH / 4)}"
+        Log.i(TAG, "🔬 EncDiag $ranges rot=$rotation cam=${camW}x$camH out=${outW}x$outH img=${image.width}x${image.height} " +
+                "srcYUV=$srcY/$srcU/$srcV dstYUV=$dstY/$dstU/$dstV " +
+                "bufY(pos=${pl[0].buffer.position()} lim=${pl[0].buffer.limit()} cap=${pl[0].buffer.capacity()}) " +
+                "bufU(pos=${pl[1].buffer.position()} lim=${pl[1].buffer.limit()} cap=${pl[1].buffer.capacity()}) " +
+                "bufV(pos=${pl[2].buffer.position()} lim=${pl[2].buffer.limit()} cap=${pl[2].buffer.capacity()}) " +
+                "uvSameBacking=${pl[1].buffer === pl[2].buffer}")
     }
 
     private fun copyPlane(src: ByteBuffer, srcStride: Int, plane: android.media.Image.Plane, w: Int, h: Int) {

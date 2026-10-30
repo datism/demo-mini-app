@@ -296,6 +296,16 @@ class MiniAppManager(val activity: CallActivity) {
             override fun onConsoleMessage(message: String?, lineNumber: Int, sourceID: String?) {
                 Log.i("WebViewConsole", "[LEGACY] $message ($sourceID:$lineNumber)")
             }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: android.webkit.ValueCallback<Array<android.net.Uri>>?,
+                fileChooserParams: android.webkit.WebChromeClient.FileChooserParams?
+            ): Boolean {
+                filePathCallback ?: return false
+                Log.i(TAG, "WebView file chooser requested (accept=${fileChooserParams?.acceptTypes?.joinToString()})")
+                return activity.launchPhotoPicker(filePathCallback)
+            }
         }
 
         // Enable WebView debugging (Android 4.4+)

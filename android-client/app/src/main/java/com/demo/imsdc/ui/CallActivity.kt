@@ -158,6 +158,31 @@ class CallActivity : AppCompatActivity() {
     // --- State ---------------------------------------------------------------
     var callId: String? = null
     var isMiniAppInitiator = false
+
+    // ─── Photo picker for <input type="file"> inside mini-apps (photo-share) ───
+    // WebView shows nothing for a file input unless WebChromeClient.onShowFileChooser opens a chooser.
+    private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
+    private val photoPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+        fileChooserCallback = null
+    }
+
+    /** Opens the system image picker; the chosen URIs are handed back to the WebView's file input. */
+    fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>): Boolean {
+        fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
+        fileChooserCallback = callback
+        return try {
+            photoPicker.launch("image/*")
+            true
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Cannot open photo picker: ${e.message}", e)
+            fileChooserCallback = null
+            callback.onReceiveValue(null)
+            false
+        }
+    }
     private var pendingInviteMsg: String? = null  // B-side: luu INVITE g?c d? g?i 200 OK
     private var eglBase: org.webrtc.EglBase? = null
     private var rtpMediaManager: RtpMediaManager? = null
