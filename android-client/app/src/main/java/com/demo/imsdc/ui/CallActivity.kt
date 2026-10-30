@@ -758,6 +758,8 @@ class CallActivity : AppCompatActivity() {
         binding.localVideoView.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    // Caro shows my camera as a fixed tile next to the other person's video.
+                    if (currentAppId == "caro") return@setOnTouchListener false
                     // Đảm bảo video view luôn ở trên cùng ngay khi bắt đầu chạm,
                     // phòng trường hợp WebView được bringToFront lại sau khi load page.
                     binding.localVideoView.bringToFront()
