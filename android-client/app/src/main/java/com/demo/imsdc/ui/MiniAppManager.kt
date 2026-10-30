@@ -456,7 +456,11 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    private var isReInviteInProgress: Boolean = false
+    // The Re-INVITE in flight and the app it is for. Its target is tracked here rather than read from
+    // sipManager.activeReqAppId, which is only set once the app download wait is over.
+    private var reInviteJob: kotlinx.coroutines.Job? = null
+    private var reInviteTargetId: String? = null
+    private var reInviteWaitingForDownload = false
     private val APP_DOWNLOAD_WAIT_MS = 3000L
 
     fun triggerAppNegotiationReInvite(appId: String) {
@@ -465,17 +469,33 @@ class MiniAppManager(val activity: CallActivity) {
             appId.contains("operator-menu") -> "operator-menu"
             else -> appId
         }
-        if (isReInviteInProgress && activity.sipManager.activeReqAppId == targetId) {
-            Log.d(TAG, "Re-INVITE already in progress for $targetId, skipping duplicate trigger")
-            return
+        val previous = reInviteJob
+        if (previous?.isActive == true) {
+            if (reInviteTargetId == targetId) {
+                Log.d(TAG, "Re-INVITE already in progress for $targetId, skipping duplicate trigger")
+                return
+            }
+            // The user left the app (e.g. back to operator-menu) while its Re-INVITE was still waiting
+            // for the package: drop it, or it would go out after this one and re-open the app on the network.
+            if (reInviteWaitingForDownload) {
+                Log.i(TAG, "Cancelling pending Re-INVITE for $reInviteTargetId (superseded by $targetId)")
+                previous.cancel()
+            }
         }
-        isReInviteInProgress = true
-        activity.lifecycleScope.launch(Dispatchers.Main) {
+        reInviteTargetId = targetId
+        reInviteWaitingForDownload = false
+        reInviteJob = activity.lifecycleScope.launch(Dispatchers.Main) {
+            val self = coroutineContext[kotlinx.coroutines.Job]
             try {
                 if (targetId != "operator-menu") {
                     // The Re-INVITE re-negotiates media and can close the BDC; let the app package
                     // requested for this launch arrive first (bounded, proceeds on timeout).
-                    activity.dcManager.awaitAppDownload(targetId, APP_DOWNLOAD_WAIT_MS)
+                    if (reInviteJob === self) reInviteWaitingForDownload = true
+                    try {
+                        activity.dcManager.awaitAppDownload(targetId, APP_DOWNLOAD_WAIT_MS)
+                    } finally {
+                        if (reInviteJob === self) reInviteWaitingForDownload = false
+                    }
                 }
                 activity.sipManager.activeReqAppId = targetId
                 // Always close existing ADC first to isolate sessions
@@ -499,8 +519,8 @@ class MiniAppManager(val activity: CallActivity) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send Re-INVITE for app: $targetId: ${e.message}")
             } finally {
-                kotlinx.coroutines.delay(1000)
-                isReInviteInProgress = false
+                // Keep the job active briefly so a repeated trigger for the same app is still deduplicated.
+                if (isActive) kotlinx.coroutines.delay(1000)
             }
         }
     }
