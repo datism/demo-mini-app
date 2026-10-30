@@ -302,7 +302,7 @@ class ImsDcSdk(
 
     fun onCallEnded() {
         Log.i(TAG, "onCallEnded - performing JavaScript cleanup")
-        val script = "javascript:if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.cleanup === 'function') { window.IMSDataChannelBridge.cleanup(); } if (window.onCallEnded) { window.onCallEnded(); }"
+        val script = "javascript:if (window.cleanUpImsDcObjects) { window.cleanUpImsDcObjects(); } if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.cleanup === 'function') { window.IMSDataChannelBridge.cleanup(); } if (window.onCallEnded) { window.onCallEnded(); }"
         webView.post {
             try {
                 webView.evaluateJavascript(script, null)

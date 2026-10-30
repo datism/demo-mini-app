@@ -19,27 +19,15 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 /**
- * PhotoShareTransport — Vận chuyển ảnh qua ADC stream 1000 (chế độ P2P relay qua MF).
- *
- * Wire protocol (xem docs photo-share):
- *   • JSON control: byte đầu = '0x7B' ('{') — đi qua sendOrQueueAdc như mọi app khác.
- *   • Binary DATA_CHUNK: byte đầu = 0x01, theo cấu trúc:
- *
- *       offset  size  field
- *       0       1     0x01 (FRAME_DATA_CHUNK)
- *       1       2     photoIdHash u16 BE
- *       3       4     seq u32 BE          (bắt đầu từ 0)
- *       7       2     totalChunks u16 BE
- *       9       2     chunkLen u16 BE
- *       11      N     payload (N = chunkLen, tối đa CHUNK_PAYLOAD)
- *
- *   SCTP DataChannel mặc định reliable+ordered ⇒ không cần retransmit ở tầng app;
- *   sha256 trong msg "begin" là lớp đối chiếu toàn vẹn duy nhất (phát hiện lần cuối).
- *
- * Flow control: không sleep cứng — gate theo bufferedAmount của channel
- * (HIGH_WATER_MARK) để không làm phình SCTP send buffer khi truyền ảnh lớn.
+ * Photos and videos share ADC 1000. JSON begin (wire=2) precedes binary frames on
+ * the same reliable ordered channel. v2 header: type=2 (u8), ID length (u8),
+ * sequence / total / payload length (u32 BE each), UTF-8 ID, payload (<=16000).
+ * Files are received on IO into .part files, SHA-256 verified, then atomically
+ * renamed and exposed through the WebView's local /media/ origin. Video bytes
+ * never cross evaluateJavascript. Legacy photo-only type=1 is still accepted.
  */
 class PhotoShareTransport(
     private val webRtcManager: WebRtcManager,
@@ -57,7 +45,7 @@ class PhotoShareTransport(
         const val FRAME_DATA_CHUNK: Int = 0x01
 
         /** Payload tối đa mỗi chunk — khớp giá trị đã chứng minh ổn định trên S24 (sendChunked của MF). */
-        const val CHUNK_PAYLOAD: Int = 16000
+        const val CHUNK_PAYLOAD: Int = SharedMediaFiles.CHUNK_BYTES
 
         /** Header 11 byte: type(1) + idHash(2) + seq(4) + total(2) + len(2). */
         const val CHUNK_HEADER: Int = 11
@@ -66,7 +54,9 @@ class PhotoShareTransport(
         const val HIGH_WATER_MARK: Int = 512 * 1024
 
         /** Nhịp nghỉ tối thiểu giữa 2 chunk liên tiếp (ms) — chống burst làm ngợm pacer nội bộ libwebrtc. */
-        const val CHUNK_PACE_MS: Long = 3
+        const val CHUNK_PACE_MS: Long = 12
+
+        const val MAX_MEDIA_BYTES: Long = SharedMediaFiles.MAX_BYTES
 
         /** Cạnh dài tối đa của ảnh full-resolution sau khi transcode. */
         const val MAX_DIMEN: Int = 1920
@@ -102,6 +92,110 @@ class PhotoShareTransport(
     }
 
     private val rxBuffers = ConcurrentHashMap<Int, AssmBuffer>()
+    private val assets = ConcurrentHashMap<String, JSONObject>()
+    private var fileReceiver: SharedMediaFiles? = null
+    private val receiveQueue = Channel<ByteArray>(128)
+    @Volatile private var closed = false
+
+    init {
+        scope.launch(Dispatchers.IO) {
+            try {
+                for (bytes in receiveQueue) {
+                    try { receiveFileFrame(bytes) }
+                    catch (e: Exception) {
+                        Log.w(TAG, "Rejected media frame", e)
+                        if (e is SharedMediaFiles.TransferFailure) {
+                            notifyPage(JSONObject().put("t", "transfer-error").put("id", e.mediaId))
+                        }
+                    }
+                }
+            } finally {
+                fileReceiver?.close()
+            }
+        }
+    }
+
+    private fun extension(mime: String): String = SharedMediaFiles.extension(mime)
+
+    /** URI decoding/copying stays off the UI and WebView threads; never bridge a full video as base64. */
+    suspend fun importMedia(context: Context, uri: android.net.Uri): JSONObject = withContext(Dispatchers.IO) {
+        check(!closed) { "Call ended" }
+        val id = "m_" + java.util.UUID.randomUUID().toString().replace("-", "")
+        val mime = context.contentResolver.getType(uri).orEmpty().lowercase()
+        val isVideo = mime.startsWith("video/")
+        val storedMime = if (isVideo) mime else "image/jpeg"
+        val ext = extension(storedMime)
+        require(isVideo || mime.startsWith("image/")) { "Chọn ảnh hoặc video MP4/WebM/3GP" }
+        val dir = File(context.cacheDir, STORE_DIR).apply { mkdirs() }
+        val file = File(dir, "$id.$ext")
+        var width = 0
+        var height = 0
+        try {
+            if (isVideo) {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    file.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            total += n
+                            require(total <= MAX_MEDIA_BYTES) { "Video tối đa 50 MB" }
+                            check(!closed) { "Call ended" }
+                            out.write(buf, 0, n)
+                        }
+                    }
+                } ?: error("Không đọc được video")
+                val retriever = android.media.MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(file.absolutePath)
+                    width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                    val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
+                    if (android.os.Build.VERSION.SDK_INT >= 27) {
+                        // Thumbnail failure must not reject an otherwise readable video or affect the call codec.
+                        runCatching {
+                            val thumb = retriever.getScaledFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, THUMB_DIMEN, THUMB_DIMEN)
+                            thumb?.let {
+                                try { File(dir, "${id}_t.jpg").writeBytes(compressJpeg(it, THUMB_QUALITY)) }
+                                finally { it.recycle() }
+                            }
+                        }.onFailure { Log.w(TAG, "Video thumbnail unavailable: ${it.message}") }
+                    }
+                } finally { retriever.release() }
+                require(width > 0 && height > 0) { "Không đọc được kích thước video" }
+            } else {
+                require(importFromUri(context, uri, id) != null) { "Không đọc được ảnh" }
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, bounds)
+                width = bounds.outWidth
+                height = bounds.outHeight
+            }
+            check(!closed) { "Call ended" }
+            require(file.length() in 1..MAX_MEDIA_BYTES) { "Tệp rỗng hoặc lớn hơn 50 MB" }
+            val thumb = File(dir, "${id}_t.jpg")
+            val meta = JSONObject().put("id", id).put("mime", storedMime).put("w", width).put("h", height)
+                .put("bytes", file.length()).put("sha256", hashFile(file))
+                .put("url", "https://miniapp/media/${file.name}")
+                .put("thumb", if (thumb.exists()) android.util.Base64.encodeToString(thumb.readBytes(), android.util.Base64.NO_WRAP) else "")
+            assets[id] = meta
+            meta
+        } catch (e: Exception) {
+            file.delete()
+            File(dir, "${id}_t.jpg").delete()
+            throw e
+        }
+    }
+
+    private fun hashFile(file: File): String {
+        val hash = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) { val n = input.read(buf); if (n < 0) break; hash.update(buf, 0, n) }
+        }
+        return hash.digest().joinToString("") { "%02x".format(it) }
+    }
 
     // ═══════════════════ PHÍA GỬI ═══════════════════
 
@@ -110,17 +204,18 @@ class PhotoShareTransport(
      * có thể bắn msg JSON "begin" trước/sau khi gọi hàm này.
      */
     fun enqueueFile(context: Context, photoId: String, onDone: ((Boolean) -> Unit)? = null): Int? {
-        val file = File(File(context.cacheDir, STORE_DIR), "$photoId.jpg")
+        if (closed || !photoId.matches(Regex("[A-Za-z0-9_-]{1,96}"))) return null
+        val file = fileFor(context, photoId)
         if (!file.exists()) {
             Log.w(TAG, "enqueueFile: not found ${file.absolutePath}")
             return null
         }
         val total = ((file.length() + CHUNK_PAYLOAD - 1) / CHUNK_PAYLOAD).toInt()
-        if (total < 1 || total > 0xFFFF) {
+        if (total < 1 || file.length() > MAX_MEDIA_BYTES) {
             Log.w(TAG, "enqueueFile: invalid chunk count $total for ${file.length()} bytes")
             return null
         }
-        sendQueue.trySend(SendJob(photoId, file, total, onDone))
+        if (sendQueue.trySend(SendJob(photoId, file, total, onDone)).isFailure) return null
         ensureSendWorker()
         return total
     }
@@ -132,8 +227,14 @@ class PhotoShareTransport(
             sendWorkerStarted = true
             scope.launch(Dispatchers.IO) {
                 for (job in sendQueue) {
-                    runCatching { streamFile(job) }
-                        .onFailure { Log.e(TAG, "streamFile failed for ${job.photoId}: ${it.message}", it) }
+                    try { streamFile(job) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Exception) {
+                        Log.e(TAG, "streamFile failed for ${job.photoId}: ${e.message}", e)
+                        job.onDone?.invoke(false)
+                        val error = JSONObject().put("t", "transfer-error").put("id", job.photoId)
+                        imsDcSdk?.sendOrQueueAdc(error.toString().toByteArray())
+                    }
                 }
             }
         }
@@ -144,8 +245,14 @@ class PhotoShareTransport(
         val adc = awaitOpenChannel() ?: run {
             job.onDone?.invoke(false); return
         }
-        val idHash = idHashOf(job.photoId)
         val total = job.totalChunks
+        val metadata = assets[job.photoId]?.let { JSONObject(it.toString()) }
+            ?: JSONObject().put("id", job.photoId).put("mime", "image/jpeg")
+                .put("bytes", job.filePath.length()).put("sha256", hashFile(job.filePath))
+        metadata.remove("thumb")
+        metadata.remove("url")
+        metadata.put("t", "begin").put("wire", 2).put("chunks", total)
+        sendFrame(adc, metadata.toString().toByteArray(), false)
 
         FileInputStream(job.filePath).use { fis ->
             var seq = 0
@@ -154,38 +261,25 @@ class PhotoShareTransport(
                 val n = readFull(fis, payload)
                 if (n <= 0) break
 
-                // Flow control: chờ cống rãnh thông thoáng trước khi nhét thêm.
-                var waited = 0
-                while (adc.bufferedAmount() > HIGH_WATER_MARK && waited < 30_000) {
-                    kotlinx.coroutines.delay(30)
-                    waited += 30
-                }
-
-                val frame = ByteArray(CHUNK_HEADER + n)
-                frame[0] = FRAME_DATA_CHUNK.toByte()
-                frame[1] = (idHash shr 8).toByte(); frame[2] = idHash.toByte()
-                frame[3] = (seq ushr 24).toByte(); frame[4] = (seq ushr 16).toByte()
-                frame[5] = (seq ushr 8).toByte();  frame[6] = seq.toByte()
-                frame[7] = (total shr 8).toByte(); frame[8] = total.toByte()
-                frame[9] = (n shr 8).toByte();     frame[10] = n.toByte()
-                System.arraycopy(payload, 0, frame, CHUNK_HEADER, n)
-
-                // binary frame — giữ nguyên stack: JS phía nhận bóc byte đầu để phân loại.
-                val sent = runCatching {
-                    adc.send(DataChannel.Buffer(ByteBuffer.wrap(frame), true))
-                }
-
-                if (sent.isFailure) {
-                    Log.e(TAG, "send chunk failed at seq=$seq for ${job.photoId}: ${sent.exceptionOrNull()?.message}")
-                    job.onDone?.invoke(false)
-                    return
-                }
+                // v2 carries the full ID, avoiding collisions in the old 16-bit photo hash.
+                val frame = SharedMediaFiles.frame(job.photoId, seq, total, payload, n)
+                sendFrame(adc, frame, true)
                 seq++
                 kotlinx.coroutines.delay(CHUNK_PACE_MS)
             }
         }
         Log.i(TAG, "streamFile done: ${job.photoId} ($total chunks)")
         job.onDone?.invoke(true)
+    }
+
+    private suspend fun sendFrame(adc: DataChannel, bytes: ByteArray, binary: Boolean) {
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30_000
+        while (!closed && android.os.SystemClock.elapsedRealtime() < deadline) {
+            check(adc.state() == DataChannel.State.OPEN) { "Data channel closed" }
+            if (adc.bufferedAmount() <= HIGH_WATER_MARK && adc.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), binary))) return
+            kotlinx.coroutines.delay(20)
+        }
+        error("Media transfer timed out")
     }
 
     private fun readFull(fis: FileInputStream, buf: ByteArray): Int {
@@ -218,14 +312,27 @@ class PhotoShareTransport(
      * (tức là binary DATA_CHUNK — không cần nfred cho JS path text).
      */
     fun onIncomingBytes(bytes: ByteArray): Boolean {
+        if (closed || bytes.isEmpty()) return false
+        if (bytes[0] == 2.toByte() || bytes[0] == '{'.code.toByte()) {
+            val binary = bytes[0] == 2.toByte()
+            val begin = !binary && runCatching { JSONObject(String(bytes, Charsets.UTF_8)).let { it.optString("t") == "begin" && it.optInt("wire") == 2 } }.getOrDefault(false)
+            if (binary || begin) {
+                if (receiveQueue.trySend(bytes).isFailure) {
+                    Log.e(TAG, "Media receive queue full; rejecting transfer")
+                    cleanup(webView?.context ?: return binary)
+                }
+                return binary
+            }
+        }
         if (bytes.isEmpty() || bytes[0].toInt() != FRAME_DATA_CHUNK) return false
+        if (bytes.size < CHUNK_HEADER) return true
 
         val idHash = ((bytes[1].toInt() and 0xFF) shl 8) or (bytes[2].toInt() and 0xFF)
         val seq = ((bytes[3].toInt() and 0xFF) shl 24) or ((bytes[4].toInt() and 0xFF) shl 16) or
                 ((bytes[5].toInt() and 0xFF) shl 8) or (bytes[6].toInt() and 0xFF)
         val total = ((bytes[7].toInt() and 0xFF) shl 8) or (bytes[8].toInt() and 0xFF)
         val len = ((bytes[9].toInt() and 0xFF) shl 8) or (bytes[10].toInt() and 0xFF)
-        if (total < 1 || total > 0xFFFF || len < 0 || CHUNK_HEADER + len > bytes.size) {
+        if (total < 1 || total.toLong() * CHUNK_PAYLOAD > MAX_MEDIA_BYTES + CHUNK_PAYLOAD || seq < 0 || seq >= total || len > CHUNK_PAYLOAD || CHUNK_HEADER + len > bytes.size) {
             Log.w(TAG, "Malformed DATA_CHUNK frame (total=$total len=$len size=${bytes.size}) — dropped")
             return true
         }
@@ -255,6 +362,31 @@ class PhotoShareTransport(
             deliverToJs(idHash, assembled)
         }
         return true
+    }
+
+    /** IO-only receiver; large files are verified on disk before exposing a playback URL. */
+    private fun receiveFileFrame(bytes: ByteArray) {
+        val context = webView?.context ?: return
+        val receiver = fileReceiver ?: SharedMediaFiles(File(context.cacheDir, STORE_DIR)).also { fileReceiver = it }
+        if (bytes[0] == '{'.code.toByte()) {
+            val meta = JSONObject(String(bytes, Charsets.UTF_8))
+            receiver.begin(SharedMediaFiles.Metadata(meta.getString("id"), meta.getString("mime"),
+                meta.getLong("bytes"), meta.getString("sha256"), meta.getInt("chunks"), meta.optInt("w"), meta.optInt("h")))
+        } else {
+            val result = receiver.accept(bytes) ?: return
+            val meta = result.metadata
+            val event = JSONObject().put("id", meta.id).put("mime", meta.mime).put("bytes", meta.bytes)
+                .put("sha256", meta.sha256).put("w", meta.width).put("h", meta.height)
+                .put("t", "stored").put("url", "https://miniapp/media/${result.file.name}")
+            assets[meta.id] = event
+            notifyPage(event)
+        }
+    }
+
+    private fun notifyPage(event: JSONObject) {
+        scope.launch(Dispatchers.Main) {
+            if (!closed) webView?.evaluateJavascript("window.receiveData && window.receiveData(${JSONObject.quote(event.toString())});", null)
+        }
     }
 
     private fun deliverToJs(idHash: Int, payload: ByteArray) {
@@ -313,9 +445,7 @@ class PhotoShareTransport(
             File(dir, "$photoId.jpg").writeBytes(fullBytes)
             File(dir, "${photoId}_t.jpg").writeBytes(thumbBytes)
 
-            if (rotated !== bmp) bmp.recycle()
-            if (full !== rotated) full.recycle()
-            if (thumb !== rotated) thumb.recycle()
+            listOf(bmp, rotated, full, thumb).distinct().forEach { it.recycle() }
 
             Pair(fullBytes.size, thumbBytes.size)
         } catch (e: Exception) {
@@ -342,21 +472,7 @@ class PhotoShareTransport(
 
             // EXIF orientation từ segment JPEG/HEIC gốc (nếu đọc được).
             val rotated = try {
-                val exif = ExifInterface(java.io.ByteArrayInputStream(bytes))
-                val orientation = exif.getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
-                )
-                val degrees = when (orientation) {
-                    ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                    ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                    ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                    else -> 0f
-                }
-                if (degrees == 0f) bmp
-                else Bitmap.createBitmap(
-                    bmp, 0, 0, bmp.width, bmp.height,
-                    Matrix().apply { postRotate(degrees) }, true
-                )
+                orientBitmap(ExifInterface(ByteArrayInputStream(bytes)), bmp)
             } catch (e: Exception) {
                 Log.w(TAG, "EXIF from bytes failed: ${e.message}")
                 bmp
@@ -372,9 +488,7 @@ class PhotoShareTransport(
             File(dir, "$photoId.jpg").writeBytes(fullBytes)
             File(dir, "${photoId}_t.jpg").writeBytes(thumbBytes)
 
-            if (rotated !== bmp) bmp.recycle()
-            if (full !== rotated) full.recycle()
-            if (thumb !== rotated) thumb.recycle()
+            listOf(bmp, rotated, full, thumb).distinct().forEach { it.recycle() }
 
             Pair(fullBytes.size, thumbBytes.size)
         } catch (e: Exception) {
@@ -386,22 +500,26 @@ class PhotoShareTransport(
     private fun applyExifRotation(context: Context, uri: android.net.Uri, bmp: Bitmap): Bitmap {
         return try {
             val exif = context.contentResolver.openInputStream(uri)?.use { ExifInterface(it) } ?: return bmp
-            val orientation = exif.getAttributeInt(
-                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
-            )
-            val degrees = when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
-            }
-            if (degrees == 0f) return bmp
-            val m = Matrix().apply { postRotate(degrees) }
-            Bitmap.createBitmap(bmp, 0, 0, bmp.width,bmp.height, m, true)
+            orientBitmap(exif, bmp)
         } catch (e: Exception) {
             Log.w(TAG, "EXIF read failed, using original: ${e.message}")
             bmp
         }
+    }
+
+    private fun orientBitmap(exif: ExifInterface, bmp: Bitmap): Bitmap {
+        val transform = Matrix()
+        when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> transform.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> transform.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> { transform.setRotate(180f); transform.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSPOSE -> { transform.setRotate(90f); transform.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> transform.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { transform.setRotate(-90f); transform.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> transform.setRotate(270f)
+            else -> return bmp
+        }
+        return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, transform, true)
     }
 
     /**
@@ -439,14 +557,20 @@ class PhotoShareTransport(
     }
 
     fun fileFor(context: Context, photoId: String, thumb: Boolean = false): File =
-        File(File(context.cacheDir, STORE_DIR), if (thumb) "${photoId}_t.jpg" else "$photoId.jpg")
+        File(File(context.cacheDir, STORE_DIR), if (thumb) "${photoId}_t.jpg" else "$photoId.${extension(assets[photoId]?.optString("mime") ?: "image/jpeg")}")
 
     /** Dọn toàn bộ photostore — gọi khi BYE/teardown cuộc gọi (GSMA TS.66 lifecycle). */
     fun cleanup(context: Context) {
-        scope.launch(Dispatchers.IO) {
+        if (closed) return
+        closed = true
+        sendQueue.close()
+        receiveQueue.cancel()
+        // lifecycleScope may already be cancelled in onDestroy; cleanup must still run.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             runCatching {
                 File(context.cacheDir, STORE_DIR).deleteRecursively()
                 rxBuffers.clear()
+                assets.clear()
                 Log.i(TAG, "photostore cleaned")
             }.onFailure { Log.w(TAG, "cleanup failed: ${it.message}") }
         }

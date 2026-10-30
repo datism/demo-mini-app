@@ -162,11 +162,53 @@ class CallActivity : AppCompatActivity() {
     // ─── Photo picker for <input type="file"> inside mini-apps (photo-share) ───
     // WebView shows nothing for a file input unless WebChromeClient.onShowFileChooser opens a chooser.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
+    private var mediaPickerOpen = false
+    private var nativeMediaPicker = false
     private val photoPicker = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+        mediaPickerOpen = false
+        val importNatively = nativeMediaPicker
+        nativeMediaPicker = false
+        val callback = fileChooserCallback
         fileChooserCallback = null
+        callback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+        recoverCallMedia(restartCamera = true)
+        if (importNatively && !isEndingCall) {
+            lifecycleScope.launch {
+                val imported = org.json.JSONArray()
+                for (uri in uris) {
+                    try {
+                        val asset = dcManager.photoShare?.importMedia(this@CallActivity, uri)
+                        if (asset != null) imported.put(asset)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Toast.makeText(this@CallActivity, e.message ?: "Không đọc được tệp", Toast.LENGTH_LONG).show()
+                    }
+                }
+                if (!isEndingCall && currentAppId == "photo-share") {
+                    binding.webviewMiniapp.evaluateJavascript(
+                        "window.onNativeMediaImported && window.onNativeMediaImported($imported);", null
+                    )
+                }
+            }
+        }
+    }
+
+    /** Import content URIs on IO instead of decoding full-resolution files in the WebView. */
+    fun launchSharedMediaPicker() {
+        if (mediaPickerOpen || isEndingCall) return
+        nativeMediaPicker = true
+        mediaPickerOpen = true
+        try {
+            photoPicker.launch(arrayOf("image/*", "video/mp4", "video/webm", "video/3gpp"))
+        } catch (e: Exception) {
+            nativeMediaPicker = false
+            mediaPickerOpen = false
+            Log.e(TAG, "Cannot open shared media picker", e)
+            Toast.makeText(this, "Không mở được trình chọn ảnh / video", Toast.LENGTH_LONG).show()
+        }
     }
 
     /** Opens the system image picker; the chosen URIs are handed back to the WebView's file input. */
@@ -174,11 +216,13 @@ class CallActivity : AppCompatActivity() {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
         fileChooserCallback = callback
         return try {
-            photoPicker.launch("image/*")
+            mediaPickerOpen = true
+            photoPicker.launch(arrayOf("image/*", "video/mp4", "video/webm", "video/3gpp"))
             true
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Cannot open photo picker: ${e.message}", e)
             fileChooserCallback = null
+            mediaPickerOpen = false
             callback.onReceiveValue(null)
             false
         }
@@ -1584,20 +1628,29 @@ class CallActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         activeInstance = this
-        if (isVideoEnabled && isCallActiveUiShown) {
+        recoverCallMedia()
+    }
+
+    private fun recoverCallMedia(restartCamera: Boolean = false) {
+        if (isEndingCall || !isCallActiveUiShown || !this::webRtcManager.isInitialized) return
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        setSpeakerphoneOn(audioManager, isSpeakerMode)
+        if (isVideoEnabled) {
             Log.i(TAG, "onStart: resuming camera capture (app returning to foreground)")
-            webRtcManager.resumeLocalCapture()
+            webRtcManager.resumeLocalCapture(forceRestart = restartCamera)
             rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
             val surface = binding.remoteVideoView.holder.surface
             if (surface != null && surface.isValid) {
                 rtpMediaManager?.updateDecoderSurface(surface)
             }
         }
+        rtpMediaManager?.resumeAfterInterruption()
     }
 
     override fun onStop() {
         super.onStop()
-        if (isVideoEnabled && isCallActiveUiShown) {
+        if (isVideoEnabled && isCallActiveUiShown && !mediaPickerOpen) {
             Log.i(TAG, "onStop: pausing camera capture (app going to background)")
             webRtcManager.pauseLocalCapture()
         }
@@ -1606,6 +1659,8 @@ class CallActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         isEndingCall = true
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
         if (activeInstance === this) {
             activeInstance = null
         }

@@ -900,23 +900,34 @@ class WebRtcManager(private val context: Context) {
         }
     }
 
+    private var capturePaused = false
+
     fun pauseLocalCapture() {
+        if (capturePaused || videoCapturer == null) return
         Log.i(TAG, "Pausing local camera capture (Activity going background)")
         try {
             videoCapturer?.stopCapture()
+            capturePaused = true
         } catch (e: Exception) {
             Log.w(TAG, "Error pausing camera: ${e.message}")
         }
     }
 
-    fun resumeLocalCapture() {
+    fun resumeLocalCapture(forceRestart: Boolean = false) {
+        if (!capturePaused && !forceRestart) return
         if (videoCapturer == null) {
             Log.w(TAG, "No video capturer to resume")
             return
         }
         Log.i(TAG, "Resuming local camera capture (Activity returning to foreground)")
         try {
+            if (forceRestart && !capturePaused) {
+                // Android may suspend a camera while a system picker covers the Activity,
+                // even though the application did not explicitly stop capture.
+                runCatching { videoCapturer?.stopCapture() }
+            }
             videoCapturer?.startCapture(640, 480, 30)
+            capturePaused = false
             Log.i(TAG, "Camera capture resumed successfully")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to resume camera, recreating capturer: ${e.message}")
@@ -930,6 +941,7 @@ class WebRtcManager(private val context: Context) {
                 newCapturer.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
                 newCapturer.startCapture(640, 480, 30)
                 videoCapturer = newCapturer
+                capturePaused = false
                 localVideoView?.let { localVideoTrack?.addSink(it) }
                 Log.i(TAG, "Camera capturer recreated and resumed")
             } else {
