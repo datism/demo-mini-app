@@ -1085,6 +1085,7 @@ class CallActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error setting Re-INVITE answer: ${e.message}", e)
                 }
+                withContext(Dispatchers.Main) { miniAppManager.onReInviteAnswered() }
             }
         }
         lifecycleScope.launch(Dispatchers.IO) {
