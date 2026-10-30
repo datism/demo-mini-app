@@ -325,7 +325,7 @@ class MiniAppManager(val activity: CallActivity) {
             // Caro: both faces side by side at the top, the game in the rest of the screen above the controls.
             lp.topToTop = unset
             lp.topToBottom = b.localVideoView.id
-            lp.topMargin = dp(TILE_GAP_DP)
+            lp.topMargin = dp(TILE_TO_GAME_GAP_DP)
             lp.bottomToTop = b.layoutBottomControls.id
             lp.bottomToBottom = unset
         } else if (full) {
@@ -345,8 +345,10 @@ class MiniAppManager(val activity: CallActivity) {
         b.layoutTopBar.visibility = if (full) View.INVISIBLE else View.VISIBLE
     }
 
-    private val TILE_GAP_DP = 4
-    private val TILE_SIDE_MARGIN_DP = 8
+    private val TILE_GAP_DP = 6
+    private val TILE_TO_GAME_GAP_DP = 12
+    // Each tile's share of the screen width; the pair is centred. Keeps the board large on S24-class phones.
+    private val TILE_WIDTH_FRACTION = 0.34f
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
@@ -366,11 +368,12 @@ class MiniAppManager(val activity: CallActivity) {
 
         if (enabled) {
             val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
-            val tileW = (screenW - 2 * dp(TILE_SIDE_MARGIN_DP) - dp(TILE_GAP_DP)) / 2
+            val tileW = (screenW * TILE_WIDTH_FRACTION).toInt()
             val tileH = tileW * 4 / 3
+            val sideMargin = (screenW - 2 * tileW - dp(TILE_GAP_DP)) / 2
             localLp.width = tileW
             localLp.height = tileH
-            localLp.setMargins(dp(TILE_SIDE_MARGIN_DP), dp(TILE_GAP_DP), 0, 0)
+            localLp.setMargins(sideMargin, dp(TILE_GAP_DP), 0, 0)
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
 
@@ -380,7 +383,7 @@ class MiniAppManager(val activity: CallActivity) {
                 remoteLp.width = tileW
                 remoteLp.height = tileH
                 remoteLp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-                remoteLp.leftMargin = dp(TILE_SIDE_MARGIN_DP) + tileW + dp(TILE_GAP_DP)
+                remoteLp.leftMargin = sideMargin + tileW + dp(TILE_GAP_DP)
                 remoteLp.topMargin = b.layoutTopBar.bottom + dp(TILE_GAP_DP)
                 remote.layoutParams = remoteLp
             }

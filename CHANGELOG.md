@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Added & Enhanced
+- **Caro tiles resized:** the two video tiles are now 34% of the screen width each (about 140×185 dp on an S24+, was about 195×260 dp), centred with a 6 dp gap, and the game starts 12 dp below them, so the board gets about 65 dp more height.
 - **Caro face-to-face layout:** while Caro is open, both players' videos sit side by side at the top as 3:4 tiles (my camera top-left, the other person top-right, 4 dp gap) and the board fills the rest of the screen above the call controls. My camera tile can't be dragged in Caro. Leaving Caro restores the normal layout (remote video full screen, my camera as the small draggable box) for every other app.
 - **Emote as the in-call home screen:** when a normal call connects, the caller's phone opens the emote app (`fun-calling-app`) and the callee follows via the Re-INVITE, so emotes work without opening an app first. Emotes moved to a small vertical dropdown at the top right (❤️ toggle → ❤️ 👍 😊 😡 👋); the app tray at the bottom keeps the operator-menu look. "‹ Menu" and Back now return to this home screen instead of the plain operator-menu.
 - **Operator menu trimmed** to Draw, Photo and Caro (Thả tim, 198, flight booking, Caller ID and the screen-share placeholder removed). Applied to both the bundled pages and the DCAR packages in `go-mf/static/apps/`.
