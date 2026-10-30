@@ -72,6 +72,10 @@ class CallActivity : AppCompatActivity() {
 
         fun hotlineApp(user: String): String? = HOTLINE_APPS[user.removePrefix("+84")]
 
+        // In-call home screen: the emote app (it needs its own ADC), with the app tray at the bottom.
+        // "‹ Menu" and Back return here instead of to operator-menu.
+        const val HOME_APP = "fun-calling-app"
+
         const val EXTRA_SIP_SERVER  = "sip_server"
         const val EXTRA_LOCAL_USER  = "local_user"
         const val EXTRA_REMOTE_USER = "remote_user"
@@ -479,9 +483,9 @@ class CallActivity : AppCompatActivity() {
                 if (hotlineApp(remoteUser) != null || currentAppId == "smart-menu") {
                     Log.i(TAG, "Back button pressed in hotline $remoteUser: resetting $currentAppId without opening operator-menu")
                     resetHotlineApp()
-                } else if (binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != "operator-menu") {
-                    Log.i(TAG, "Back button pressed: returning to operator-menu instead of finishing CallActivity")
-                    miniAppManager.launchMiniApp("operator-menu")
+                } else if (binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != "operator-menu" && currentAppId != HOME_APP) {
+                    Log.i(TAG, "Back button pressed: returning to $HOME_APP instead of finishing CallActivity")
+                    miniAppManager.launchMiniApp(HOME_APP)
                 } else {
                     Toast.makeText(this@CallActivity, "Vui lòng bấm nút Kết thúc để dừng cuộc gọi", Toast.LENGTH_SHORT).show()
                 }
@@ -670,8 +674,8 @@ class CallActivity : AppCompatActivity() {
                 Log.i(TAG, "Exit clicked in hotline $remoteUser: resetting $currentAppId")
                 resetHotlineApp()
             } else {
-                Log.i(TAG, "User clicked Exit Mini-app -> returning to operator-menu")
-                miniAppManager.launchMiniApp("operator-menu")
+                Log.i(TAG, "User clicked Exit Mini-app -> returning to $HOME_APP")
+                miniAppManager.launchMiniApp(HOME_APP)
             }
         }
 
@@ -1494,8 +1498,15 @@ class CallActivity : AppCompatActivity() {
                 } else if (currentAppId == "operator-menu") {
                     binding.localVideoView.visibility = View.VISIBLE
                     binding.remoteVideoView.visibility = View.VISIBLE
-                    Log.i(TAG, "Operator menu will load by default via BDC.")
-                    miniAppManager.launchMiniApp("operator-menu", sendRemoteTrigger = false)
+                    // The caller opens the emote home (Re-INVITE for its ADC); the callee shows the menu
+                    // until that Re-INVITE arrives, so only one side negotiates.
+                    if (intent.getStringExtra(EXTRA_INCOMING_INVITE) == null) {
+                        Log.i(TAG, "Caller: opening $HOME_APP as the in-call home")
+                        miniAppManager.launchMiniApp(HOME_APP, sendRemoteTrigger = true)
+                    } else {
+                        Log.i(TAG, "Operator menu will load by default via BDC.")
+                        miniAppManager.launchMiniApp("operator-menu", sendRemoteTrigger = false)
+                    }
                 }
             } else {
                 Log.i(TAG, "showCallActiveUi already initialized, active app=$currentAppId - preserving active mini-app")

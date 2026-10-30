@@ -384,8 +384,8 @@ class MiniAppManager(val activity: CallActivity) {
 
             if (targetId == "sketch-sync-app") {
                 activity.binding.tvCallStatus.text = "🎨 Bảng vẽ TuYaApp (GSMA Standard)"
-            } else if (targetId == "fun-calling-app") {
-                activity.binding.tvCallStatus.text = "❤️ Thả tim tương tác (5G New Calling)"
+            } else if (targetId == CallActivity.HOME_APP) {
+                activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
             } else if (targetId == "smart-menu") {
                 activity.binding.tvCallStatus.text = "📞 Tổng đài 198 (Smart Menu)"
             } else if (targetId == "caro") {
@@ -398,7 +398,7 @@ class MiniAppManager(val activity: CallActivity) {
             } else {
                 activity.binding.tvCallStatus.text = "📱 Ứng dụng: $targetId"
             }
-            if (targetId == "smart-menu" || CallActivity.hotlineApp(activity.remoteUser) != null) {
+            if (targetId == "smart-menu" || targetId == CallActivity.HOME_APP || CallActivity.hotlineApp(activity.remoteUser) != null) {
                 activity.binding.btnExitMiniapp.visibility = View.GONE
             } else {
                 activity.binding.btnExitMiniapp.visibility = View.VISIBLE

@@ -3,78 +3,190 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Fun Calling Mini-App</title>
   <style>
-    body {
+    /* In-call home: the operator-menu app tray at the bottom, an emote dropdown on the right. */
+    html, body {
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
       background: transparent;
       overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
       user-select: none;
       -webkit-user-select: none;
     }
 
-    #app-container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
+    /* Emote dropdown: a small toggle at the top right, the emotes drop down vertically under it. */
+    .emote {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .emote-toggle,
+    .emote-list button {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(20, 20, 24, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      font-size: 20px;
+      line-height: 1;
+      padding: 0;
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform .12s ease, background .12s ease;
+    }
+    .emote-toggle:active,
+    .emote-list button:active {
+      transform: scale(.88);
+      background: rgba(255, 255, 255, 0.28);
+    }
+    .emote-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transform-origin: top center;
+      transition: opacity .18s ease, transform .2s cubic-bezier(.2, .8, .2, 1);
+    }
+    .emote-list button {
+      width: 36px;
+      height: 36px;
+      font-size: 18px;
+    }
+    .emote-list.hidden {
+      opacity: 0;
+      transform: translateY(-8px) scaleY(.6);
+      pointer-events: none;
+    }
+
+    /* App tray: same look as operator-menu. */
+    body {
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
       align-items: center;
-      background: transparent;
+      padding: 0 12px 10px;
+      box-sizing: border-box;
     }
-
-    /* Sticker Bar at the bottom */
-    #sticker-bar {
+    .tray {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      background: rgba(20, 20, 24, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 26px;
+      padding: 14px 6px 10px;
+      box-sizing: border-box;
+      z-index: 100;
+      transition: opacity .2s ease, transform .25s cubic-bezier(.2, .8, .2, 1);
+    }
+    .tray.hidden {
+      opacity: 0;
+      transform: translateY(16px) scale(.96);
+      pointer-events: none;
+    }
+    .handle {
       position: absolute;
-      bottom: 24px;
+      top: 0;
       left: 50%;
       transform: translateX(-50%);
-      display: flex;
-      gap: 12px;
-      background: rgba(15, 23, 42, 0.95);
-      padding: 10px 18px;
-      border-radius: 30px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-      z-index: 100;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      width: 64px;
+      height: 14px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      cursor: pointer;
     }
-
-    .sticker-btn {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.15);
-      border: none;
+    .handle::after {
+      content: "";
+      position: absolute;
+      top: 5px;
+      left: 50%;
+      width: 32px;
+      height: 4px;
+      margin-left: -16px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.35);
+    }
+    .row {
       display: flex;
       justify-content: center;
+      gap: 4px;
+      padding: 0 4px;
+    }
+    .app {
+      flex: 0 0 auto;
+      width: 60px;
+      display: flex;
+      flex-direction: column;
       align-items: center;
+      gap: 6px;
+      border: 0;
+      padding: 0;
+      background: none;
+      color: #fff;
       cursor: pointer;
-      transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s;
     }
-
-    .sticker-btn:hover {
-      background: rgba(255, 255, 255, 0.3);
-      transform: scale(1.15);
+    .app .ic {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 25px;
+      background: rgba(255, 255, 255, 0.14);
+      transition: transform .12s ease, background .12s ease;
     }
-
-    .sticker-btn:active {
-      transform: scale(0.9);
+    .app:active .ic {
+      transform: scale(.9);
+      background: rgba(255, 255, 255, 0.28);
     }
-
-    .sticker-btn svg {
-      width: 24px;
-      height: 24px;
-      fill: none;
-      stroke: white;
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+    .app .lbl {
+      font-size: 11.5px;
+      font-weight: 500;
+      line-height: 1.1;
+      color: rgba(255, 255, 255, 0.92);
+      white-space: nowrap;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    }
+    .chip {
+      position: absolute;
+      bottom: 10px;
+      right: 16px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(20, 20, 24, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      font-size: 22px;
+      color: #fff;
+      cursor: pointer;
+      z-index: 100;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .chip.hidden {
+      opacity: 0;
+      transform: scale(.6);
+      pointer-events: none;
     }
 
     /* Floating Stickers Container */
@@ -129,62 +241,46 @@
 </head>
 
 <body>
+  <div id="animation-area"></div>
 
-  <div id="app-container">
-    <div id="animation-area"></div>
-
-    <div id="sticker-bar">
-      <!-- Heart Button -->
-      <button class="sticker-btn" id="btn-heart" onclick="sendSticker('heart')" title="Trái tim">
-        <svg viewBox="0 0 24 24" style="stroke: #ff4757;">
-          <path
-            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z">
-          </path>
-        </svg>
-      </button>
-
-      <!-- Like Button -->
-      <button class="sticker-btn" id="btn-like" onclick="sendSticker('like')" title="Thích">
-        <svg viewBox="0 0 24 24" style="stroke: #1e90ff;">
-          <path
-            d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3">
-          </path>
-        </svg>
-      </button>
-
-      <!-- Smile Button -->
-      <button class="sticker-btn" id="btn-smile" onclick="sendSticker('smile')" title="Mặt cười">
-        <svg viewBox="0 0 24 24" style="stroke: #ffa500;">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-          <line x1="9" y1="9" x2="9.01" y2="9"></line>
-          <line x1="15" y1="9" x2="15.01" y2="9"></line>
-        </svg>
-      </button>
-
-      <!-- Angry Button -->
-      <button class="sticker-btn" id="btn-angry" onclick="sendSticker('angry')" title="Tức giận">
-        <svg viewBox="0 0 24 24" style="stroke: #ff3838;">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M16 16s-1.5-2-4-2-4 2-4 2"></path>
-          <line x1="7.5" y1="8.5" x2="10.5" y2="10"></line>
-          <line x1="16.5" y1="8.5" x2="13.5" y2="10"></line>
-          <circle cx="9" cy="11.5" r="0.75" fill="#ff3838"></circle>
-          <circle cx="15" cy="11.5" r="0.75" fill="#ff3838"></circle>
-        </svg>
-      </button>
-
-      <!-- Wave Button -->
-      <button class="sticker-btn" id="btn-wave" onclick="sendSticker('wave')" title="Vẫy chào">
-        <svg viewBox="0 0 24 24" style="stroke: #ffb142;">
-          <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v3"></path>
-          <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7"></path>
-          <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"></path>
-          <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path>
-        </svg>
-      </button>
+  <div class="emote">
+    <button class="emote-toggle" id="emote-toggle" onclick="toggleEmotes()" aria-label="Biểu cảm">❤️</button>
+    <div class="emote-list hidden" id="emote-list">
+      <button onclick="sendSticker('heart')" title="Trái tim">❤️</button>
+      <button onclick="sendSticker('like')" title="Thích">👍</button>
+      <button onclick="sendSticker('smile')" title="Mặt cười">😊</button>
+      <button onclick="sendSticker('angry')" title="Tức giận">😡</button>
+      <button onclick="sendSticker('wave')" title="Vẫy chào">👋</button>
     </div>
   </div>
+
+  <div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
+    <button class="handle" onclick="setOpen(false)" aria-label="Thu gọn"></button>
+    <div class="row">
+      <button class="app" onclick="launchApp('sketch-sync-app')"><span class="ic">🎨</span><span class="lbl">Vẽ</span></button>
+      <button class="app" onclick="launchApp('photo-share')"><span class="ic">📷</span><span class="lbl">Ảnh</span></button>
+      <button class="app" onclick="launchApp('caro')"><span class="ic">♟️</span><span class="lbl">Caro</span></button>
+    </div>
+  </div>
+  <button class="chip hidden" id="chip" onclick="setOpen(true)" aria-label="Mở ứng dụng">✨</button>
+
+  <script>
+    function toggleEmotes() {
+      const closed = document.getElementById('emote-list').classList.toggle('hidden');
+      document.getElementById('emote-toggle').textContent = closed ? '❤️' : '✕';
+    }
+
+    function launchApp(appId) {
+      if (window.AndroidBridge && window.AndroidBridge.startMiniApp) {
+        window.AndroidBridge.startMiniApp(appId);
+      }
+    }
+
+    function setOpen(open) {
+      document.getElementById('tray').classList.toggle('hidden', !open);
+      document.getElementById('chip').classList.toggle('hidden', open);
+    }
+  </script>
 
   <script>
     // Send sticker action to native Go backend via the W3C IMSDataChannelBridge

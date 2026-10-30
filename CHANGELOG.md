@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Added & Enhanced
+- **Emote as the in-call home screen:** when a normal call connects, the caller's phone opens the emote app (`fun-calling-app`) and the callee follows via the Re-INVITE, so emotes work without opening an app first. Emotes moved to a small vertical dropdown at the top right (❤️ toggle → ❤️ 👍 😊 😡 👋); the app tray at the bottom keeps the operator-menu look. "‹ Menu" and Back now return to this home screen instead of the plain operator-menu.
+- **Operator menu trimmed** to Draw, Photo and Caro (Thả tim, 198, flight booking, Caller ID and the screen-share placeholder removed). Applied to both the bundled pages and the DCAR packages in `go-mf/static/apps/`.
+
 - **Photo-share Mini-App (new, P2A2P):** share photos from the album during a call over the ADC (`photo-share/index.html`, `PhotoShareTransport.kt`). Photos are EXIF-rotated on import, kept in `cacheDir/photostore`, served to the WebView at `/media/`, and cleared when the call ends. Added a 📷 button to the operator-menu tray.
 
 - **Caro Mini-App Demo Upgrade:**
