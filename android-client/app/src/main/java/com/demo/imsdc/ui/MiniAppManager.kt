@@ -497,23 +497,17 @@ class MiniAppManager(val activity: CallActivity) {
                         if (reInviteJob === self) reInviteWaitingForDownload = false
                     }
                 }
-                activity.sipManager.activeReqAppId = targetId
-                // Always close existing ADC first to isolate sessions
-                activity.webRtcManager.closeADC()
-                if (targetId != "operator-menu") {
-                    Log.i(TAG, "Re-creating ADC for requested app: $targetId")
-                    activity.webRtcManager.createADC()
-                    activity.dcManager.setupADC()
-                    if (targetId == "fun-calling-app") {
-                        activity.webRtcManager.createADC2()
-                        activity.dcManager.setupADC2()
-                    }
+                // The MF cannot move an open ADC to another app in place: it keeps the old DTLS association
+                // and ignores the new ADC offer, so the new app never connects. Release the current app's
+                // ADC first (the app → operator-menu → app sequence), then open the new one.
+                val currentApp = activity.sipManager.activeReqAppId
+                if (targetId != "operator-menu" && currentApp != null && currentApp != "operator-menu" && currentApp != targetId) {
+                    Log.i(TAG, "Releasing ADC of $currentApp before switching to $targetId")
+                    sendAppReInvite("operator-menu")
+                    val answered = kotlinx.coroutines.withTimeoutOrNull(REINVITE_ANSWER_WAIT_MS) { reInviteAnswer?.await() }
+                    Log.i(TAG, "ADC release for $currentApp ${if (answered != null) "answered" else "not answered in time"}")
                 }
-                val localOffer = activity.webRtcManager.createOffer()
-                Log.i(TAG, "Creating standard-compliant Re-INVITE for app: $targetId")
-                withContext(Dispatchers.IO) {
-                    activity.sipManager.sendReInviteWithSdp(localOffer)
-                }
+                sendAppReInvite(targetId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Log.d(TAG, "Re-INVITE coroutine cancelled for app $targetId (call ended/navigated)")
             } catch (e: Exception) {
@@ -522,6 +516,35 @@ class MiniAppManager(val activity: CallActivity) {
                 // Keep the job active briefly so a repeated trigger for the same app is still deduplicated.
                 if (isActive) kotlinx.coroutines.delay(1000)
             }
+        }
+    }
+
+    // Completed when the 200 OK of the Re-INVITE sent by sendAppReInvite() has been applied.
+    private var reInviteAnswer: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private val REINVITE_ANSWER_WAIT_MS = 5000L
+
+    fun onReInviteAnswered() {
+        reInviteAnswer?.complete(Unit)
+    }
+
+    private suspend fun sendAppReInvite(targetId: String) {
+        activity.sipManager.activeReqAppId = targetId
+        // Always close existing ADC first to isolate sessions
+        activity.webRtcManager.closeADC()
+        if (targetId != "operator-menu") {
+            Log.i(TAG, "Re-creating ADC for requested app: $targetId")
+            activity.webRtcManager.createADC()
+            activity.dcManager.setupADC()
+            if (targetId == "fun-calling-app") {
+                activity.webRtcManager.createADC2()
+                activity.dcManager.setupADC2()
+            }
+        }
+        val localOffer = activity.webRtcManager.createOffer()
+        reInviteAnswer = kotlinx.coroutines.CompletableDeferred()
+        Log.i(TAG, "Creating standard-compliant Re-INVITE for app: $targetId")
+        withContext(Dispatchers.IO) {
+            activity.sipManager.sendReInviteWithSdp(localOffer)
         }
     }
 
