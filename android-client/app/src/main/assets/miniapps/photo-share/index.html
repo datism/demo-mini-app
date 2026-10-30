@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Photo Share — 5G New Calling</title>
+<title>Photo & Video Share — 5G New Calling</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117;
@@ -24,9 +24,13 @@
   #imgCanvasWrap { position: absolute; top: 0; bottom: 0; left: 0; right: 0;
                    display: flex; align-items: center; justify-content: center; }
   /* Kích thước do sizeCanvas() tính (fit vào #viewer) — max-width/height % không hoạt động vì #stage co theo ảnh. */
-  #photoImg { object-fit: contain; user-select: none;
+  #photoImg, #sharedVideo { display: block; object-fit: contain; user-select: none;
               -webkit-user-drag: none; }
-  #drawCanvas { position: absolute; pointer-events: none; }
+  #drawCanvas { position: absolute; left: 0; top: 0; touch-action: none; pointer-events: none; }
+  #stage { flex: none; line-height: 0; }
+  #sharedVideo { background: #010409; }
+  #prev, #next { position:absolute; bottom:8px; z-index:10; border:0; border-radius:20px; padding:8px 14px; color:white; background:#30363d; }
+  #prev { left:8px; } #next { right:8px; }
 
   /* ── Loading spinner ── */
   #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
@@ -72,24 +76,27 @@
 
 <div id="header">
   <div>
-    <div class="title">📷 Chia sẻ ảnh</div>
+    <div class="title">📷 Ảnh & video</div>
     <div class="status" id="statusText">Đang kết nối...</div>
   </div>
-  <button id="btnPick">＋ Chọn ảnh</button>
+  <button id="btnPick">＋ Chọn ảnh / video</button>
 </div>
 
 <div id="viewer">
   <div id="imgCanvasWrap">
     <div style="position:relative; display:inline-block;" id="stage">
       <img id="photoImg" alt="" style="display:none">
+      <video id="sharedVideo" controls playsinline muted preload="metadata" style="display:none"></video>
       <canvas id="drawCanvas"></canvas>
     </div>
   </div>
   <div id="loader"><div class="spin"></div><div class="pct" id="loaderPct">0%</div></div>
   <div id="empty">
     <div class="icon">🖼️</div>
-    <div class="txt">Chưa có ảnh — bấm “Chọn ảnh”<br>hoặc chờ đối phương chia sẻ</div>
+    <div class="txt">Chưa có ảnh / video — bấm “Chọn ảnh / video”<br>hoặc chờ đối phương chia sẻ</div>
   </div>
+  <button id="prev" aria-label="Ảnh trước">‹</button>
+  <button id="next" aria-label="Ảnh tiếp theo">›</button>
 </div>
 
 <div id="drawBar">
@@ -104,466 +111,349 @@
 <div id="strip"></div>
 <div id="toast"></div>
 
-<input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+<input type="file" id="fileInput" accept="image/*,video/mp4,video/webm,video/3gpp" multiple style="display:none">
 
 <script>
 'use strict';
 
-/* ═══════════════════════════════════════════════════════════════════
- * PHOTO-SHARE mini-app
- *
- * Wire protocol (2 lớp trên ADC stream 1000, P2P qua MF):
- *   A. JSON control  —/native→sendOrQueueAdc (text path). Msg types:
- *      {t:"offer",  photos:[{id,w,h,bytes,thumb}]}
- *      {t:"fetch",  id, fromSeq?}
- *      {t:"begin",  id, chunks, bytes, sha256}
- *      {t:"done",   id, ok}
- *      {t:"goto",   id, seq}
- *      {t:"stroke", id, color, w, pts:[[x,y]∈[0,1],...]}
- *      {t:"clear",  id}
- *   B. Binary chunk — native PhotoShareTransport tự xử lý (byte đầu 0x01),
- *      khi đủ chunks đẩy lên JS: window.receiveData("PSHARE:<idHash>:<b64>")
- *
- * Nhận từ xa: mọi msg đến qua window.receiveData(dataStr).
- * ═══════════════════════════════════════════════════════════════════ */
-
 const $ = id => document.getElementById(id);
-const state = {
-  photos: {},            // id → {id,w,h,bytes,thumb,ready(bool),url?,strokes:[]}
-  order: [],             // thứ tự strip
-  current: null,         // photoId đang xem
-  seq: 0,                //counter cho goto LWW
-  drawMode: false,
-  color: '#ff3b30',
-  preloading: {},
-};
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
+const actor = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+const state = { photos: {}, order: [], current: null, seq: 0, lastNavigation: [0, ''],
+  pendingNavigation: null, drawMode: false, color: '#ff3b30', closed: false };
+let mediaEpoch = 0, toastTimer, activeStroke = null;
+const isVideo = p => !!p && String(p.mime || '').startsWith('video/');
+const clamp = n => Math.max(0, Math.min(1, n));
 
-/* ─────────────── Bridge helpers ─────────────── */
-function sendJson(obj) {
-  const s = JSON.stringify(obj);
-  if (window.AndroidBridge && window.AndroidBridge.send) {
-    window.AndroidBridge.send(1000, s);
-  } else if (window.AndroidBridge && window.AndroidBridge.sendData) {
-    window.AndroidBridge.sendData(s);
-  } else { console.warn('[PS] no bridge', s); }
+function sendJson(message) {
+  if (state.closed) return;
+  const bridge = window.AndroidBridge;
+  if (bridge && bridge.send) bridge.send(1000, JSON.stringify(message));
+  else if (bridge && bridge.sendData) bridge.sendData(JSON.stringify(message));
 }
-
-/* ─────────────── Toast + status ─────────────── */
-let toastTimer = null;
-function toast(msg, ms) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200);
+function toast(text) {
+  $('toast').textContent = text; $('toast').classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2400);
 }
-function setStatus(s) { $('statusText').textContent = s; }
-
-/* ─────────────── Thumbnail strip ─────────────── */
+function setStatus(text) { $('statusText').textContent = text; }
+function showLoader(visible) { $('loader').style.display = visible ? 'block' : 'none'; $('loaderPct').textContent = 'Đang nhận tệp…'; }
 function renderStrip() {
-  const strip = $('strip'); strip.innerHTML = '';
-  state.order.forEach(id => {
-    const p = state.photos[id];
-    const img = document.createElement('img');
+  $('strip').replaceChildren();
+  for (const id of state.order) {
+    const p = state.photos[id], img = document.createElement('img');
     img.className = 'thumb' + (id === state.current ? ' active' : '');
-    if (p.thumbUrl) img.src = p.thumbUrl;
+    img.alt = isVideo(p) ? 'Video' : 'Ảnh';
+    img.src = p.thumbUrl || 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="78" height="78"><rect width="78" height="78" fill="#161b22"/><text x="39" y="49" font-size="30" text-anchor="middle" fill="white">' + (isVideo(p) ? '▶' : '▧') + '</text></svg>');
     img.onclick = () => gotoPhoto(id, true);
-    strip.appendChild(img);
-  });
+    $('strip').appendChild(img);
+  }
 }
 
-/* ─────────────── Hiển thị ảnh ─────────────── */
-function showPhoto(p) {
-  $('empty').style.display = 'none';
-  const img = $('photoImg');
-  // Ảnh mới (thumb -> full, hoặc ảnh khác) đổi kích thước tự nhiên: fit lại khi tải xong.
-  img.onload = () => { sizeCanvas(); redrawStrokes(); };
-  img.src = p.url; img.style.display = 'block';
-  requestAnimationFrame(() => { sizeCanvas(); redrawStrokes(); });
-}
-
+// Layout uses the selected asset's dimensions, never the previous <img>'s natural size.
+// CSS pixels and canvas backing pixels are kept separate on high-DPI phones.
 function sizeCanvas() {
-  const img = $('photoImg'); const c = $('drawCanvas');
-  if (!img.naturalWidth) return;
-  // Fit (contain) vào #viewer: cả thumb 256px lẫn ảnh 1920px đều hiện đúng khung, hai bên giống nhau.
-  const viewer = $('viewer');
-  if (!viewer.clientWidth || !viewer.clientHeight) return;
-  const k = Math.min(viewer.clientWidth / img.naturalWidth, viewer.clientHeight / img.naturalHeight);
-  const rect = { width: Math.max(1, Math.floor(img.naturalWidth * k)), height: Math.max(1, Math.floor(img.naturalHeight * k)) };
-  img.style.width = rect.width + 'px';
-  img.style.height = rect.height + 'px';
-  const stage = $('stage');
-  stage.style.width = rect.width + 'px';
-  stage.style.height = rect.height + 'px';
-  const dpr = window.devicePixelRatio || 1;
-  c.width = rect.width * dpr; c.height = rect.height * dpr;
-  c.style.width = rect.width + 'px'; c.style.height = rect.height + 'px';
-  c.getContext('2d').scale(dpr, dpr);
-  // canvas phủ NGANG TRÊN ảnh để bắt touch
-  c.style.pointerEvents = state.drawMode ? 'auto' : 'none';
-}
-
-function redrawStrokes() {
-  const c = $('drawCanvas'); const ctx = c.getContext('2d');
   const p = state.photos[state.current];
-  ctx.clearRect(0, 0, c.width, c.height);
-  if (!p) return;
-  const rect = $('photoImg').getBoundingClientRect();
-  p.strokes.forEach(st => drawStrokeOn(ctx, st, rect.width, rect.height));
+  if (!p || !(p.w > 0 && p.h > 0)) return;
+  const viewer = $('viewer'), c = $('drawCanvas');
+  const k = Math.min(viewer.clientWidth / p.w, viewer.clientHeight / p.h);
+  const w = Math.max(1, Math.floor(p.w * k)), h = Math.max(1, Math.floor(p.h * k));
+  $('stage').style.width = w + 'px'; $('stage').style.height = h + 'px';
+  for (const el of [$('photoImg'), $('sharedVideo')]) { el.style.width = w + 'px'; el.style.height = h + 'px'; }
+  const dpr = window.devicePixelRatio || 1;
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if (c.width !== bw || c.height !== bh) { c.width = bw; c.height = bh; }
+  c.style.width = w + 'px'; c.style.height = h + 'px';
+  c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  redrawStrokes();
 }
-function drawStrokeOn(ctx, st, w, h) {
-  if (!st.pts || !st.pts.length) return;
-  ctx.strokeStyle = st.color; ctx.lineWidth = st.w || 3;
-  ctx.lineJoin = ctx.lineCap = 'round';
-  ctx.beginPath();
-  st.pts.forEach((pt, i) => {
-    const x = pt[0] * w, y = pt[1] * h;
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  });
+function updateDrawTools() {
+  const p = state.photos[state.current], enabled = !!p && p.ready && !isVideo(p);
+  $('drawBar').style.display = 'flex';
+  $('btnDraw').disabled = !enabled;
+  $('btnDraw').classList.toggle('active', state.drawMode && enabled);
+  document.querySelectorAll('.swatch').forEach(el => el.style.display = state.drawMode && enabled ? 'block' : 'none');
+  $('btnClearDraw').style.display = state.drawMode && enabled ? 'block' : 'none';
+  $('drawCanvas').style.pointerEvents = state.drawMode && enabled ? 'auto' : 'none';
+  $('drawCanvas').style.display = isVideo(p) ? 'none' : 'block';
+}
+function showPhoto(p) {
+  if (!p || p.id !== state.current) return;
+  const epoch = ++mediaEpoch, img = $('photoImg'), video = $('sharedVideo');
+  video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none';
+  img.onload = null; img.onerror = null; img.style.display = 'none'; img.removeAttribute('src');
+  $('empty').style.display = 'none';
+  const full = p.ready && !!p.url;
+  showLoader(!full); updateDrawTools(); sizeCanvas();
+  if (isVideo(p) && full) {
+    video.onloadedmetadata = () => {
+      if (epoch !== mediaEpoch || state.current !== p.id) return;
+      if (video.videoWidth && video.videoHeight) { p.w = video.videoWidth; p.h = video.videoHeight; }
+      sizeCanvas();
+    };
+    video.onerror = () => { if (epoch === mediaEpoch) toast('Không phát được định dạng video này'); };
+    video.muted = true; // Shared clips must not take the voice call's audio focus.
+    video.src = p.url; video.style.display = 'block';
+  } else {
+    const url = full ? p.url : p.thumbUrl;
+    if (url) {
+      img.onload = () => {
+        if (epoch !== mediaEpoch || state.current !== p.id) return;
+        if (full || !(p.w > 0 && p.h > 0)) { p.w = img.naturalWidth; p.h = img.naturalHeight; }
+        sizeCanvas();
+      };
+      img.onerror = () => { if (epoch === mediaEpoch) toast('Không đọc được ảnh'); };
+      img.src = url; img.style.display = 'block';
+    }
+  }
+  redrawStrokes();
+}
+function drawStrokeOn(ctx, stroke, w, h) {
+  if (!stroke.pts || !stroke.pts.length) return;
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = stroke.nw ? stroke.nw * Math.min(w, h) : (stroke.w || 3);
+  ctx.lineJoin = ctx.lineCap = 'round'; ctx.beginPath();
+  stroke.pts.forEach((pt, i) => i ? ctx.lineTo(pt[0] * w, pt[1] * h) : ctx.moveTo(pt[0] * w, pt[1] * h));
+  if (stroke.pts.length === 1) { const pt = stroke.pts[0]; ctx.lineTo(pt[0] * w + 0.01, pt[1] * h); }
   ctx.stroke();
 }
+function redrawStrokes() {
+  const c = $('drawCanvas'), ctx = c.getContext('2d'), p = state.photos[state.current];
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore();
+  if (!p || isVideo(p)) return;
+  const r = c.getBoundingClientRect();
+  p.strokes.forEach(st => drawStrokeOn(ctx, st, r.width, r.height));
+  Object.values(p.live || {}).forEach(st => drawStrokeOn(ctx, st, r.width, r.height));
+  if (activeStroke && activeStroke.id === p.id) drawStrokeOn(ctx, activeStroke, r.width, r.height);
+}
 
-/* ─────────────── Điều hướng (goto + LWW) ─────────────── */
+function cancelStroke() {
+  if (!activeStroke) return;
+  sendJson({ t: 'ink-cancel', id: activeStroke.id, sid: activeStroke.sid });
+  activeStroke = null; redrawStrokes();
+}
 function gotoPhoto(id, userInitiated) {
-  const p = state.photos[id];
-  if (!p) return;
-  state.current = id;
-  renderStrip();
-  if (p.ready && p.url) { showPhoto(p); }
-  else { fetchPhoto(id); }
-
-  // preload lân cận — vuốt tiếp là có ngay
-  const idx = state.order.indexOf(id);
-  [idx + 1, idx - 1].forEach(i => {
-    const nid = state.order[i];
-    if (nid && state.photos[nid] && !state.photos[nid].ready) fetchPhoto(nid);
-  });
-
+  const p = state.photos[id]; if (!p) return;
+  cancelStroke(); state.current = id; renderStrip(); showPhoto(p);
+  if (!p.ready) fetchPhoto(id);
   if (userInitiated) {
-    state.seq++;
-    sendJson({ t: 'goto', id: id, seq: state.seq });
+    const navigation = { t: 'goto', id, seq: ++state.seq, actor };
+    state.lastNavigation = [navigation.seq, actor]; sendJson(navigation);
   }
 }
-
 function onRemoteGoto(msg) {
-  if (typeof msg.seq === 'number' && msg.seq <= state.gotSeqMax) return; // LWW drop
-  state.gotSeqMax = msg.seq || 0;
-  if (!state.photos[msg.id]) { toast('Đối phương đang xem một ảnh chưa tải về'); return; }
-  gotoPhoto(msg.id, false);
+  const seq = Number(msg.seq) || 0, sender = String(msg.actor || 'legacy');
+  state.seq = Math.max(state.seq, seq);
+  if (seq < state.lastNavigation[0] || (seq === state.lastNavigation[0] && sender <= state.lastNavigation[1])) return;
+  state.lastNavigation = [seq, sender];
+  if (!state.photos[msg.id]) { state.pendingNavigation = msg; return; }
+  state.pendingNavigation = null; gotoPhoto(msg.id, false);
 }
-
-/* ─────────────── Fetch / nhận ảnh ─────────────── */
 function fetchPhoto(id) {
-  const p = state.photos[id];
-  if (!p || p.fetching) return;
-  p.fetching = true;
-  if (p.local) {
-    // ảnh của chính máy mình — có sẵn qua /media/
-    p.ready = true; p.url = window.AndroidBridge ? window.AndroidBridge.mediaUrl(id, false) : '';
-    if (state.current === id) showPhoto(p);
+  const p = state.photos[id]; if (!p || p.ready || p.fetching) return;
+  p.fetching = true; sendJson({ t: 'fetch', id });
+  // A failed/old peer cannot leave the UI permanently stuck in "fetching".
+  clearTimeout(p.fetchTimer);
+  p.fetchTimer = setTimeout(() => {
+    if (state.closed || p.ready) return;
     p.fetching = false;
-    return;
-  }
-  showLoader(0, 'Đang nhận ảnh...');
-  sendJson({ t: 'fetch', id: id });
-  // Local thumb hiển thị tạm trong lúc chờ full
-  if (p.thumbUrl && state.current === id) showPhoto({ url: p.thumbUrl });
+    if (state.current === id) { showLoader(false); toast('Chưa nhận được tệp. Chọn lại để thử.'); }
+  }, 180000);
 }
-
-function showLoader(pct, label) {
-  const loader = $('loader');
-  if (pct === null) { loader.style.display = 'none'; return; }
-  loader.style.display = 'block';
-  $('loaderPct').textContent = (label || '') + ' ' + pct + '%';
-}
-
-function onBegin(msg) {
-  const p = state.photos[msg.id];
-  if (!p) return;
-  p.chunks = msg.chunks; p.chunksGot = 0; p.sha256 = msg.sha256;
-}
-
-/** Frame binary đã ghép xong phía native: "PSHARE:<idHash>:<base64-JPEG>" */
-function onPshare(idHash, b64) {
-  // quy idHash → id qua bảng photos
-  const id = Object.keys(state.photos).find(
-    k => hash16(k) === Number(idHash)
-  );
-  if (!id) { console.warn('[PS] unknown idHash', idHash); return; }
-  const p = state.photos[id];
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  if (p.url) URL.revokeObjectURL(p.url);
-  p.url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
-  p.ready = true; p.fetching = false;
-  showLoader(null);
-  if (state.current === id) showPhoto(p);
-  sendJson({ t: 'done', id: id, ok: true });
-  toast('📸 Đã nhận ảnh');
-}
-function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return h & 0xffff; }
-
-/* ─────────────── Chọn ảnh (máy mình là nguồn) ─────────────── */
-$('btnPick').onclick = () => $('fileInput').click();
-
-function blobToB64(blob) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1] || '');
-    r.onerror = () => reject(r.error || new Error('read_failed'));
-    r.readAsDataURL(blob);
-  });
-}
-
-/** File ảnh -> base64 JPEG đã thu nhỏ (EXIF đã được áp khi decode). Lỗi decode: chỉ nhận file nhỏ nguyên bản. */
-async function fileToJpegB64(file) {
-  try {
-    const bmp = await createImageBitmap(file);
-    const MAX = 1920, k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(bmp.width * k));
-    c.height = Math.max(1, Math.round(bmp.height * k));
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    if (bmp.close) bmp.close();
-    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
-    if (blob) return await blobToB64(blob);
-  } catch (e) { /* rơi xuống bản gốc */ }
-  if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
-  return await blobToB64(file);
-}
-
-$('fileInput').onchange = async () => {
-  const files = Array.from($('fileInput').files || []);
-  $('fileInput').value = ''; // cho phép chọn lại đúng ảnh đó lần sau
-  if (!files.length) return;
-  if (!window.AndroidBridge || !window.AndroidBridge.importPhoto) {
-    toast('Thiết bị không hỗ trợ chọn ảnh'); return;
-  }
-  const offered = [];
-  for (let i = 0; i < files.length; i++) {
-    const id = 'p' + Date.now() + '_' + i;
-    // WebView <input type=file> trả File object. Thu nhỏ ngay trong trang (canvas, cạnh dài 1920, JPEG):
-    // ảnh 12-50 MP dạng base64 qua JS bridge nặng hàng chục MB và làm treo cả app.
-    let b64;
-    try { b64 = await fileToJpegB64(files[i]); }
-    catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); continue; }
-    const res = JSON.parse(window.AndroidBridge.importPhotoB64 ?
-        window.AndroidBridge.importPhotoB64(JSON.stringify({ id: id, data: b64, type: 'image/jpeg' })) :
-        JSON.stringify({ ok: false, error: 'importPhotoB64_missing' }));
-    if (res.ok) {
-      state.photos[id] = {
-        id, w: 0, h: 0, bytes: res.bytes, local: true, ready: true,
-        url: window.AndroidBridge.mediaUrl(id, false),
-        thumbUrl: window.AndroidBridge.mediaUrl(id, true),
-        strokes: [],
-      };
-      state.order.push(id);
-      offered.push({ id: id, bytes: res.bytes, thumb: window.AndroidBridge.mediaUrl(id, true).slice() });
-    } else {
-      toast('Không nhập được ảnh: ' + (res.error || '?'));
-    }
-  }
-  renderStrip();
-  if (offered.length) {
-    gotoPhoto(offered[0].id, true);
-    setStatus('Đã chia sẻ ' + offered.length + ' ảnh');
-    // Thumb base64 kèm theo offer — phía nhận hiện strip ngay không cần fetch full.
-    const photosPayload = [];
-    for (const o of offered) {
-      photosPayload.push({ id: o.id, bytes: o.bytes, thumb: await thumbB64Of(o.id) });
-    }
-    sendJson({ t: 'offer', photos: photosPayload });
-  }
-};
-
-/** Đọc thumbnail <id>_t.jpg từ photostore qua /media/ rồi trả base64 thuần. */
-async function thumbB64Of(id) {
-  try {
-    const url = window.AndroidBridge.mediaUrl(id, true);
-    const resp = await fetch(url);
-    if (!resp.ok) return '';
-    const buf = new Uint8Array(await resp.arrayBuffer());
-    let bin = '';
-    for (let j = 0; j < buf.length; j += 0x8000) {
-      bin += String.fromCharCode.apply(null, buf.subarray(j, j + 0x8000));
-    }
-    return btoa(bin);
-  } catch (e) { return ''; }
-}
-
-/* ─────────────── Nhận offer từ xa ─────────────── */
 function onOffer(msg) {
-  (msg.photos || []).forEach(ph => {
-    if (state.photos[ph.id]) return;
-    let thumbUrl = '';
-    if (ph.thumb) { // data URL hoặc base64 thuần
-      thumbUrl = ph.thumb.startsWith('data:') ? ph.thumb : 'data:image/jpeg;base64,' + ph.thumb;
-    }
-    state.photos[ph.id] = {
-      id: ph.id, bytes: ph.bytes, ready: false, strokes: [],
-      thumbUrl: thumbUrl,
-    };
+  const photos = Array.isArray(msg.photos) ? msg.photos : [];
+  for (const ph of photos) {
+    if (!/^[A-Za-z0-9_-]{1,96}$/.test(ph.id) || state.photos[ph.id] || ph.bytes > MAX_MEDIA_BYTES) continue;
+    const thumbUrl = ph.thumb ? (ph.thumb.startsWith('data:') ? ph.thumb : 'data:image/jpeg;base64,' + ph.thumb) : '';
+    state.photos[ph.id] = { id: ph.id, mime: ph.mime || 'image/jpeg', w: ph.w || 0, h: ph.h || 0,
+      bytes: ph.bytes, thumbUrl, ready: false, fetching: false, strokes: [], live: {} };
     state.order.push(ph.id);
-  });
+  }
   renderStrip();
-  toast('📨 Đối phương chia sẻ ' + msg.photos.length + ' ảnh');
-  if (!state.current && msg.photos.length) gotoPhoto(msg.photos[0].id, false);
+  if (state.pendingNavigation && state.photos[state.pendingNavigation.id]) {
+    const id = state.pendingNavigation.id; state.pendingNavigation = null; gotoPhoto(id, false);
+  } else if (!state.current && photos.length && state.photos[photos[0].id]) gotoPhoto(photos[0].id, false);
 }
-
-/* ─────────────── Xử lý fetch từ xa (máy mình có ảnh local) ─────────────── */
+function onStored(msg) {
+  const p = state.photos[msg.id]; if (!p) return;
+  if (p.url && p.url.startsWith('blob:')) URL.revokeObjectURL(p.url);
+  Object.assign(p, { url: msg.url, mime: msg.mime || p.mime, w: msg.w || p.w, h: msg.h || p.h, ready: true, fetching: false });
+  clearTimeout(p.fetchTimer);
+  if (state.current === p.id) showPhoto(p);
+  sendJson({ t: 'done', id: p.id, ok: true }); setStatus('Đã nhận tệp');
+}
+// Compatibility with older photo-only peers. Full images are retained when navigating away and back.
+function onPshare(hash, b64) {
+  const id = Object.keys(state.photos).find(k => hash16(k) === Number(hash)); if (!id) return;
+  const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+  onStored({ id, mime: 'image/jpeg', url: URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) });
+}
+function hash16(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h & 0xffff; }
 function onFetch(msg) {
-  const p = state.photos[msg.id];
-  if (!p || !p.local || !window.AndroidBridge) return;
-  const res = JSON.parse(window.AndroidBridge.sendPhoto(JSON.stringify({ id: msg.id })));
-  if (res.ok) {
-    sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes });
-  }
+  const p = state.photos[msg.id], bridge = window.AndroidBridge;
+  if (!p || !p.local || !bridge || !bridge.sendPhoto) return;
+  const res = JSON.parse(bridge.sendPhoto(JSON.stringify({ id: p.id })));
+  if (!res.ok) sendJson({ t: 'transfer-error', id: p.id });
+  // Native sends begin on the SAME ordered channel before any binary frames.
 }
 
-/* ═══════════════ Vẽ trên ảnh ═══════════════ */
-$('btnDraw').onclick = () => {
-  state.drawMode = !state.drawMode;
-  $('btnDraw').classList.toggle('active', state.drawMode);
-  document.querySelectorAll('#drawBar .swatch').forEach(s =>
-    s.style.display = state.drawMode ? 'block' : 'none');
-  $('btnClearDraw').style.display = state.drawMode ? 'block' : 'none';
-  $('drawBar').style.display = state.drawMode ? 'flex' : 'none';
-  $('drawCanvas').style.pointerEvents = state.drawMode ? 'auto' : 'none';
+$('btnPick').onclick = () => {
+  if (window.AndroidBridge && window.AndroidBridge.pickMedia) window.AndroidBridge.pickMedia();
+  else $('fileInput').click();
 };
-// Mặc định hiện bar (đổi: bar luôn hiện, swatch ẩn)
-$('drawBar').style.display = 'flex';
-$('btnDraw').classList.add('active');
-state.drawMode = true;
-$('drawCanvas').style.pointerEvents = 'auto';
-document.querySelectorAll('#drawBar .swatch').forEach(s => s.style.display = 'block');
-$('btnClearDraw').style.display = 'block';
+window.onNativeMediaImported = function(assets) {
+  if (state.closed || !Array.isArray(assets)) return;
+  const offer = [];
+  for (const asset of assets) {
+    if (!asset.id || !asset.url) continue;
+    const thumbUrl = asset.thumb ? 'data:image/jpeg;base64,' + asset.thumb : '';
+    state.photos[asset.id] = Object.assign({}, asset, { local: true, ready: true, thumbUrl, strokes: [], live: {} });
+    state.order.push(asset.id);
+    offer.push({ id: asset.id, mime: asset.mime, w: asset.w, h: asset.h, bytes: asset.bytes, thumb: asset.thumb || '' });
+  }
+  if (offer.length) {
+    sendJson({ t: 'offer', photos: offer }); // Announce IDs before the first synchronized navigation.
+    gotoPhoto(offer[0].id, true); setStatus('Đã chia sẻ ' + offer.length + ' tệp');
+  }
+};
+// Older APKs may still expose only importPhotoB64. Limit this fallback to small photos.
+$('fileInput').onchange = async () => {
+  const files = Array.from($('fileInput').files || []); $('fileInput').value = '';
+  const bridge = window.AndroidBridge;
+  if (!bridge || !bridge.importPhotoB64) { toast('Cần ứng dụng Android để chia sẻ tệp'); return; }
+  const imported = [];
+  for (const file of files) {
+    if (!file.type.startsWith('image/') || file.size > 6 * 1024 * 1024) { toast('Cập nhật ứng dụng để chọn video hoặc ảnh lớn'); continue; }
+    try {
+      const bmp = await createImageBitmap(file), k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement('canvas'); canvas.width = Math.round(bmp.width * k); canvas.height = Math.round(bmp.height * k);
+      canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height); bmp.close();
+      const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1], id = 'p_' + actor.replace(/[^A-Za-z0-9]/g, '') + '_' + Date.now();
+      const res = JSON.parse(bridge.importPhotoB64(JSON.stringify({ id, data: b64 })));
+      if (res.ok) imported.push({ id, mime: 'image/jpeg', w: canvas.width, h: canvas.height, bytes: res.bytes,
+        url: bridge.mediaUrl(id, false), thumb: '' });
+    } catch (e) { toast('Không đọc được ảnh'); }
+  }
+  window.onNativeMediaImported(imported);
+};
 
-document.querySelectorAll('#drawBar .swatch').forEach(sw => {
-  sw.onclick = () => {
-    state.color = sw.dataset.color;
-    document.querySelectorAll('#drawBar .swatch').forEach(x => x.classList.remove('active'));
-    sw.classList.add('active');
-  };
+$('btnDraw').onclick = () => { cancelStroke(); state.drawMode = !state.drawMode; updateDrawTools(); };
+document.querySelectorAll('.swatch').forEach(sw => sw.onclick = () => {
+  state.color = sw.dataset.color;
+  document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('active', x === sw));
 });
-
 $('btnClearDraw').onclick = () => {
-  const p = state.photos[state.current];
-  if (p) { p.strokes = []; redrawStrokes(); sendJson({ t: 'clear', id: state.current }); }
+  const p = state.photos[state.current]; if (!p) return;
+  cancelStroke(); p.strokes = []; p.live = {}; redrawStrokes(); sendJson({ t: 'clear', id: p.id });
 };
-
-/* Pointer events cho canvas vẽ */
-(function () {
-  const c = $('drawCanvas');
-  let stroking = null;
-  const norm = e => {
-    const r = c.getBoundingClientRect();
-    return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
-  };
-  c.addEventListener('pointerdown', e => {
-    if (!state.drawMode) return;
-    stroking = { color: state.color, w: 3, pts: [norm(e)] };
-    c.setPointerCapture(e.pointerId);
-  });
-  c.addEventListener('pointermove', e => {
-    if (!stroking) return;
-    stroking.pts.push(norm(e));
-    // preview cục bộ
-    const ctx = c.getContext('2d');
-    const p = state.photos[state.current];
-    if (p) { ctx.clearRect(0,0,c.width,c.height); redrawStrokes(); drawStrokeOn(ctx, {...stroking, pts: stroking.pts}, c.width, c.height); }
-  });
-  const finish = () => {
-    if (!stroking) return;
-    const p = state.photos[state.current];
-    if (p && stroking.pts.length > 1) {
-      p.strokes.push(stroking);
-      sendJson({ t: 'stroke', id: p.id, color: stroking.color, w: stroking.w, pts: stroking.pts });
-      redrawStrokes();
-    }
-    stroking = null;
-  };
-  c.addEventListener('pointerup', finish);
-  c.addEventListener('pointercancel', finish);
-})();
-
-function onRemoteStroke(msg) {
-  const p = state.photos[msg.id];
-  if (!p) return;
-  if (state.current === msg.id) {
-    p.strokes.push({ color: msg.color, w: msg.w, pts: msg.pts });
-    redrawStrokes();
-  } else {
-    p.strokes.push({ color: msg.color, w: msg.w, pts: msg.pts });
-    if (!state.hintedOther) { toast('✏️ Đối phương vẽ trên ảnh khác'); state.hintedOther = true; }
-  }
+function normalizedPoint(e) {
+  const r = $('drawCanvas').getBoundingClientRect();
+  return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
 }
-function onRemoteClear(msg) {
-  const p = state.photos[msg.id];
-  if (p) { p.strokes = []; if (state.current === msg.id) redrawStrokes(); }
+function emitInk(stroke) {
+  const pts = stroke.pts.slice(Math.max(0, stroke.sent - 1)); stroke.sent = stroke.pts.length; stroke.lastSent = Date.now();
+  sendJson({ t: 'ink', id: stroke.id, sid: stroke.sid, color: stroke.color, nw: stroke.nw, pts });
 }
-
-/* ─────────────── Vuốt trái/phải trên viewer ─────────────── */
-(function () {
-  const viewer = $('viewer');
-  let sx = null, sy = null, t0 = 0;
-  viewer.addEventListener('pointerdown', e => {
-    if (e.target === $('drawCanvas') && state.drawMode) return; // vẽ ưu tiên
-    sx = e.clientX; sy = e.clientY; t0 = Date.now();
-  });
-  viewer.addEventListener('pointerup', e => {
-    if (sx === null) return;
-    const dx = e.clientX - sx, dy = e.clientY - sy;
-    sx = null;
-    if (Math.abs(dx) < 60 || Math.abs(dy) > 50) return;         // quá ngắn / dọc
-    if (Date.now() - t0 > 700) return;                          // quá chậm
-    const idx = state.order.indexOf(state.current);
-    const next = dx < 0 ? idx + 1 : idx - 1;                    // trái sang phải = ảnh trước
-    if (next >= 0 && next < state.order.length) gotoPhoto(state.order[next], true);
-  });
-})();
-
-/* ═══════════════ ĐIỂM VÀO DUY NHẤT: nhận message ═══════════════ */
-window.receiveData = function (dataStr) {
-  try {
-    // 1) Binary photo frame đã ghép: "PSHARE:<idHash>:<b64>"
-    if (dataStr.startsWith('PSHARE:')) {
-      const parts = dataStr.split(':');
-      onPshare(parts[1], parts.slice(2).join(':'));
-      return;
-    }
-    // 2) JSON control
-    const msg = JSON.parse(dataStr);
-    switch (msg.t) {
-      case 'offer':  onOffer(msg); break;
-      case 'fetch':  onFetch(msg); break;
-      case 'begin':  onBegin(msg); break;
-      case 'done':   if (msg.ok) setStatus('Đã gửi xong'); break;
-      case 'goto':   onRemoteGoto(msg); break;
-      case 'stroke': onRemoteStroke(msg); break;
-      case 'clear':  onRemoteClear(msg); break;
-    }
-  } catch (err) {
-    console.warn('[PS] bad message', err, dataStr && dataStr.slice(0, 80));
-  }
-};
-
-/* Bridge qua GSMA _dsbridge nếu app chạy SDK path (dataChannelNotify đã có) */
-window.addEventListener('load', () => {
-  setStatus('Sẵn sàng');
-  // Yêu cầu ADC nếu chưa có (khi vào app bằng deep-link không qua operator-menu)
-  if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) {
-    window.ImsDcBridge.createDataChannel('photo-share');
-  } else if (window._dsbridge) {
-    try { window._dsbridge.call('createAppDataChannel', 'photo-share'); } catch (e) {}
-  }
+$('drawCanvas').addEventListener('pointerdown', e => {
+  const p = state.photos[state.current]; if (!state.drawMode || !p || !p.ready || isVideo(p)) return;
+  e.preventDefault();
+  activeStroke = { id: p.id, sid: actor + ':' + Date.now(), pointerId: e.pointerId,
+    color: state.color, nw: 0.008, pts: [normalizedPoint(e)], sent: 0, lastSent: 0 };
+  $('drawCanvas').setPointerCapture(e.pointerId); emitInk(activeStroke); redrawStrokes();
 });
+$('drawCanvas').addEventListener('pointermove', e => {
+  if (!activeStroke || activeStroke.pointerId !== e.pointerId) return;
+  activeStroke.pts.push(normalizedPoint(e));
+  if (activeStroke.pts.length >= 1024) finishStroke(e);
+  else { if (Date.now() - activeStroke.lastSent >= 50) emitInk(activeStroke); redrawStrokes(); }
+});
+function finishStroke(e) {
+  const st = activeStroke; if (!st || st.pointerId !== e.pointerId) return;
+  const p = state.photos[st.id]; activeStroke = null;
+  if (p) { p.strokes.push(st); sendJson({ t: 'stroke', id: st.id, sid: st.sid, color: st.color, nw: st.nw, pts: st.pts }); }
+  redrawStrokes();
+}
+$('drawCanvas').addEventListener('pointerup', finishStroke);
+$('drawCanvas').addEventListener('pointercancel', cancelStroke);
+$('drawCanvas').addEventListener('lostpointercapture', cancelStroke);
+function validStroke(msg) {
+  return Array.isArray(msg.pts) && msg.pts.length > 0 && msg.pts.length <= 1024 &&
+    msg.pts.every(pt => Array.isArray(pt) && pt.length === 2 && pt.every(n => Number.isFinite(n) && n >= 0 && n <= 1));
+}
+function onRemoteStroke(msg, live) {
+  const p = state.photos[msg.id]; if (!p || !validStroke(msg) || isVideo(p)) return;
+  const stroke = { sid: msg.sid, color: /^#[0-9a-f]{6}$/i.test(msg.color) ? msg.color : '#ff3b30',
+    nw: Number.isFinite(msg.nw) ? Math.max(0.001, Math.min(0.05, msg.nw)) : undefined, w: 3, pts: msg.pts };
+  if (live) {
+    if (!msg.sid) return;
+    if (!p.live[msg.sid]) p.live[msg.sid] = Object.assign({}, stroke, { pts: [] });
+    p.live[msg.sid].pts = p.live[msg.sid].pts.concat(msg.pts).slice(-1024);
+  } else {
+    if (msg.sid) delete p.live[msg.sid];
+    if (!msg.sid || !p.strokes.some(st => st.sid === msg.sid)) p.strokes.push(stroke);
+  }
+  if (state.current === p.id) redrawStrokes();
+}
+function navigate(delta) {
+  const next = state.order.indexOf(state.current) + delta;
+  if (next >= 0 && next < state.order.length) gotoPhoto(state.order[next], true);
+}
+$('prev').onclick = () => navigate(-1); $('next').onclick = () => navigate(1);
+let swipe = null;
+$('viewer').addEventListener('pointerdown', e => {
+  if (e.target === $('sharedVideo') || (e.target === $('drawCanvas') && state.drawMode)) return;
+  swipe = { x: e.clientX, y: e.clientY, time: Date.now(), id: e.pointerId };
+});
+$('viewer').addEventListener('pointerup', e => {
+  const start = swipe; swipe = null; if (!start || e.pointerId !== start.id) return;
+  const dx = e.clientX - start.x, dy = e.clientY - start.y;
+  if (Math.abs(dx) >= 60 && Math.abs(dy) < 50 && Date.now() - start.time < 700) navigate(dx < 0 ? 1 : -1);
+});
+$('viewer').addEventListener('pointercancel', () => { swipe = null; });
 
-/* Xử lý window resize (xoay màn hình) */
-window.addEventListener('resize', () => { sizeCanvas(); redrawStrokes(); });
-
-/* gọi dọn URL blobs khi app bị đóng */
-window.cleanUpImsDcObjects = function () {
-  Object.values(state.photos).forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
-  state.photos = {}; state.order = []; state.current = null;
+window.receiveData = function(data) {
+  if (state.closed) return;
+  try {
+    if (typeof data === 'string' && data.startsWith('PSHARE:')) {
+      const parts = data.split(':'); onPshare(parts[1], parts.slice(2).join(':')); return;
+    }
+    const msg = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!msg) return;
+    switch (msg.t) {
+      case 'offer': onOffer(msg); break;
+      case 'fetch': onFetch(msg); break;
+      case 'begin': {
+        const p = state.photos[msg.id]; if (p) { p.mime = msg.mime || p.mime; p.w = msg.w || p.w; p.h = msg.h || p.h; }
+        break;
+      }
+      case 'stored': onStored(msg); break;
+      case 'done': setStatus('Đã gửi xong'); break;
+      case 'goto': onRemoteGoto(msg); break;
+      case 'ink': onRemoteStroke(msg, true); break;
+      case 'stroke': onRemoteStroke(msg, false); break;
+      case 'ink-cancel': { const p = state.photos[msg.id]; if (p) { delete p.live[msg.sid]; redrawStrokes(); } break; }
+      case 'clear': {
+        const p = state.photos[msg.id]; if (p) { if (activeStroke && activeStroke.id === p.id) cancelStroke(); p.strokes = []; p.live = {}; redrawStrokes(); }
+        break;
+      }
+      case 'transfer-error': {
+        const p = state.photos[msg.id]; if (p) { p.fetching = false; clearTimeout(p.fetchTimer); }
+        if (state.current === msg.id) { showLoader(false); toast('Gửi tệp thất bại. Chọn lại để thử.'); }
+        break;
+      }
+    }
+  } catch (e) { console.warn('[PhotoShare] Invalid message', e); }
+};
+window.addEventListener('load', () => {
+  setStatus('Sẵn sàng'); updateDrawTools();
+  if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) window.ImsDcBridge.createDataChannel('photo-share');
+});
+window.addEventListener('resize', sizeCanvas);
+if (window.ResizeObserver) new ResizeObserver(sizeCanvas).observe($('viewer'));
+window.cleanUpImsDcObjects = function() {
+  state.closed = true; activeStroke = null; mediaEpoch++;
+  $('sharedVideo').pause(); $('sharedVideo').removeAttribute('src'); $('sharedVideo').load();
+  Object.values(state.photos).forEach(p => { clearTimeout(p.fetchTimer); if (p.url && p.url.startsWith('blob:')) URL.revokeObjectURL(p.url); });
+  clearTimeout(toastTimer); state.photos = {}; state.order = []; state.current = null;
 };
 </script>
 </body>

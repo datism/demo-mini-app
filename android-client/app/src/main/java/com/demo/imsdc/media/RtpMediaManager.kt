@@ -298,6 +298,30 @@ class RtpMediaManager(
         }
     }
 
+    /** A document picker can interrupt Android audio routing and destroy the decoder surface. */
+    @Synchronized
+    fun resumeAfterInterruption() {
+        if (!isRunning) return
+        try {
+            if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) audioRecord?.startRecording()
+            if (audioTrack?.playState != AudioTrack.PLAYSTATE_PLAYING) audioTrack?.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "Restoring call audio after picker: ${e.message}")
+        }
+        if (audioSenderThread?.isAlive != true) {
+            try { audioRecord?.release() } catch (_: Exception) {}
+            audioRecord = null
+            startAudioSender()
+        }
+        if (audioReceiverThread?.isAlive != true) {
+            try { audioTrack?.release() } catch (_: Exception) {}
+            audioTrack = null
+            startAudioReceiver()
+        }
+        forceKeyframe()
+        videoSocket?.let { sendKeyframeRequest(it) }
+    }
+
     @Synchronized
     fun onSurfaceDestroyed() {
         Log.i(TAG, "Surface destroyed, releasing video decoder safely")
