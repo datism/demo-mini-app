@@ -166,22 +166,25 @@ class CallActivity : AppCompatActivity() {
     // ─── Photo picker for <input type="file"> inside mini-apps (photo-share) ───
     // WebView shows nothing for a file input unless WebChromeClient.onShowFileChooser opens a chooser.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
-    private val photoPicker = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    private val mediaPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
         fileChooserCallback = null
     }
 
-    /** Opens the system image picker; the chosen URIs are handed back to the WebView's file input. */
+    /** Opens Android's visual media picker (gallery) for images and videos. */
     fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>): Boolean {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
         fileChooserCallback = callback
         return try {
-            photoPicker.launch("image/*")
+            val request = androidx.activity.result.PickVisualMediaRequest.Builder()
+                .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                .build()
+            mediaPicker.launch(request)
             true
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Cannot open photo picker: ${e.message}", e)
+            android.util.Log.e(TAG, "Cannot open visual media picker: ${e.message}", e)
             fileChooserCallback = null
             callback.onReceiveValue(null)
             false
@@ -395,9 +398,9 @@ class CallActivity : AppCompatActivity() {
         @Suppress("DEPRECATION")
         window.addFlags(
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
     }
 
@@ -476,7 +479,7 @@ class CallActivity : AppCompatActivity() {
         if (!isIncoming) {
             IncomingCallNotificationManager.dismiss(this)
         }
-        
+
         // Prevent accidental Back button from killing CallActivity (and the call)
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -633,7 +636,7 @@ class CallActivity : AppCompatActivity() {
         binding.tvBigAvatar.text = initial
         binding.tvBigName.text = remoteUser
         startAvatarPulse()
-        
+
         // Setup background placeholder & details defaults
         binding.viewBackgroundPlaceholder.visibility = View.VISIBLE
         binding.layoutMiddleDetails.visibility = View.GONE
@@ -709,7 +712,7 @@ class CallActivity : AppCompatActivity() {
             eglBase = org.webrtc.EglBase.create()
         }
         val eglContext = eglBase!!.eglBaseContext
-        
+
         binding.remoteVideoView.visibility = View.GONE
 
         if (!isRendererInitialized) {
@@ -735,7 +738,7 @@ class CallActivity : AppCompatActivity() {
 
         // Hiển thị WebView chỉ sau khi Mini-app load xong
         binding.webviewMiniapp.visibility = View.INVISIBLE
-        
+
         setupDraggableLocalVideo()
     }
 
@@ -755,8 +758,6 @@ class CallActivity : AppCompatActivity() {
         binding.localVideoView.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
-                    // Caro shows my camera as a fixed tile next to the other person's video.
-                    if (currentAppId == "caro") return@setOnTouchListener false
                     // Đảm bảo video view luôn ở trên cùng ngay khi bắt đầu chạm,
                     // phòng trường hợp WebView được bringToFront lại sau khi load page.
                     binding.localVideoView.bringToFront()
@@ -1041,7 +1042,7 @@ class CallActivity : AppCompatActivity() {
                         Log.i(TAG, "Re-INVITE: ADC port=0 detected but reqApp=$reqApp present, keeping app")
                     }
                     sipManager.activeReqAppId = reqApp
-                    
+
                     // Always close existing ADC connection first to isolate sessions
                     webRtcManager.closeADC()
                     if (reqApp != "operator-menu") {
@@ -1061,7 +1062,7 @@ class CallActivity : AppCompatActivity() {
 
                     val sdpAnswer = webRtcManager.createAnswer()
                     sipManager.sendOkAnswer(rawMsg, sdpAnswer)
-                    
+
                     withContext(Dispatchers.Main) {
                         Log.i(TAG, "? Re-INVITE auto-answered successfully")
                         Log.i(TAG, "Re-INVITE requested app: $reqApp")
@@ -1137,7 +1138,7 @@ class CallActivity : AppCompatActivity() {
 
         imsDcSdk = com.demo.imsdc.webrtc.ImsDcSdk(this, binding.webviewMiniapp, webRtcManager, dcManager)
         dcManager.imsDcSdk = imsDcSdk
-        
+
         webRtcManager.onRemoteDataChannelMessage = { data ->
             dcManager.handleAdcMessage(data)
         }
@@ -1182,8 +1183,8 @@ class CallActivity : AppCompatActivity() {
                 }
                 val currentReqApp = when {
                     sipManager.activeReqAppId?.contains("0003210000000038") == true ||
-                    sipManager.activeReqAppId?.contains("tuyaapp") == true ||
-                    sipManager.activeReqAppId?.contains("sketch-sync-app") == true -> "sketch-sync-app"
+                            sipManager.activeReqAppId?.contains("tuyaapp") == true ||
+                            sipManager.activeReqAppId?.contains("sketch-sync-app") == true -> "sketch-sync-app"
                     sipManager.activeReqAppId?.contains("operator-menu") == true -> "operator-menu"
                     else -> sipManager.activeReqAppId
                 }
@@ -1313,7 +1314,7 @@ class CallActivity : AppCompatActivity() {
 
     private fun handleSdpAnswer(sdpAnswer: String, toHeaderVal: String, rawSdp: String) {
         Log.i(TAG, "Setting remote SDP answer (anchored by Erlang to MF)...")
-        
+
         // C?u hnh d?a ch? dch cho RTP t? raw SIP SDP
         val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
@@ -1322,9 +1323,9 @@ class CallActivity : AppCompatActivity() {
             try {
                 webRtcManager.setRemoteAnswer(sdpAnswer)
                 Log.i(TAG, "? Remote answer set  sending ACK (no SDP)")
-                
+
                 sipManager.sendAck(toHeaderVal)
-                
+
                 withContext(Dispatchers.Main) {
                     showCallActiveUi()
                     imsDcSdk.handleRemoteSdp(sdpAnswer, callId = callId)
@@ -1397,10 +1398,10 @@ class CallActivity : AppCompatActivity() {
                         webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
                     }
                     val localOffer = webRtcManager.createOffer()
-                    
+
                     sipManager.onAckWithSdp = { remoteSdpAnswer, rawSdpAnswer ->
                         Log.i(TAG, "B (Delayed Offer): ACK received, setting remote answer...")
-                        
+
                         // C?u h�nh d?a ch? d�ch cho RTP t? raw SIP SDP
                         val (ip, aPort, vPort) = parseRemoteSdp(rawSdpAnswer)
                         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
@@ -1482,7 +1483,7 @@ class CallActivity : AppCompatActivity() {
                 binding.tvCallStatus.text = "🟢 Cuộc gọi thoại & video đã kết nối"
             }
             startCallTimer()
-            
+
             // Hide gradient placeholder & middle avatar details
             binding.viewBackgroundPlaceholder.visibility = View.GONE
             binding.layoutMiddleDetails.visibility = View.GONE
@@ -1514,7 +1515,7 @@ class CallActivity : AppCompatActivity() {
             } else {
                 Log.i(TAG, "showCallActiveUi already initialized, active app=$currentAppId - preserving active mini-app")
             }
-            
+
             // Start RTP audio/video streaming
             val surface = binding.remoteVideoView.holder.surface
             if (surface != null && surface.isValid) {
@@ -1524,7 +1525,7 @@ class CallActivity : AppCompatActivity() {
                 Log.i(TAG, "Starting RTP audio first, waiting for remote video surface callback...")
                 rtpMediaManager?.start(webRtcManager.localVideoTrack, null)
             }
-            
+
             binding.remoteVideoView.holder.addCallback(object : SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: SurfaceHolder) {
                     Log.i(TAG, "remoteVideoView surface created, updating RTP media decoder surface now")
@@ -1719,7 +1720,7 @@ class CallActivity : AppCompatActivity() {
         var ip = sipServer // M?c d?nh l� IP c?a SIP Server
         var audioPort = 40002
         var videoPort = 40004
-        
+
         val lines = sdp.replace("\r", "").split("\n")
         var currentMedia = ""
         for (line in lines) {
@@ -1759,11 +1760,11 @@ class CallActivity : AppCompatActivity() {
     private fun toggleCallHold() {
         val nextHoldState = !sipManager.isCallHoldActive
         sipManager.isCallHoldActive = nextHoldState
-        
+
         setCallButtonOn(binding.btnKeypadCircle, nextHoldState)
-        
+
         Toast.makeText(this, if (nextHoldState) "\u0110ang gi\u1eef cu\u1ed9c g\u1ecdi..." else "\u0110ang kh\u00f4i ph\u1ee5c cu\u1ed9c g\u1ecdi...", Toast.LENGTH_SHORT).show()
-        
+
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 binding.tvCallStatus.text = if (nextHoldState) "\u23f8\ufe0f \u0110ang gi\u1eef" else "\u2705 \u0110\u00e3 k\u1ebft n\u1ed1i"
@@ -1778,7 +1779,7 @@ class CallActivity : AppCompatActivity() {
     }
 
 
-    
+
     // Messenger-style toggle: white circle with a dark icon when on, translucent with a white icon when off.
     private fun setCallButtonOn(btn: android.widget.ImageView, on: Boolean) {
         btn.backgroundTintList = android.content.res.ColorStateList.valueOf(

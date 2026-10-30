@@ -24,8 +24,11 @@
     #imgCanvasWrap { position: absolute; top: 0; bottom: 0; left: 0; right: 0;
                      display: flex; align-items: center; justify-content: center; }
     /* Kích thước do sizeCanvas() tính (fit vào #viewer) — max-width/height % không hoạt động vì #stage co theo ảnh. */
-    #photoImg { object-fit: contain; user-select: none;
-                -webkit-user-drag: none; }
+    #photoImg, #photoVideo { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+    #photoImg { -webkit-user-drag: none; }
+    #photoVideo { width: 90vw; max-height: calc(100vh - 150px); background: #000; }
+    #strip .video-thumb { flex: 0 0 auto; width: 78px; height: 78px; border-radius: 8px; border: 2px solid #30363d; background: #161b22; display:flex; align-items:center; justify-content:center; font-size:26px; }
+    #strip .video-thumb.active { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.4); }
     #drawCanvas { position: absolute; inset: 0; display: block; pointer-events: none; touch-action: none; }
 
     /* ── Loading spinner ── */
@@ -73,16 +76,17 @@
 
 <div id="header">
   <div>
-    <div class="title">📷 Chia sẻ ảnh</div>
+    <div class="title">📷 Chia sẻ ảnh và video</div>
     <div class="status" id="statusText">Đang kết nối...</div>
   </div>
-  <button id="btnPick">＋ Chọn ảnh</button>
+  <button id="btnPick">＋ Chọn media</button>
 </div>
 
 <div id="viewer">
   <div id="imgCanvasWrap">
     <div style="position:relative; display:inline-block;" id="stage">
       <img id="photoImg" alt="" style="display:none">
+      <video id="photoVideo" controls playsinline preload="metadata" style="display:none"></video>
       <canvas id="drawCanvas"></canvas>
     </div>
   </div>
@@ -105,7 +109,7 @@
 <div id="strip"></div>
 <div id="toast"></div>
 
-<input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+<input type="file" id="fileInput" accept="image/*,video/mp4" multiple style="display:none">
 
 <script>
   'use strict';
@@ -164,19 +168,28 @@
     const strip = $('strip'); strip.innerHTML = '';
     state.order.forEach(id => {
       const p = state.photos[id];
-      const img = document.createElement('img');
-      img.className = 'thumb' + (id === state.current ? ' active' : '');
-      if (p.thumbUrl) img.src = p.thumbUrl;
-      img.onclick = () => gotoPhoto(id, true);
-      strip.appendChild(img);
+      const thumb = p.kind === 'video' ? document.createElement('div') : document.createElement('img');
+      thumb.className = (p.kind === 'video' ? 'video-thumb' : 'thumb') + (id === state.current ? ' active' : '');
+      if (p.kind === 'video') thumb.textContent = '▶';
+      else if (p.thumbUrl) thumb.src = p.thumbUrl;
+      thumb.onclick = () => gotoPhoto(id, true);
+      strip.appendChild(thumb);
     });
   }
 
   /* ─────────────── Hiển thị ảnh ─────────────── */
   function showPhoto(p) {
     $('empty').style.display = 'none';
-    const img = $('photoImg');
-    // Ảnh mới (thumb -> full, hoặc ảnh khác) đổi kích thước tự nhiên: fit lại khi tải xong.
+    const img = $('photoImg'), video = $('photoVideo');
+    if (p.kind === 'video') {
+      img.style.display = 'none';
+      $('drawCanvas').style.display = 'none';
+      video.style.display = 'block';
+      if (video.src !== p.url) { video.pause(); video.src = p.url; video.load(); }
+      return;
+    }
+    video.pause(); video.removeAttribute('src'); video.style.display = 'none';
+    $('drawCanvas').style.display = 'block';
     img.onload = () => { sizeCanvas(); redrawStrokes(); };
     img.src = p.url; img.style.display = 'block';
     requestAnimationFrame(() => { sizeCanvas(); redrawStrokes(); });
@@ -184,7 +197,7 @@
 
   function sizeCanvas() {
     const img = $('photoImg'); const c = $('drawCanvas');
-    if (!img.naturalWidth) return;
+    if (!img.naturalWidth || state.photos[state.current]?.kind === 'video') return;
     // Fit (contain) vào #viewer: cả thumb 256px lẫn ảnh 1920px đều hiện đúng khung, hai bên giống nhau.
     const viewer = $('viewer');
     if (!viewer.clientWidth || !viewer.clientHeight) return;
@@ -257,7 +270,7 @@
   function onRemoteGoto(msg) {
     if (typeof msg.seq === 'number' && msg.seq <= state.gotSeqMax) return; // LWW drop
     state.gotSeqMax = msg.seq || 0;
-    if (!state.photos[msg.id]) { toast('Đối phương đang xem một ảnh chưa tải về'); return; }
+    if (!state.photos[msg.id]) { toast('Đối phương đang xem media chưa tải về'); return; }
     gotoPhoto(msg.id, false);
   }
 
@@ -268,12 +281,12 @@
     p.fetching = true;
     if (p.local) {
       // ảnh của chính máy mình — có sẵn qua /media/
-      p.ready = true; p.url = window.AndroidBridge ? window.AndroidBridge.mediaUrl(id, false) : '';
+      p.ready = true; p.url = window.AndroidBridge ? (p.kind === 'video' ? window.AndroidBridge.videoUrl(id) : window.AndroidBridge.mediaUrl(id, false)) : '';
       if (state.current === id) showPhoto(p);
       p.fetching = false;
       return;
     }
-    showLoader(0, 'Đang nhận ảnh...');
+    showLoader(0, p.kind === 'video' ? 'Đang nhận video...' : 'Đang nhận ảnh...');
     sendJson({ t: 'fetch', id: id });
     // Local thumb hiển thị tạm trong lúc chờ full
     if (p.thumbUrl && state.current === id) showPhoto({ url: p.thumbUrl });
@@ -292,7 +305,7 @@
     p.chunks = msg.chunks; p.chunksGot = 0; p.sha256 = msg.sha256;
   }
 
-  /** Frame binary đã ghép xong phía native: "PSHARE:<idHash>:<base64-JPEG>" */
+  /** Frame media đã ghép xong phía native: "PSHARE:<idHash>:<base64>" */
   function onPshare(idHash, b64) {
     // quy idHash → id qua bảng photos
     const id = Object.keys(state.photos).find(
@@ -304,17 +317,18 @@
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (p.url) URL.revokeObjectURL(p.url);
-    p.url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+    p.url = URL.createObjectURL(new Blob([bytes], { type: p.mimeType || 'image/jpeg' }));
     p.ready = true; p.fetching = false;
     showLoader(null);
     if (state.current === id) showPhoto(p);
     sendJson({ t: 'done', id: id, ok: true });
-    toast('📸 Đã nhận ảnh');
+    toast(p.kind === 'video' ? '🎬 Đã nhận video' : '📸 Đã nhận ảnh');
   }
   function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return h & 0xffff; }
 
   /* ─────────────── Chọn ảnh (máy mình là nguồn) ─────────────── */
   $('btnPick').onclick = () => $('fileInput').click();
+  const MAX_VIDEO_BYTES = 6 * 1024 * 1024; // Bản đơn giản: giới hạn video 6 MiB vì payload đi qua JS bridge/base64.
 
   function blobToB64(blob) {
     return new Promise((resolve, reject) => {
@@ -346,41 +360,68 @@
     const files = Array.from($('fileInput').files || []);
     $('fileInput').value = ''; // cho phép chọn lại đúng ảnh đó lần sau
     if (!files.length) return;
-    if (!window.AndroidBridge || !window.AndroidBridge.importPhoto) {
-      toast('Thiết bị không hỗ trợ chọn ảnh'); return;
+    if (!window.AndroidBridge) {
+      toast('Không tìm thấy AndroidBridge'); return;
     }
+    toast('Đã chọn ' + files.length + ' tệp, đang xử lý...');
     const offered = [];
     for (let i = 0; i < files.length; i++) {
-      const id = 'p' + Date.now() + '_' + i;
-      // WebView <input type=file> trả File object. Thu nhỏ ngay trong trang (canvas, cạnh dài 1920, JPEG):
+      const file = files[i];
+      const fileName = (file.name || '').toLowerCase();
+      // Some Android document providers return an empty or generic MIME type; use extension as fallback.
+      const isVideo = file.type.startsWith('video/') || fileName.endsWith('.mp4');
+      const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(fileName);
+      if (!isVideo && !isImage) { toast('Không nhận diện được định dạng: ' + (file.name || file.type || 'unknown')); continue; }
+      if (isVideo && fileName && !fileName.endsWith('.mp4')) { toast('Hiện chỉ hỗ trợ video MP4'); continue; }
+      if (isVideo && file.size > MAX_VIDEO_BYTES) { toast('Video vượt quá giới hạn 6 MiB'); continue; }
+      const kind = isVideo ? 'video' : 'image';
+      const mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
+      const id = (isVideo ? 'v' : 'p') + Date.now() + '_' + i;
+      // WebView <input type=file> trả File object. Thu nhỏ ảnh trong trang (canvas, cạnh dài 1920, JPEG):
       // ảnh 12-50 MP dạng base64 qua JS bridge nặng hàng chục MB và làm treo cả app.
       let b64;
-      try { b64 = await fileToJpegB64(files[i]); }
-      catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); continue; }
-      const res = JSON.parse(window.AndroidBridge.importPhotoB64 ?
-          window.AndroidBridge.importPhotoB64(JSON.stringify({ id: id, data: b64, type: 'image/jpeg' })) :
-          JSON.stringify({ ok: false, error: 'importPhotoB64_missing' }));
+      try { b64 = isVideo ? await blobToB64(file) : await fileToJpegB64(file); }
+      catch (e) { toast('Không đọc được media: ' + (e && e.message || e)); continue; }
+      const requiredImportMethod = isVideo ? window.AndroidBridge.importVideoB64 : window.AndroidBridge.importPhotoB64;
+      if (typeof requiredImportMethod !== 'function') {
+        toast('AndroidBridge chưa có hàm import ' + kind);
+        continue;
+      }
+      let res;
+      try {
+        const payload = JSON.stringify({ id: id, data: b64, type: mimeType });
+        // Call directly on the injected object. Detaching a @JavascriptInterface method
+        // into a local variable makes WebView reject it as a non-injected object.
+        const rawResult = isVideo
+          ? window.AndroidBridge.importVideoB64(payload)
+          : window.AndroidBridge.importPhotoB64(payload);
+        res = JSON.parse(rawResult || '{}');
+      } catch (e) {
+        toast('Lỗi khi gửi tệp sang Android: ' + (e && e.message || e));
+        continue;
+      }
       if (res.ok) {
         state.photos[id] = {
-          id, w: 0, h: 0, bytes: res.bytes, local: true, ready: true,
-          url: window.AndroidBridge.mediaUrl(id, false),
-          thumbUrl: window.AndroidBridge.mediaUrl(id, true),
+          id, kind, mimeType, w: 0, h: 0, bytes: res.bytes, local: true, ready: true,
+          url: isVideo ? window.AndroidBridge.videoUrl(id) : window.AndroidBridge.mediaUrl(id, false),
+          thumbUrl: isVideo ? '' : window.AndroidBridge.mediaUrl(id, true),
           strokes: [],
         };
         state.order.push(id);
-        offered.push({ id: id, bytes: res.bytes, thumb: window.AndroidBridge.mediaUrl(id, true).slice() });
+        offered.push({ id, bytes: res.bytes, kind, mimeType, thumb: isVideo ? '' : await thumbB64Of(id) });
       } else {
-        toast('Không nhập được ảnh: ' + (res.error || '?'));
+        toast('Không nhập được media: ' + (res.error || '?'));
       }
     }
     renderStrip();
     if (offered.length) {
       gotoPhoto(offered[0].id, true);
-      setStatus('Đã chia sẻ ' + offered.length + ' ảnh');
+      setStatus('Đã chia sẻ ' + offered.length + ' media');
+      toast('Đã chia sẻ ' + offered.length + ' media');
       // Thumb base64 kèm theo offer — phía nhận hiện strip ngay không cần fetch full.
       const photosPayload = [];
       for (const o of offered) {
-        photosPayload.push({ id: o.id, bytes: o.bytes, thumb: await thumbB64Of(o.id) });
+        photosPayload.push({ id: o.id, bytes: o.bytes, kind: o.kind, mimeType: o.mimeType, thumb: o.thumb });
       }
       sendJson({ t: 'offer', photos: photosPayload });
     }
@@ -410,13 +451,13 @@
         thumbUrl = ph.thumb.startsWith('data:') ? ph.thumb : 'data:image/jpeg;base64,' + ph.thumb;
       }
       state.photos[ph.id] = {
-        id: ph.id, bytes: ph.bytes, ready: false, strokes: [],
-        thumbUrl: thumbUrl,
+        id: ph.id, kind: ph.kind || 'image', mimeType: ph.mimeType || 'image/jpeg',
+        bytes: ph.bytes, ready: false, strokes: [], thumbUrl: thumbUrl,
       };
       state.order.push(ph.id);
     });
     renderStrip();
-    toast('📨 Đối phương chia sẻ ' + msg.photos.length + ' ảnh');
+    toast('📨 Đối phương chia sẻ ' + msg.photos.length + ' media');
     if (!state.current && msg.photos.length) gotoPhoto(msg.photos[0].id, false);
   }
 
@@ -424,14 +465,19 @@
   function onFetch(msg) {
     const p = state.photos[msg.id];
     if (!p || !p.local || !window.AndroidBridge) return;
-    const res = JSON.parse(window.AndroidBridge.sendPhoto(JSON.stringify({ id: msg.id })));
+    const payload = JSON.stringify({ id: msg.id });
+    const rawResult = p.kind === 'video'
+      ? window.AndroidBridge.sendVideo(payload)
+      : window.AndroidBridge.sendPhoto(payload);
+    const res = JSON.parse(rawResult || '{}');
     if (res.ok) {
-      sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes });
+      sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes, kind: p.kind, mimeType: p.mimeType });
     }
   }
 
   /* ═══════════════ Vẽ trên ảnh ═══════════════ */
   $('btnDraw').onclick = () => {
+    if (state.photos[state.current]?.kind === 'video') { toast('Không thể vẽ lên video'); return; }
     state.paletteOpen = !state.paletteOpen;
     $('btnDraw').classList.toggle('active', state.paletteOpen);
     document.querySelectorAll('#drawBar .palette-item').forEach(item => {

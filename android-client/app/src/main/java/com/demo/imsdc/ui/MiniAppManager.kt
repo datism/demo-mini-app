@@ -79,7 +79,7 @@ class MiniAppManager(val activity: CallActivity) {
                 val url = request?.url ?: return null
                 val host = url.host
                 val path = url.path ?: ""
-                
+
                 if (host == "miniapp") {
                     // Return empty response for favicon.ico to avoid WebView errors
                     if (path == "/favicon.ico") {
@@ -106,6 +106,7 @@ class MiniAppManager(val activity: CallActivity) {
                         val mime = when {
                             mediaName.endsWith(".jpg") || mediaName.endsWith(".jpeg") -> "image/jpeg"
                             mediaName.endsWith(".png") -> "image/png"
+                            mediaName.endsWith(".mp4") -> "video/mp4"
                             else -> "application/octet-stream"
                         }
                         if (mediaFile.exists() && mediaFile.isFile) {
@@ -131,11 +132,11 @@ class MiniAppManager(val activity: CallActivity) {
                             }
                             conn.connectTimeout = 3000
                             conn.readTimeout = 3000
-                            
+
                             val responseCode = conn.responseCode
                             val mimeType = conn.contentType?.split(";")?.firstOrNull()?.trim() ?: "application/json"
                             val encoding = conn.contentEncoding ?: "UTF-8"
-                            
+
                             val headers = conn.headerFields.entries.filter { it.key != null }.associate { it.key to it.value.joinToString(",") }
                             val stream = if (responseCode >= 400) conn.errorStream else conn.inputStream
                             Log.i(TAG, "Proxy response code: $responseCode, mimeType: $mimeType")
@@ -149,14 +150,14 @@ class MiniAppManager(val activity: CallActivity) {
                             )
                         }
                     }
-                    
+
                     val relPath = if (path.startsWith("/")) path.substring(1) else path
                     val file = if (relPath.isEmpty() || relPath == "index.html") {
                         java.io.File(cachedAppDir, "index.html")
                     } else {
                         java.io.File(cachedAppDir, relPath)
                     }
-                    
+
                     if (file.exists() && file.isFile) {
                         // Strict MIME verification for intercepted resources (GSMA TS.66)
                         if (file.name.endsWith(".js") || file.name.endsWith(".css")) {
@@ -253,7 +254,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
                 activity.binding.webviewMiniapp.bringToFront()
                 val isEnterpriseOrSmart = activity.currentAppId == "enterprise-callerid" || activity.currentAppId == "smart-menu" || url?.contains("enterprise-callerid") == true || url?.contains("smart-menu") == true ||
-                    activity.currentAppId == "flight-booking" || url?.contains("flight-booking") == true
+                        activity.currentAppId == "flight-booking" || url?.contains("flight-booking") == true
                 if (isEnterpriseOrSmart) {
                     activity.binding.localVideoView.visibility = View.GONE
                 } else {
@@ -268,8 +269,8 @@ class MiniAppManager(val activity: CallActivity) {
 
                 // Fix race condition: dataChannelNotify may have fired before JS was loaded.
                 // Only re-send for actual mini-app pages (TuYaApp), not operator-menu.
-                val isTuYaApp = url?.contains("tuyaapp") == true || 
-                    (activity.currentAppId.contains("0003210000000038") || activity.currentAppId.contains("tuyaapp") || activity.currentAppId.contains("sketch-sync"))
+                val isTuYaApp = url?.contains("tuyaapp") == true ||
+                        (activity.currentAppId.contains("0003210000000038") || activity.currentAppId.contains("tuyaapp") || activity.currentAppId.contains("sketch-sync"))
                 if (isTuYaApp) {
                     Log.i(TAG, "TuYaApp page finished loading, scheduling dataChannelNotify re-send")
                     // Use longer delay (500ms) to ensure GSMA bridge JS is fully initialized
@@ -319,16 +320,7 @@ class MiniAppManager(val activity: CallActivity) {
         val full = appId == "flight-booking"
         val lp = b.webviewMiniapp.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-        val videoTiles = appId == "caro"
-        applyVideoTiles(videoTiles)
-        if (videoTiles) {
-            // Caro: both faces side by side at the top, the game in the rest of the screen above the controls.
-            lp.topToTop = unset
-            lp.topToBottom = b.localVideoView.id
-            lp.topMargin = dp(TILE_GAP_DP)
-            lp.bottomToTop = b.layoutBottomControls.id
-            lp.bottomToBottom = unset
-        } else if (full) {
+        if (full) {
             // Leave room for the status bar, and for the exit button when it is shown.
             val topDp = if (CallActivity.hotlineApp(activity.remoteUser) != null) 40 else 72
             lp.topToBottom = unset
@@ -343,62 +335,6 @@ class MiniAppManager(val activity: CallActivity) {
         }
         b.webviewMiniapp.layoutParams = lp
         b.layoutTopBar.visibility = if (full) View.INVISIBLE else View.VISIBLE
-    }
-
-    private val TILE_GAP_DP = 4
-    private val TILE_SIDE_MARGIN_DP = 8
-
-    private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
-
-    // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
-    // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
-    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left.
-    private fun applyVideoTiles(enabled: Boolean) {
-        val b = activity.binding
-        val local = b.localVideoView
-        val remote = b.remoteVideoView
-        val localLp = local.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
-        val remoteLp = remote.layoutParams as android.widget.FrameLayout.LayoutParams
-
-        // Undo any drag of my camera box (the drag handler moves it with translation).
-        local.translationX = 0f
-        local.translationY = 0f
-
-        if (enabled) {
-            val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
-            val tileW = (screenW - 2 * dp(TILE_SIDE_MARGIN_DP) - dp(TILE_GAP_DP)) / 2
-            val tileH = tileW * 4 / 3
-            localLp.width = tileW
-            localLp.height = tileH
-            localLp.setMargins(dp(TILE_SIDE_MARGIN_DP), dp(TILE_GAP_DP), 0, 0)
-            local.layoutParams = localLp
-            local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-
-            // The remote view lives in a full-screen FrameLayout, so place it by margins: below the
-            // top bar, level with my tile, to its right.
-            fun placeRemote() {
-                remoteLp.width = tileW
-                remoteLp.height = tileH
-                remoteLp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-                remoteLp.leftMargin = dp(TILE_SIDE_MARGIN_DP) + tileW + dp(TILE_GAP_DP)
-                remoteLp.topMargin = b.layoutTopBar.bottom + dp(TILE_GAP_DP)
-                remote.layoutParams = remoteLp
-            }
-            if (b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
-        } else {
-            localLp.width = dp(90)
-            localLp.height = dp(125)
-            localLp.setMargins(dp(16), dp(16), dp(16), dp(16))
-            local.layoutParams = localLp
-            local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
-
-            remoteLp.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            remoteLp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            remoteLp.gravity = android.view.Gravity.NO_GRAVITY
-            remoteLp.leftMargin = 0
-            remoteLp.topMargin = 0
-            remote.layoutParams = remoteLp
-        }
     }
 
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {
@@ -424,11 +360,11 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.dcManager.targetAppId = "operator-menu"
                 activity.binding.btnExitMiniapp.visibility = View.GONE
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
-                
+
                 if (sendRemoteTrigger) {
                     triggerAppNegotiationReInvite("operator-menu")
                 }
-                
+
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
                 activity.binding.webviewMiniapp.visibility = View.VISIBLE
                 activity.binding.webviewMiniapp.bringToFront()
@@ -483,7 +419,7 @@ class MiniAppManager(val activity: CallActivity) {
             }
             activity.binding.layoutTopBar.bringToFront()
             activity.binding.btnExitMiniapp.bringToFront()
-            
+
             // 1. Gửi tin nhắn điều khiển P2P qua ADC (Stream 1000) để bảo đầu kia mở ứng dụng
             if (sendRemoteTrigger) {
                 val adc = activity.webRtcManager.adcChannel
@@ -495,11 +431,11 @@ class MiniAppManager(val activity: CallActivity) {
                     Log.i(TAG, "Sent JSON LAUNCH_APP via ADC: $msg")
                 }
             }
-            
+
             // 2. Load cached app if available, otherwise asset (bundled in APK)
             val cachedAppDir = java.io.File(activity.cacheDir, "miniapps/$targetId")
             val localIndex = java.io.File(cachedAppDir, "index.html")
-            
+
             Log.i(TAG, "Loading mini-app: https://miniapp/index.html (cached=${localIndex.exists()})")
             activity.binding.webviewMiniapp.loadUrl("https://miniapp/index.html")
 
@@ -509,7 +445,7 @@ class MiniAppManager(val activity: CallActivity) {
             // 4. Send BDC request with ETag
             val prefs = activity.getSharedPreferences("miniapps_etag", android.content.Context.MODE_PRIVATE)
             val savedEtag = if (localIndex.exists()) prefs.getString(targetId, "") else ""
-            
+
             Log.i(TAG, "Sending BDC request for appId=$targetId (If-None-Match: $savedEtag)")
             activity.dcManager.sendAppRequest(targetId, savedEtag ?: "")
 
