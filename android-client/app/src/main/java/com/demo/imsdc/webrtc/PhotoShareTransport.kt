@@ -109,8 +109,19 @@ class PhotoShareTransport(
      * Đưa ảnh vào hàng đợi stream. Trả về totalChunks (đã tính sẵn) để caller
      * có thể bắn msg JSON "begin" trước/sau khi gọi hàm này.
      */
-    fun enqueueFile(context: Context, photoId: String, onDone: ((Boolean) -> Unit)? = null): Int? {
-        val file = File(File(context.cacheDir, STORE_DIR), "$photoId.jpg")
+    fun enqueueFile(context: Context, photoId: String, onDone: ((Boolean) -> Unit)? = null): Int? =
+        enqueueMediaFile(context, photoId, isVideo = false, onDone = onDone)
+
+    fun enqueueVideoFile(context: Context, mediaId: String, onDone: ((Boolean) -> Unit)? = null): Int? =
+        enqueueMediaFile(context, mediaId, isVideo = true, onDone = onDone)
+
+    private fun enqueueMediaFile(
+        context: Context,
+        mediaId: String,
+        isVideo: Boolean,
+        onDone: ((Boolean) -> Unit)?
+    ): Int? {
+        val file = fileForMedia(context, mediaId, isVideo)
         if (!file.exists()) {
             Log.w(TAG, "enqueueFile: not found ${file.absolutePath}")
             return null
@@ -120,7 +131,7 @@ class PhotoShareTransport(
             Log.w(TAG, "enqueueFile: invalid chunk count $total for ${file.length()} bytes")
             return null
         }
-        sendQueue.trySend(SendJob(photoId, file, total, onDone))
+        sendQueue.trySend(SendJob(mediaId, file, total, onDone))
         ensureSendWorker()
         return total
     }
@@ -440,6 +451,21 @@ class PhotoShareTransport(
 
     fun fileFor(context: Context, photoId: String, thumb: Boolean = false): File =
         File(File(context.cacheDir, STORE_DIR), if (thumb) "${photoId}_t.jpg" else "$photoId.jpg")
+
+    fun fileForMedia(context: Context, mediaId: String, isVideo: Boolean): File =
+        File(File(context.cacheDir, STORE_DIR), if (isVideo) "$mediaId.mp4" else "$mediaId.jpg")
+
+    fun importVideoBytes(context: Context, videoId: String, bytes: ByteArray): File? {
+        if (bytes.isEmpty() || bytes.size > 6 * 1024 * 1024) return null
+        return try {
+            val dir = File(context.cacheDir, STORE_DIR)
+            dir.mkdirs()
+            File(dir, "$videoId.mp4").apply { writeBytes(bytes) }
+        } catch (e: Exception) {
+            Log.e(TAG, "importVideoBytes failed: ${e.message}", e)
+            null
+        }
+    }
 
     /** Dọn toàn bộ photostore — gọi khi BYE/teardown cuộc gọi (GSMA TS.66 lifecycle). */
     fun cleanup(context: Context) {

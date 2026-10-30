@@ -79,7 +79,7 @@ class MiniAppManager(val activity: CallActivity) {
                 val url = request?.url ?: return null
                 val host = url.host
                 val path = url.path ?: ""
-                
+
                 if (host == "miniapp") {
                     // Return empty response for favicon.ico to avoid WebView errors
                     if (path == "/favicon.ico") {
@@ -106,6 +106,7 @@ class MiniAppManager(val activity: CallActivity) {
                         val mime = when {
                             mediaName.endsWith(".jpg") || mediaName.endsWith(".jpeg") -> "image/jpeg"
                             mediaName.endsWith(".png") -> "image/png"
+                            mediaName.endsWith(".mp4") -> "video/mp4"
                             else -> "application/octet-stream"
                         }
                         if (mediaFile.exists() && mediaFile.isFile) {
@@ -131,11 +132,11 @@ class MiniAppManager(val activity: CallActivity) {
                             }
                             conn.connectTimeout = 3000
                             conn.readTimeout = 3000
-                            
+
                             val responseCode = conn.responseCode
                             val mimeType = conn.contentType?.split(";")?.firstOrNull()?.trim() ?: "application/json"
                             val encoding = conn.contentEncoding ?: "UTF-8"
-                            
+
                             val headers = conn.headerFields.entries.filter { it.key != null }.associate { it.key to it.value.joinToString(",") }
                             val stream = if (responseCode >= 400) conn.errorStream else conn.inputStream
                             Log.i(TAG, "Proxy response code: $responseCode, mimeType: $mimeType")
@@ -149,14 +150,14 @@ class MiniAppManager(val activity: CallActivity) {
                             )
                         }
                     }
-                    
+
                     val relPath = if (path.startsWith("/")) path.substring(1) else path
                     val file = if (relPath.isEmpty() || relPath == "index.html") {
                         java.io.File(cachedAppDir, "index.html")
                     } else {
                         java.io.File(cachedAppDir, relPath)
                     }
-                    
+
                     if (file.exists() && file.isFile) {
                         // Strict MIME verification for intercepted resources (GSMA TS.66)
                         if (file.name.endsWith(".js") || file.name.endsWith(".css")) {
@@ -253,7 +254,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
                 activity.binding.webviewMiniapp.bringToFront()
                 val isEnterpriseOrSmart = activity.currentAppId == "enterprise-callerid" || activity.currentAppId == "smart-menu" || url?.contains("enterprise-callerid") == true || url?.contains("smart-menu") == true ||
-                    activity.currentAppId == "flight-booking" || url?.contains("flight-booking") == true
+                        activity.currentAppId == "flight-booking" || url?.contains("flight-booking") == true
                 if (isEnterpriseOrSmart) {
                     activity.binding.localVideoView.visibility = View.GONE
                 } else {
@@ -268,8 +269,8 @@ class MiniAppManager(val activity: CallActivity) {
 
                 // Fix race condition: dataChannelNotify may have fired before JS was loaded.
                 // Only re-send for actual mini-app pages (TuYaApp), not operator-menu.
-                val isTuYaApp = url?.contains("tuyaapp") == true || 
-                    (activity.currentAppId.contains("0003210000000038") || activity.currentAppId.contains("tuyaapp") || activity.currentAppId.contains("sketch-sync"))
+                val isTuYaApp = url?.contains("tuyaapp") == true ||
+                        (activity.currentAppId.contains("0003210000000038") || activity.currentAppId.contains("tuyaapp") || activity.currentAppId.contains("sketch-sync"))
                 if (isTuYaApp) {
                     Log.i(TAG, "TuYaApp page finished loading, scheduling dataChannelNotify re-send")
                     // Use longer delay (500ms) to ensure GSMA bridge JS is fully initialized
@@ -427,11 +428,11 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.dcManager.targetAppId = "operator-menu"
                 activity.binding.btnExitMiniapp.visibility = View.GONE
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
-                
+
                 if (sendRemoteTrigger) {
                     triggerAppNegotiationReInvite("operator-menu")
                 }
-                
+
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
                 activity.binding.webviewMiniapp.visibility = View.VISIBLE
                 activity.binding.webviewMiniapp.bringToFront()
@@ -486,7 +487,7 @@ class MiniAppManager(val activity: CallActivity) {
             }
             activity.binding.layoutTopBar.bringToFront()
             activity.binding.btnExitMiniapp.bringToFront()
-            
+
             // 1. Gửi tin nhắn điều khiển P2P qua ADC (Stream 1000) để bảo đầu kia mở ứng dụng
             if (sendRemoteTrigger) {
                 val adc = activity.webRtcManager.adcChannel
@@ -498,11 +499,11 @@ class MiniAppManager(val activity: CallActivity) {
                     Log.i(TAG, "Sent JSON LAUNCH_APP via ADC: $msg")
                 }
             }
-            
+
             // 2. Load cached app if available, otherwise asset (bundled in APK)
             val cachedAppDir = java.io.File(activity.cacheDir, "miniapps/$targetId")
             val localIndex = java.io.File(cachedAppDir, "index.html")
-            
+
             Log.i(TAG, "Loading mini-app: https://miniapp/index.html (cached=${localIndex.exists()})")
             activity.binding.webviewMiniapp.loadUrl("https://miniapp/index.html")
 
@@ -512,7 +513,7 @@ class MiniAppManager(val activity: CallActivity) {
             // 4. Send BDC request with ETag
             val prefs = activity.getSharedPreferences("miniapps_etag", android.content.Context.MODE_PRIVATE)
             val savedEtag = if (localIndex.exists()) prefs.getString(targetId, "") else ""
-            
+
             Log.i(TAG, "Sending BDC request for appId=$targetId (If-None-Match: $savedEtag)")
             activity.dcManager.sendAppRequest(targetId, savedEtag ?: "")
 

@@ -225,6 +225,31 @@ class AndroidBridgeInterface(
         }
     }
 
+    /** Stream một video MP4 đã import tới đầu xa qua cùng chunk transport. */
+    @JavascriptInterface
+    fun sendVideo(payload: String): String {
+        val transport = photoShare ?: return """{"ok":false,"error":"transport_not_ready"}"""
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val id = org.json.JSONObject(payload).optString("id")
+            if (id.isEmpty()) return """{"ok":false,"error":"id_missing"}"""
+            val total = transport.enqueueVideoFile(context, id)
+            if (total == null) """{"ok":false,"error":"file_not_found"}"""
+            else {
+                val bytes = transport.fileForMedia(context, id, true).length()
+                """{"ok":true,"chunks":$total,"bytes":$bytes}"""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "sendVideo failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
+    /** URL để <video> phát video MP4 local trong WebView. */
+    @JavascriptInterface
+    fun videoUrl(id: String): String = "https://miniapp/media/$id.mp4"
+
     /**
      * URL để <img> hiển thị ảnh local trong WebView (serve bằng shouldInterceptRequest).
      * @param id photoId; @param thumb true nếu muốn bản thumbnail
@@ -271,5 +296,30 @@ class AndroidBridgeInterface(
             """{"ok":false,"error":"${e.message ?: "exception"}"}"""
         }
     }
+
+    /** Import video MP4 nhỏ từ file input WebView. Payload tối đa 6 MiB. */
+    @JavascriptInterface
+    fun importVideoB64(payload: String): String {
+        val transport = photoShare ?: return """{"ok":false,"error":"transport_not_ready"}"""
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val obj = org.json.JSONObject(payload)
+            val id = obj.optString("id")
+            val type = obj.optString("type")
+            val data = obj.optString("data")
+            if (id.isEmpty() || data.isEmpty()) return """{"ok":false,"error":"id_or_data_missing"}"""
+            if (type != "video/mp4") return """{"ok":false,"error":"unsupported_video_type"}"""
+            val bytes = android.util.Base64.decode(data, android.util.Base64.NO_WRAP)
+            if (bytes.size > 6 * 1024 * 1024) return """{"ok":false,"error":"video_too_large"}"""
+            val file = transport.importVideoBytes(context, id, bytes)
+                ?: return """{"ok":false,"error":"video_import_failed"}"""
+            """{"ok":true,"id":"$id","bytes":${file.length()}}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "importVideoB64 failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
 }
 
