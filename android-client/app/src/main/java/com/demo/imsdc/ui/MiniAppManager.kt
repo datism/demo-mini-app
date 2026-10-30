@@ -319,7 +319,16 @@ class MiniAppManager(val activity: CallActivity) {
         val full = appId == "flight-booking"
         val lp = b.webviewMiniapp.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-        if (full) {
+        val videoTiles = appId == "caro"
+        applyVideoTiles(videoTiles)
+        if (videoTiles) {
+            // Caro: both faces side by side at the top, the game in the rest of the screen above the controls.
+            lp.topToTop = unset
+            lp.topToBottom = b.localVideoView.id
+            lp.topMargin = dp(TILE_GAP_DP)
+            lp.bottomToTop = b.layoutBottomControls.id
+            lp.bottomToBottom = unset
+        } else if (full) {
             // Leave room for the status bar, and for the exit button when it is shown.
             val topDp = if (CallActivity.hotlineApp(activity.remoteUser) != null) 40 else 72
             lp.topToBottom = unset
@@ -334,6 +343,62 @@ class MiniAppManager(val activity: CallActivity) {
         }
         b.webviewMiniapp.layoutParams = lp
         b.layoutTopBar.visibility = if (full) View.INVISIBLE else View.VISIBLE
+    }
+
+    private val TILE_GAP_DP = 4
+    private val TILE_SIDE_MARGIN_DP = 8
+
+    private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
+
+    // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
+    // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
+    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left.
+    private fun applyVideoTiles(enabled: Boolean) {
+        val b = activity.binding
+        val local = b.localVideoView
+        val remote = b.remoteVideoView
+        val localLp = local.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        val remoteLp = remote.layoutParams as android.widget.FrameLayout.LayoutParams
+
+        // Undo any drag of my camera box (the drag handler moves it with translation).
+        local.translationX = 0f
+        local.translationY = 0f
+
+        if (enabled) {
+            val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
+            val tileW = (screenW - 2 * dp(TILE_SIDE_MARGIN_DP) - dp(TILE_GAP_DP)) / 2
+            val tileH = tileW * 4 / 3
+            localLp.width = tileW
+            localLp.height = tileH
+            localLp.setMargins(dp(TILE_SIDE_MARGIN_DP), dp(TILE_GAP_DP), 0, 0)
+            local.layoutParams = localLp
+            local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+
+            // The remote view lives in a full-screen FrameLayout, so place it by margins: below the
+            // top bar, level with my tile, to its right.
+            fun placeRemote() {
+                remoteLp.width = tileW
+                remoteLp.height = tileH
+                remoteLp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                remoteLp.leftMargin = dp(TILE_SIDE_MARGIN_DP) + tileW + dp(TILE_GAP_DP)
+                remoteLp.topMargin = b.layoutTopBar.bottom + dp(TILE_GAP_DP)
+                remote.layoutParams = remoteLp
+            }
+            if (b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
+        } else {
+            localLp.width = dp(90)
+            localLp.height = dp(125)
+            localLp.setMargins(dp(16), dp(16), dp(16), dp(16))
+            local.layoutParams = localLp
+            local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
+
+            remoteLp.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            remoteLp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            remoteLp.gravity = android.view.Gravity.NO_GRAVITY
+            remoteLp.leftMargin = 0
+            remoteLp.topMargin = 0
+            remote.layoutParams = remoteLp
+        }
     }
 
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {
