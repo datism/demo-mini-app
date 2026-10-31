@@ -320,3 +320,32 @@ func setAppLinePort(sdp string, port int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// isReInviteFailure reports whether a final non-2xx response answers an
+// in-dialog re-INVITE of an answered call rather than the initial INVITE.
+// Re-INVITE detection mirrors handle200OKInvite.
+func isReInviteFailure(session *CallSession, msg *SIPMessage) bool {
+	if session == nil || !msg.IsResponse || msg.StatusCode < 300 || !session.TermAnswered {
+		return false
+	}
+	cseq, method := msg.GetCSeq()
+	if method != "INVITE" {
+		return false
+	}
+	calleeInitiated := !strings.HasPrefix(msg.GetHeader("Call-ID"), "b2b_") &&
+		session.LastCalleeCSeq > 0 && cseq == session.LastCalleeCSeq
+	return cseq > session.InitialCSeq || calleeInitiated
+}
+
+// rollbackAppSlotChange undoes the App-slot change of a failed re-INVITE. Only
+// an App open/replace leaves AppAnswerPending set (a close already deleted the
+// context), so only then is the '<id>-app' context released. Home/BDC are untouched.
+func (b *B2BUA) rollbackAppSlotChange(session *CallSession) {
+	session.mu.Lock()
+	pending := session.AppAnswerPending
+	session.AppAnswerPending = false
+	session.mu.Unlock()
+	if pending {
+		b.closeAppSlot(session)
+	}
+}
