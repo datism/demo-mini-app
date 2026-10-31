@@ -66,7 +66,7 @@ class SipManager(
     var onCallEnded: (() -> Unit)? = null
     var onCancelReceived: (() -> Unit)? = null
     var onAckWithSdp: ((sdpBody: String, rawSdp: String) -> Unit)? = null
-    var onReInviteResponse: ((sdpAnswer: String?, rawSdp: String?) -> Unit)? = null
+    var onReInviteResponse: ((cseq: Int, sdpAnswer: String?, rawSdp: String?) -> Unit)? = null
     // The phone's IP changed during a call: SIP has moved to the new IP, the UI must end the call.
     var onIpChangedDuringCall: (() -> Unit)? = null
 
@@ -89,7 +89,7 @@ class SipManager(
     var appSlotUsed: Boolean = false  // mid 4 has appeared in this call; it stays in every SDP from then on
     var isCallHoldActive: Boolean = false
     var onReInviteReceived: ((String, String) -> Unit)? = null
-    var onReInviteFailed: ((Int) -> Unit)? = null
+    var onReInviteFailed: ((code: Int, cseq: Int) -> Unit)? = null
     /** True when this side sent the initial INVITE (owns the Call-ID), RFC 3261 14.1. */
     @Volatile var isCallIdOwner = false
     // CSeq of the initial INVITE — responses with higher CSeq are Re-INVITE responses
@@ -541,7 +541,7 @@ class SipManager(
                         Log.i(TAG, "✅ Re-INVITE 200 OK — sending ACK")
                         activeToHeader = toHeaderVal
                         val translatedAnswer = sdp?.let { SdpHelper.translateSipAnswerToWebRtcAnswer(it, lastLocalOfferSdp) }
-                        onReInviteResponse?.invoke(translatedAnswer, sdp)
+                        onReInviteResponse?.invoke(cseqVal, translatedAnswer, sdp)
                         sipScope.launch {
                             sendAck(toHeaderVal, cseqOverride = cseqVal)
                         }
@@ -572,7 +572,7 @@ class SipManager(
                     if (isReInvite) {
                         // Re-INVITE failures should NOT terminate the ongoing call
                         Log.w(TAG, "Re-INVITE failed with $statusCode — call continues")
-                        onReInviteFailed?.invoke(statusCode)
+                        onReInviteFailed?.invoke(statusCode, getCSeqNumber(msg))
                     } else {
                         Log.w(TAG, "INVITE response: $statusCode")
                         onInviteResponse?.invoke(statusCode, null, "", null)
@@ -929,13 +929,21 @@ class SipManager(
             callId
         }
 
-    suspend fun sendReInviteWithSdp(sdpBody: String): String =
+    /** 491 Request Pending to an incoming Re-INVITE that arrived while ours is in progress (RFC 3261 14.2). */
+    suspend fun sendRequestPending(originalInvite: String) = withContext(Dispatchers.IO) {
+        Log.w(TAG, "→ 491 Request Pending (own Re-INVITE in progress)")
+        sendRaw(buildResponse(originalInvite, 491, "Request Pending", ""))
+    }
+
+    /** [onCSeq] gets the CSeq before the request goes out, so its final response can be matched to it. */
+    suspend fun sendReInviteWithSdp(sdpBody: String, onCSeq: (Int) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
             val callId = pendingCallId ?: randomCallId()
             val fromTag = pendingFromTag ?: randomTag()
             val toVal = activeToHeader ?: "<sip:${pendingRemoteUser ?: "unknown"}@$sipServerHost>"
             val cseq = cseqCounter.getAndIncrement()
             lastReInviteCSeq = cseq
+            onCSeq(cseq)
             val localIp = getLocalIp()
             lastLocalIp = localIp
             val branch = randomBranch()

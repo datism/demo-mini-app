@@ -95,4 +95,123 @@ class AdcSlotsTest {
         assertEquals("x", home)
         assertEquals("y", app)
     }
+
+    // ── Slot negotiation (C2, C3, I2, I4) ──────────────────────────────────
+
+    private val home = "fun-calling-app"
+
+    @Test
+    fun hotlineCallKeepsTheHotlineAppOnHomeForAnyTarget() {
+        assertEquals(SlotState("hotline-app", null), desiredSlots("sketch-sync-app", home, "hotline-app"))
+        assertEquals(SlotState("hotline-app", null), desiredSlots(home, home, "hotline-app"))
+    }
+
+    @Test
+    fun normalCallPutsOtherAppsOnMid4() {
+        assertEquals(SlotState(home, "sketch-sync-app"), desiredSlots("sketch-sync-app", home, null))
+        assertEquals(SlotState(home, null), desiredSlots(home, home, null))
+    }
+
+    @Test
+    fun nothingToNegotiateWhenLocalMatchesAndIsConfirmed() {
+        val s = SlotState(home, "a")
+        assertNull(planSlotChange(SlotState(home, "a"), s, s))
+    }
+
+    @Test
+    fun sameTargetAfter491IsReOfferedWithoutLocalSteps() {
+        // The App PC was opened for "a" but the far end answered 491: still only Home is confirmed.
+        val plan = planSlotChange(SlotState(home, "a"), SlotState(home, "a"), SlotState(home, null))
+        assertEquals(SlotPlan(openHome = null, closeApp = false, openApp = null), plan)
+    }
+
+    @Test
+    fun unknownConfirmedStateForcesAReOffer() {
+        val s = SlotState(home, null)
+        assertEquals(SlotPlan(null, false, null), planSlotChange(s, s, null))
+    }
+
+    @Test
+    fun hotlineCallOpensOnlyTheHomeSlot() {
+        val plan = planSlotChange(desiredSlots("x", home, "hotline-app"), SlotState(null, null), SlotState(null, null))
+        assertEquals(SlotPlan(openHome = "hotline-app", closeApp = false, openApp = null), plan)
+    }
+
+    @Test
+    fun hotlineAlreadyOnHomeNeedsNothing() {
+        val s = SlotState("hotline-app", null)
+        assertNull(planSlotChange(desiredSlots("hotline-app", home, "hotline-app"), s, s))
+    }
+
+    @Test
+    fun replacingTheAppClosesAndOpensMid4() {
+        val s = SlotState(home, "a")
+        assertEquals(SlotPlan(null, true, "b"), planSlotChange(SlotState(home, "b"), s, s))
+    }
+
+    @Test
+    fun backToHomeClosesMid4Only() {
+        val s = SlotState(home, "a")
+        assertEquals(SlotPlan(null, true, null), planSlotChange(SlotState(home, null), s, s))
+    }
+
+    @Test
+    fun anOpenHomeLineIsNeverReplaced() {
+        val s = SlotState("other", null)
+        assertEquals(SlotPlan(null, false, "a"), planSlotChange(SlotState(home, "a"), s, s))
+    }
+
+    @Test
+    fun outcomeActions() {
+        assertEquals(OutcomeAction.CONFIRM, outcomeAction(ReInviteOutcome.Answered("v=0"), 1, superseded = true))
+        assertEquals(OutcomeAction.RETRY, outcomeAction(ReInviteOutcome.Failed(491), 1, superseded = false))
+        assertEquals(OutcomeAction.SUPERSEDED, outcomeAction(ReInviteOutcome.Failed(491), 1, superseded = true))
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(491), MAX_GLARE_ATTEMPTS, superseded = false))
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(488), 1, superseded = false))
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Timeout, 1, superseded = false))
+    }
+
+    @Test
+    fun confirmedSlotsFollowTheOutcome() {
+        val offered = SlotState(home, "a")
+        val before = SlotState(home, null)
+        assertEquals(offered, confirmedAfter(ReInviteOutcome.Answered(null), offered, before))
+        assertEquals(before, confirmedAfter(ReInviteOutcome.Failed(491), offered, before))
+        assertNull(confirmedAfter(ReInviteOutcome.Timeout, offered, before))
+    }
+
+    @Test
+    fun pendingReInviteAcceptsOnlyTheAwaitedCSeqOnce() {
+        val p = PendingReInvite()
+        p.begin(7)
+        assertFalse(p.finish(6))   // late answer to an earlier Re-INVITE
+        assertTrue(p.finish(7))
+        assertFalse(p.finish(7))   // duplicate final response
+    }
+
+    @Test
+    fun answerAfterTheTimeoutIsStale() {
+        val p = PendingReInvite()
+        p.begin(7)
+        p.clear()                  // request gave up after 5 s
+        p.begin(8)                 // next request in flight
+        assertFalse(p.finish(7))
+        assertTrue(p.finish(8))
+    }
+
+    @Test
+    fun nothingAwaitedRejectsEveryCSeq() {
+        assertFalse(PendingReInvite().finish(1))
+    }
+
+    @Test
+    fun queueReportsAWaitingRequest() {
+        val q = LatestRequestQueue<String>()
+        q.submit("a")
+        assertFalse(q.hasPending)
+        q.submit("b")
+        assertTrue(q.hasPending)
+        assertEquals("b", q.complete())
+        assertFalse(q.hasPending)
+    }
 }

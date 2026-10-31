@@ -5,11 +5,13 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.webrtc.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 private const val TAG = "WebRtcManager"
+private const val ICE_GATHERING_TIMEOUT_MS = 3000L
 
 /**
  * WebRtcManager — Quản lý WebRTC PeerConnection cho IMS DC
@@ -370,17 +372,27 @@ class WebRtcManager(private val context: Context) {
         }, constraints)
     }
 
+    /** Gathering may never report COMPLETE (e.g. an unreachable STUN server); send what was gathered by then. */
+    private suspend fun awaitIceGathering(pc: PeerConnection?) {
+        if (withTimeoutOrNull(ICE_GATHERING_TIMEOUT_MS) { awaitIceGatheringComplete(pc) } == null) {
+            Log.w(TAG, "ICE gathering not complete after $ICE_GATHERING_TIMEOUT_MS ms, using the candidates so far")
+        }
+    }
+
     /**
      * Local offer of one PeerConnection. A STABLE PC with a local description reuses it: an unchanged
-     * m-line keeps the same ICE credentials, fingerprint and tls-id.
+     * m-line keeps the same ICE credentials, fingerprint and tls-id. A PC still holding an unanswered
+     * offer (HAVE_LOCAL_OFFER, after a 491 or a timeout) re-sends that same offer.
      */
     private suspend fun offerFor(pc: PeerConnection?): String? {
         pc ?: return null
-        if (pc.signalingState() == PeerConnection.SignalingState.STABLE && pc.localDescription != null) {
+        val state = pc.signalingState()
+        if (pc.localDescription != null &&
+            (state == PeerConnection.SignalingState.STABLE || state == PeerConnection.SignalingState.HAVE_LOCAL_OFFER)) {
             return pc.localDescription.description // unchanged m-line: same credentials, same tls-id
         }
         val raw = createOfferRaw(pc).description
-        awaitIceGatheringComplete(pc)
+        awaitIceGathering(pc)
         return pc.localDescription?.description ?: raw
     }
 
@@ -570,7 +582,7 @@ class WebRtcManager(private val context: Context) {
             return null
         }
         val raw = createAnswerRaw(pc).description
-        awaitIceGatheringComplete(pc)
+        awaitIceGathering(pc)
         return pc.localDescription?.description ?: raw
     }
 

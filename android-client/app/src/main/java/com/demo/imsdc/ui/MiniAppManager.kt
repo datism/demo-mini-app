@@ -18,6 +18,16 @@ import com.demo.imsdc.sip.SipManager
 import com.demo.imsdc.webrtc.AndroidBridgeInterface
 import com.demo.imsdc.webrtc.DataChannelManager
 import com.demo.imsdc.webrtc.LatestRequestQueue
+import com.demo.imsdc.webrtc.MAX_GLARE_ATTEMPTS
+import com.demo.imsdc.webrtc.OutcomeAction
+import com.demo.imsdc.webrtc.PendingReInvite
+import com.demo.imsdc.webrtc.ReInviteOutcome
+import com.demo.imsdc.webrtc.SlotPlan
+import com.demo.imsdc.webrtc.SlotState
+import com.demo.imsdc.webrtc.confirmedAfter
+import com.demo.imsdc.webrtc.desiredSlots
+import com.demo.imsdc.webrtc.outcomeAction
+import com.demo.imsdc.webrtc.planSlotChange
 import com.demo.imsdc.webrtc.reInviteRetryDelayMs
 import com.demo.imsdc.webrtc.WebRtcManager
 import com.demo.imsdc.media.RtpMediaManager
@@ -28,8 +38,13 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.view.SurfaceHolder
 import android.view.WindowManager
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.withContext
@@ -419,7 +434,8 @@ class MiniAppManager(val activity: CallActivity) {
                 else -> appId
             }
             activity.currentAppId = targetId
-            activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu")
+            // A hotline app lives on the Home slot (mid 3), so its traffic is on the Home channel.
+            activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu" || hotlineApp != null)
             Log.i(TAG, "launchMiniApp targetId=$targetId")
             applyWebViewBounds(targetId)
 
@@ -531,12 +547,39 @@ class MiniAppManager(val activity: CallActivity) {
         private const val ANSWER_TIMEOUT_MS = 5000L
     }
 
-    private val requests = LatestRequestQueue<String>()
-    private var lastTarget: String? = null
-    private var reInviteAnswer: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    /** One slot change. [sync]: re-offer the current local slots after a rejection; a sync is never re-synced. */
+    private data class AdcRequest(val target: String, val sync: Boolean = false)
 
-    fun onReInviteAnswered() {
-        reInviteAnswer?.complete(Unit)
+    private enum class ChangeResult { DONE, SUPERSEDED, REJECTED }
+
+    private val requests = LatestRequestQueue<AdcRequest>()
+    /** Serialises every Re-INVITE transaction: app changes, hold/resume and incoming Re-INVITEs. */
+    private val negotiation = Mutex()
+    private val pending = PendingReInvite()
+    private var outcome: CompletableDeferred<ReInviteOutcome>? = null
+    /** Slots the far end last agreed to; null = unknown (a Re-INVITE went unanswered). Guarded by [negotiation]. */
+    @Volatile private var confirmed: SlotState? = SlotState(null, null)
+
+    private val hotlineApp: String? get() = CallActivity.hotlineApp(activity.remoteUser)
+
+    private fun localSlots(): SlotState {
+        val web = activity.webRtcManager
+        val sip = activity.sipManager
+        return SlotState(
+            home = if (web.homeAdcPC != null) sip.homeReqApp else null,
+            app = if (web.appAdcPC != null) sip.appReqApp else null
+        )
+    }
+
+    /** 200 OK for the Re-INVITE with [cseq]. Only the awaited CSeq counts: a late answer to an earlier one is dropped. */
+    fun onReInviteAnswered(cseq: Int, sdpAnswer: String?) {
+        if (pending.finish(cseq)) outcome?.complete(ReInviteOutcome.Answered(sdpAnswer))
+        else Log.w(TAG, "Ignoring 200 OK for Re-INVITE CSeq $cseq: not the one awaited (late or unknown)")
+    }
+
+    fun onReInviteFailed(code: Int, cseq: Int) {
+        if (pending.finish(cseq)) outcome?.complete(ReInviteOutcome.Failed(code))
+        else Log.w(TAG, "Ignoring $code for Re-INVITE CSeq $cseq: not the one awaited (late or unknown)")
     }
 
     private fun normalizeTarget(appId: String): String {
@@ -551,65 +594,187 @@ class MiniAppManager(val activity: CallActivity) {
     fun triggerAppNegotiationReInvite(appId: String) {
         val target = normalizeTarget(appId)
         if (target.contains("operator-menu")) return // Home not open: local menu, nothing to negotiate
-        requests.submit(target)?.let { runRequest(it) }
-            ?: Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $target")
+        submit(AdcRequest(target))
     }
 
-    private fun runRequest(target: String) {
+    private fun submit(request: AdcRequest) {
+        requests.submit(request)?.let { runRequest(it) }
+            ?: Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $request")
+    }
+
+    private fun runRequest(request: AdcRequest) {
         activity.lifecycleScope.launch(Dispatchers.Main) {
             try {
-                if (target != HOME_APP && activity.webRtcManager.homeAdcPC == null) {
-                    sendChange(HOME_APP)            // Home first (mid 3), see ruling
+                // Home first (mid 3): go-mf takes an App line only with a Home context. Not for hotlines (no mid 4).
+                if (hotlineApp == null && request.target != HOME_APP && localSlots().home == null) {
+                    val home = sendChange(AdcRequest(HOME_APP, request.sync))
+                    if (home != ChangeResult.DONE) {
+                        if (home == ChangeResult.REJECTED) rollbackAppSlot("Home ADC could not be opened for ${request.target}")
+                        return@launch
+                    }
                 }
-                sendChange(target)
+                sendChange(request)
             } catch (e: kotlinx.coroutines.CancellationException) {
-                Log.d(TAG, "Re-INVITE coroutine cancelled for $target (call ended)")
+                Log.d(TAG, "Re-INVITE coroutine cancelled for ${request.target} (call ended)")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send Re-INVITE for $target: ${e.message}")
+                Log.e(TAG, "Failed to send Re-INVITE for ${request.target}: ${e.message}")
             } finally {
                 requests.complete()?.let { runRequest(it) }
             }
         }
     }
 
-    /** Applies the local ADC change for [target] and sends exactly one Re-INVITE (or none if nothing changes). */
-    private suspend fun sendChange(target: String) {
-        lastTarget = target
+    /**
+     * Moves the slots to what [request] wants and negotiates it: one Re-INVITE, or none if the local slots
+     * already match and the far end confirmed them. A 491 is re-offered after the RFC 3261 back-off: the
+     * plan is recomputed against the unconfirmed local slots, so the same offer really goes out again.
+     */
+    private suspend fun sendChange(request: AdcRequest): ChangeResult {
+        val desired = desiredSlots(request.target, HOME_APP, hotlineApp)
+        var attempt = 1
+        while (true) {
+            val step = negotiation.withLock {
+                val plan = planSlotChange(desired, localSlots(), confirmed) ?: return@withLock null
+                applyPlan(plan)
+                val offered = localSlots()
+                Log.i(TAG, "Re-INVITE for ${request.target} (attempt $attempt): offer=$offered confirmed=$confirmed")
+                val result = transact()
+                confirmed = confirmedAfter(result, offered, confirmed)
+                val action = outcomeAction(result, attempt, superseded = requests.hasPending)
+                Log.i(TAG, "Re-INVITE for ${request.target}: $result -> $action")
+                when (action) {
+                    OutcomeAction.CONFIRM -> applyAnswer((result as ReInviteOutcome.Answered).sdp)
+                    OutcomeAction.ROLLBACK -> {
+                        if (localSlots().app != null) rollbackAppSlot("Re-INVITE for ${request.target}: $result")
+                        // Rejected Home offer: the far end has no Home line, so drop the local one too.
+                        if (confirmed?.home == null && confirmed != null && localSlots().home != null) {
+                            activity.webRtcManager.closeADC()
+                            activity.sipManager.homeReqApp = null
+                        }
+                    }
+                    else -> Unit
+                }
+                // No answer in time: nobody knows what the far end holds, so re-offer the local slots once.
+                action to (action == OutcomeAction.ROLLBACK && !request.sync && confirmed == null)
+            } ?: return ChangeResult.DONE
+            val (action, needsSync) = step
+            when (action) {
+                OutcomeAction.CONFIRM -> return ChangeResult.DONE
+                OutcomeAction.SUPERSEDED -> return ChangeResult.SUPERSEDED
+                OutcomeAction.ROLLBACK -> {
+                    if (needsSync && !requests.hasPending) submit(AdcRequest(hotlineApp ?: HOME_APP, sync = true))
+                    return ChangeResult.REJECTED
+                }
+                OutcomeAction.RETRY -> {
+                    val delayMs = reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner)
+                    Log.i(TAG, "491 glare for ${request.target}, re-offering in $delayMs ms")
+                    delay(delayMs)   // without the lock: the far end's Re-INVITE is handled meanwhile
+                    if (requests.hasPending) return ChangeResult.SUPERSEDED
+                    attempt++
+                }
+            }
+        }
+    }
+
+    private fun applyPlan(plan: SlotPlan) {
         val web = activity.webRtcManager
         val sip = activity.sipManager
-        if (target == HOME_APP) {
-            val homeOpen = web.homeAdcPC != null
-            val appOpen = sip.appReqApp != null
-            if (homeOpen && !appOpen) return          // already on emotes: nothing to negotiate
-            if (!homeOpen) {
-                sip.homeReqApp = HOME_APP
-                web.createADC(); activity.dcManager.setupADC()
-                web.createADC2(); activity.dcManager.setupADC2()
-            }
-            if (appOpen) {
-                sip.appReqApp = null                  // mid 4 -> port 0
-                web.closeAppADC()
-            }
-        } else {
-            if (sip.appReqApp == target && web.appAdcPC != null) return
+        val dc = activity.dcManager
+        plan.openHome?.let { id ->
+            sip.homeReqApp = id
+            web.createADC(); dc.setupADC()
+            if (id == HOME_APP) { web.createADC2(); dc.setupADC2() }
+        }
+        if (plan.closeApp) {
+            sip.appReqApp = null                      // mid 4 -> port 0
+            web.closeAppADC()
+        }
+        plan.openApp?.let { id ->
             web.closeAppADC()                         // replace in place: new PC, new credentials, new tls-id
-            sip.appReqApp = target
+            sip.appReqApp = id
             sip.appSlotUsed = true
             web.createAppADC()
-            activity.dcManager.setupAppADC()
+            dc.setupAppADC()
         }
-        val localOffer = web.createOffer()
-        reInviteAnswer = kotlinx.coroutines.CompletableDeferred()
-        Log.i(TAG, "Re-INVITE for $target (home=${sip.homeReqApp}, app=${sip.appReqApp})")
-        withContext(Dispatchers.IO) { sip.sendReInviteWithSdp(localOffer) }
-        val answered = kotlinx.coroutines.withTimeoutOrNull(ANSWER_TIMEOUT_MS) { reInviteAnswer?.await() }
-        if (answered == null) onReInviteUnanswered(target) // Task 9
+    }
+
+    /** Sends one Re-INVITE with the current local slots and waits for its final response. Caller holds [negotiation]. */
+    private suspend fun transact(): ReInviteOutcome {
+        val localOffer = activity.webRtcManager.createOffer()
+        val result = CompletableDeferred<ReInviteOutcome>()
+        outcome = result
+        try {
+            withContext(Dispatchers.IO) {
+                activity.sipManager.sendReInviteWithSdp(localOffer) { cseq -> pending.begin(cseq) }
+            }
+            return withTimeoutOrNull(ANSWER_TIMEOUT_MS) { result.await() } ?: ReInviteOutcome.Timeout
+        } finally {
+            pending.clear()                           // a final response arriving after this is stale
+            outcome = null
+        }
+    }
+
+    private suspend fun applyAnswer(sdpAnswer: String?) {
+        if (sdpAnswer.isNullOrEmpty()) return
+        try {
+            withContext(Dispatchers.IO) { activity.webRtcManager.setRemoteAnswer(sdpAnswer) }
+            Log.i(TAG, "Re-INVITE answer set, ICE starting for the ADCs")
+            activity.imsDcSdk.handleRemoteSdp(sdpAnswer, callId = activity.callId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting Re-INVITE answer: ${e.message}", e)
+        }
+    }
+
+    /** Hold/resume: one Re-INVITE with the current slots, serialised with the app changes, re-offered on 491. */
+    fun sendHoldReInvite() {
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            var attempt = 1
+            try {
+                while (true) {
+                    val result = negotiation.withLock {
+                        val offered = localSlots()
+                        val r = transact()
+                        confirmed = confirmedAfter(r, offered, confirmed)
+                        if (r is ReInviteOutcome.Answered) applyAnswer(r.sdp)
+                        r
+                    }
+                    if (result is ReInviteOutcome.Failed && result.code == 491 && attempt < MAX_GLARE_ATTEMPTS) {
+                        delay(reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner))
+                        attempt++
+                        continue
+                    }
+                    if (result !is ReInviteOutcome.Answered) Log.w(TAG, "Hold/resume Re-INVITE not accepted: $result")
+                    break
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Hold/resume Re-INVITE cancelled (call ended)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Hold/resume Re-INVITE failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Runs the handling of an incoming Re-INVITE under the negotiation lock. Returns false, without running
+     * [block], while a Re-INVITE of this side is in progress: the caller answers 491 (RFC 3261 14.2).
+     * [block] returns true once its 200 OK went out; the slots it left are then what the far end agreed to.
+     */
+    suspend fun handleIncomingReInvite(block: suspend () -> Boolean): Boolean {
+        if (!negotiation.tryLock()) return false
+        try {
+            if (block()) confirmed = localSlots()
+        } finally {
+            negotiation.unlock()
+        }
+        return true
     }
 
     /** Drops queued work; call at call end because a cancelled scope can leave the queue busy. */
     fun resetRequests() {
         requests.reset()
-        reInviteAnswer?.complete(Unit)
+        pending.clear()
+        outcome?.cancel()                             // the waiting request ends as cancelled, no rollback
+        confirmed = SlotState(null, null)
     }
 
     /** Roll back the App slot only. Home ADC and BDC are untouched. */
@@ -619,25 +784,5 @@ class MiniAppManager(val activity: CallActivity) {
         activity.sipManager.appReqApp = null          // mid 4 -> port 0 locally; appSlotUsed stays true
         android.widget.Toast.makeText(activity, "Không mở được ứng dụng, quay về emote", android.widget.Toast.LENGTH_SHORT).show()
         launchMiniApp(HOME_APP, sendRemoteTrigger = false)
-    }
-
-    private fun onReInviteUnanswered(target: String) {
-        if (target != HOME_APP) rollbackAppSlot("no 200 OK within ${ANSWER_TIMEOUT_MS} ms for $target")
-        else Log.w(TAG, "No 200 OK for the Home Re-INVITE")
-    }
-
-    fun onReInviteFailed(code: Int) {
-        val target = lastTarget ?: return
-        reInviteAnswer?.complete(Unit)                // unblock the waiting request
-        if (code == 491) {
-            val delayMs = reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner)
-            Log.i(TAG, "491 glare for $target, retrying in $delayMs ms")
-            activity.lifecycleScope.launch(Dispatchers.Main) {
-                kotlinx.coroutines.delay(delayMs)
-                triggerAppNegotiationReInvite(target)
-            }
-        } else if (target != HOME_APP) {
-            rollbackAppSlot("Re-INVITE for $target failed with $code")
-        }
     }
 }

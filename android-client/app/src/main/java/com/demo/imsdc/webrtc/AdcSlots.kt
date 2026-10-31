@@ -73,6 +73,10 @@ class LatestRequestQueue<T> {
     private var pending: T? = null
     val busy: Boolean get() = inFlight
 
+    /** A newer request is waiting: the running one is superseded. */
+    val hasPending: Boolean
+        @Synchronized get() = pending != null
+
     @Synchronized
     fun submit(item: T): T? {
         if (inFlight) {
@@ -101,3 +105,101 @@ class LatestRequestQueue<T> {
 /** RFC 3261 14.1: the Call-ID owner retries a glared Re-INVITE after 2.1-4 s, the other side after 0-2 s. */
 fun reInviteRetryDelayMs(isCallIdOwner: Boolean, random: kotlin.random.Random = kotlin.random.Random): Long =
     if (isCallIdOwner) random.nextLong(2100, 4001) else random.nextLong(0, 2001)
+
+/** Apps on the two ADC slots: Home (mid 3) and App (mid 4); null = slot closed. */
+data class SlotState(val home: String?, val app: String?)
+
+/**
+ * Slots a request for [target] should end in. A hotline call keeps its hotline app on the Home slot and
+ * never uses mid 4 (go-mf keeps hotlines on the legacy single-ADC path); otherwise Home holds [homeApp]
+ * and any other target goes on mid 4.
+ */
+fun desiredSlots(target: String, homeApp: String, hotlineApp: String?): SlotState = when {
+    hotlineApp != null -> SlotState(hotlineApp, null)
+    target == homeApp -> SlotState(homeApp, null)
+    else -> SlotState(homeApp, target)
+}
+
+/** Local steps before the offer: [openHome] app id for a new Home PC, [closeApp] drop the App PC, [openApp] app id for a new App PC. */
+data class SlotPlan(val openHome: String?, val closeApp: Boolean, val openApp: String?)
+
+/**
+ * What to do to reach [desired]. null: nothing to negotiate, because the local slots already match and the
+ * far end confirmed them. [confirmed] null means unknown (a Re-INVITE went unanswered). A slot that is
+ * local but not confirmed (its offer got 491 or no answer) needs no local step: the plan has no steps and
+ * the same offer is sent again. An open Home line is never replaced.
+ */
+fun planSlotChange(desired: SlotState, local: SlotState, confirmed: SlotState?): SlotPlan? {
+    val want = if (local.home != null) desired.copy(home = local.home) else desired
+    if (want == local && local == confirmed) return null
+    return SlotPlan(
+        openHome = if (local.home == null) want.home else null,
+        closeApp = local.app != null && local.app != want.app,
+        openApp = want.app?.takeIf { it != local.app }
+    )
+}
+
+sealed class ReInviteOutcome {
+    data class Answered(val sdp: String?) : ReInviteOutcome()
+    data class Failed(val code: Int) : ReInviteOutcome()
+    object Timeout : ReInviteOutcome() {
+        override fun toString() = "Timeout"
+    }
+}
+
+enum class OutcomeAction { CONFIRM, RETRY, SUPERSEDED, ROLLBACK }
+
+/** Attempts per request when the far end answers 491 (RFC 3261 14.1 glare). */
+const val MAX_GLARE_ATTEMPTS = 3
+
+/**
+ * Next step after one Re-INVITE: 200 OK confirms; 491 is re-offered after the back-off unless a newer
+ * request supersedes it or the attempts are used up; any other failure, and no answer in time, roll back.
+ */
+fun outcomeAction(outcome: ReInviteOutcome, attempt: Int, superseded: Boolean): OutcomeAction = when (outcome) {
+    is ReInviteOutcome.Answered -> OutcomeAction.CONFIRM
+    is ReInviteOutcome.Failed -> when {
+        outcome.code != 491 -> OutcomeAction.ROLLBACK
+        superseded -> OutcomeAction.SUPERSEDED
+        attempt < MAX_GLARE_ATTEMPTS -> OutcomeAction.RETRY
+        else -> OutcomeAction.ROLLBACK
+    }
+    ReInviteOutcome.Timeout -> OutcomeAction.ROLLBACK
+}
+
+/**
+ * Slots the far end holds after one Re-INVITE: what was offered on 200 OK, unchanged after a rejection
+ * (it kept the previous session), unknown after no answer (a late 200 OK may still have applied it).
+ */
+fun confirmedAfter(outcome: ReInviteOutcome, offered: SlotState, before: SlotState?): SlotState? = when (outcome) {
+    is ReInviteOutcome.Answered -> offered
+    is ReInviteOutcome.Failed -> before
+    ReInviteOutcome.Timeout -> null
+}
+
+/** CSeq of the one outgoing Re-INVITE whose final response is awaited; a response for any other CSeq is stale. */
+class PendingReInvite {
+    private var cseq = NONE
+
+    @Synchronized
+    fun begin(cseq: Int) {
+        this.cseq = cseq
+    }
+
+    /** True once, for the awaited CSeq; false for a stale or unknown one. */
+    @Synchronized
+    fun finish(cseq: Int): Boolean {
+        if (cseq <= 0 || cseq != this.cseq) return false
+        this.cseq = NONE
+        return true
+    }
+
+    @Synchronized
+    fun clear() {
+        cseq = NONE
+    }
+
+    private companion object {
+        const val NONE = -1
+    }
+}
