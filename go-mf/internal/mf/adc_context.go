@@ -41,3 +41,11 @@ func newShadowSession(parent *SessionInfo, id, callID string, adcBlock int) *Ses
 		AdcBlock: adcBlock, CreatedAt: time.Now(), tcpConns: map[uint16]net.Conn{},
 	}
 }
+
+// adcParentID returns the parent context id for either ADC suffix ("-adc" or "-app").
+func adcParentID(id string) string {
+	if p, ok := appParentID(id); ok {
+		return p
+	}
+	return strings.TrimSuffix(id, "-adc")
+}

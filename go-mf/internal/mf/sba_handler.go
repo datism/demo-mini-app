@@ -30,6 +30,40 @@ func (m *MediaFunction) CreateMediaContext(ctx *sba.MediaContext) (*sba.MediaCon
 		return m.buildAdcTransport(contextID, ctx, sessA, sessB), nil
 	}
 
+	if parentID, ok := appParentID(contextID); ok {
+		m.mu.Lock()
+		parent := m.contexts[parentID]
+		var pa, pb *SessionInfo
+		if parent != nil {
+			pa, pb = m.sessions[parent.SessionA], m.sessions[parent.SessionB]
+		}
+		m.mu.Unlock()
+		if pa == nil {
+			return nil, fmt.Errorf("parent context %s not found for app slot", parentID)
+		}
+		shA := newShadowSession(pa, pa.ID+"-app", contextID, 2)
+		var shB *SessionInfo
+		if pb != nil {
+			shB = newShadowSession(pb, pb.ID+"-app", contextID, 2)
+		}
+		cinfo := &ContextInfo{ContextID: contextID, SessionA: shA.ID}
+		m.mu.Lock()
+		m.sessions[shA.ID] = shA
+		if shB != nil {
+			m.sessions[shB.ID] = shB
+			cinfo.SessionB = shB.ID
+		}
+		m.contexts[contextID] = cinfo
+		m.mu.Unlock()
+		if shB != nil {
+			if err := m.LinkSessions(shA.ID, shB.ID); err != nil {
+				return nil, err
+			}
+		}
+		log.Printf("[MF] Creating App-slot context %s (parent %s)", contextID, parentID)
+		return m.buildAdcTransport(contextID, ctx, shA, shB), nil
+	}
+
 	log.Printf("[MF] CreateMediaContext context=%s", contextID)
 
 	cinfo := &ContextInfo{
@@ -95,7 +129,7 @@ func (m *MediaFunction) CreateMediaContext(ctx *sba.MediaContext) (*sba.MediaCon
 	} else if isAdcContext(contextID) {
 		// ADC Sub-context: find parent BDC context, reuse existing sessions,
 		// create separate AdcPC PeerConnections on ephemeral ports.
-		parentContextID := strings.TrimSuffix(contextID, "-adc")
+		parentContextID := adcParentID(contextID)
 		log.Printf("[MF] Creating ADC Sub-context: context=%s, parent=%s", contextID, parentContextID)
 
 		m.mu.Lock()
