@@ -177,6 +177,29 @@ fun confirmedAfter(outcome: ReInviteOutcome, offered: SlotState, before: SlotSta
     ReInviteOutcome.Timeout -> null
 }
 
+/**
+ * After a 491 back-off: true when the far end's Re-INVITE, handled meanwhile, changed the confirmed slots
+ * ([atGlare] = confirmed when the 491 came). Its offer won the glare (RFC 3261 14.1), so the retry is dropped
+ * and the page it launched stays consistent with the slots.
+ */
+fun supersededDuringBackOff(atGlare: SlotState?, now: SlotState?): Boolean = atGlare != now
+
+/**
+ * After a rolled-back request ([isSync] = it was itself a sync): re-offer the local slots when they differ from
+ * what the far end holds, e.g. a rejected switch whose App PC was closed locally, or unknown after no answer.
+ */
+fun needsSyncAfterRollback(isSync: Boolean, local: SlotState, confirmed: SlotState?): Boolean =
+    !isSync && local != confirmed
+
+/**
+ * Page to launch after a glare retry got 200 OK for [target], when [shownPage] (launched by an incoming
+ * Re-INVITE during the back-off) shows something else; null = already shown. operator-menu is a view of Home.
+ */
+fun pageToRelaunch(target: String, shownPage: String, homeApp: String): String? {
+    val shown = if (shownPage == "operator-menu") homeApp else shownPage
+    return if (shown == target) null else target
+}
+
 /** CSeq of the one outgoing Re-INVITE whose final response is awaited; a response for any other CSeq is stale. */
 class PendingReInvite {
     private var cseq = NONE

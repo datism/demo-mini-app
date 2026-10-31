@@ -214,4 +214,72 @@ class AdcSlotsTest {
         assertEquals("b", q.complete())
         assertFalse(q.hasPending)
     }
+
+    // N1: the far end's Re-INVITE during the 491 back-off opened Y: our retry for X is dropped.
+    @Test
+    fun incomingOfferDuringBackOffSupersedesTheRetry() {
+        val atGlare = SlotState("home", null)
+        assertTrue(supersededDuringBackOff(atGlare, SlotState("home", "Y")))
+        assertTrue(supersededDuringBackOff(SlotState("home", "X"), SlotState("home", null)))
+        assertTrue(supersededDuringBackOff(null, SlotState("home", "Y")))
+    }
+
+    @Test
+    fun noIncomingOfferDuringBackOffKeepsTheRetry() {
+        assertFalse(supersededDuringBackOff(SlotState("home", "X"), SlotState("home", "X")))
+        assertFalse(supersededDuringBackOff(null, null))
+    }
+
+    // N1: a retry that got 200 OK puts its target on screen unless it is already there.
+    @Test
+    fun confirmedRetryRelaunchesItsTargetOverAnotherPage() {
+        assertEquals("X", pageToRelaunch("X", "Y", "home"))
+        assertEquals("home", pageToRelaunch("home", "Y", "home"))
+        assertNull(pageToRelaunch("X", "X", "home"))
+    }
+
+    @Test
+    fun operatorMenuCountsAsTheHomePage() {
+        assertNull(pageToRelaunch("home", "operator-menu", "home"))
+        assertEquals("X", pageToRelaunch("X", "operator-menu", "home"))
+    }
+
+    // N2: switch X->Y rejected, App PC closed locally, far end still holds X: sync.
+    @Test
+    fun rejectedSwitchClosedLocallyNeedsSync() {
+        assertTrue(needsSyncAfterRollback(isSync = false, local = SlotState("home", null), confirmed = SlotState("home", "X")))
+    }
+
+    // N2: close-to-Home rejected (or 3x 491): local has no App, the far end kept X: sync.
+    @Test
+    fun rejectedCloseToHomeNeedsSync() {
+        val before = SlotState("home", "X")
+        val confirmed = confirmedAfter(ReInviteOutcome.Failed(488), SlotState("home", null), before)
+        assertTrue(needsSyncAfterRollback(false, SlotState("home", null), confirmed))
+        val afterGlares = confirmedAfter(ReInviteOutcome.Failed(491), SlotState("home", null), before)
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(491), MAX_GLARE_ATTEMPTS, superseded = false))
+        assertTrue(needsSyncAfterRollback(false, SlotState("home", null), afterGlares))
+    }
+
+    @Test
+    fun unknownConfirmedAfterTimeoutNeedsSync() {
+        assertTrue(needsSyncAfterRollback(false, SlotState("home", null), null))
+    }
+
+    @Test
+    fun matchingSlotsOrASyncNeedNoFurtherSync() {
+        // Rejected first App open: rolled back to what the far end holds.
+        assertFalse(needsSyncAfterRollback(false, SlotState("home", null), SlotState("home", null)))
+        // Rejected Home offer: local Home dropped, far end has none.
+        assertFalse(needsSyncAfterRollback(false, SlotState(null, null), SlotState(null, null)))
+        // A sync is never re-synced.
+        assertFalse(needsSyncAfterRollback(true, SlotState("home", null), SlotState("home", "X")))
+    }
+
+    // N2: the sync for a rolled-back switch re-offers the local slots with no local step.
+    @Test
+    fun syncAfterRejectedSwitchReOffersWithoutSteps() {
+        val plan = planSlotChange(SlotState("home", null), SlotState("home", null), SlotState("home", "X"))
+        assertEquals(SlotPlan(openHome = null, closeApp = false, openApp = null), plan)
+    }
 }

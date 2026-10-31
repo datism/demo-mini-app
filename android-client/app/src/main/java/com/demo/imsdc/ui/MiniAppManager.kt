@@ -26,8 +26,11 @@ import com.demo.imsdc.webrtc.SlotPlan
 import com.demo.imsdc.webrtc.SlotState
 import com.demo.imsdc.webrtc.confirmedAfter
 import com.demo.imsdc.webrtc.desiredSlots
+import com.demo.imsdc.webrtc.needsSyncAfterRollback
+import com.demo.imsdc.webrtc.pageToRelaunch
 import com.demo.imsdc.webrtc.outcomeAction
 import com.demo.imsdc.webrtc.planSlotChange
+import com.demo.imsdc.webrtc.supersededDuringBackOff
 import com.demo.imsdc.webrtc.reInviteRetryDelayMs
 import com.demo.imsdc.webrtc.WebRtcManager
 import com.demo.imsdc.media.RtpMediaManager
@@ -607,7 +610,7 @@ class MiniAppManager(val activity: CallActivity) {
             try {
                 // Home first (mid 3): go-mf takes an App line only with a Home context. Not for hotlines (no mid 4).
                 if (hotlineApp == null && request.target != HOME_APP && localSlots().home == null) {
-                    val home = sendChange(AdcRequest(HOME_APP, request.sync))
+                    val home = sendChange(AdcRequest(HOME_APP, request.sync), showsPage = false)
                     if (home != ChangeResult.DONE) {
                         if (home == ChangeResult.REJECTED) rollbackAppSlot("Home ADC could not be opened for ${request.target}")
                         return@launch
@@ -628,12 +631,19 @@ class MiniAppManager(val activity: CallActivity) {
      * Moves the slots to what [request] wants and negotiates it: one Re-INVITE, or none if the local slots
      * already match and the far end confirmed them. A 491 is re-offered after the RFC 3261 back-off: the
      * plan is recomputed against the unconfirmed local slots, so the same offer really goes out again.
+     * [showsPage]: the page shows [request]'s target (false for the Home-first step of an App request).
      */
-    private suspend fun sendChange(request: AdcRequest): ChangeResult {
+    private suspend fun sendChange(request: AdcRequest, showsPage: Boolean = true): ChangeResult {
         val desired = desiredSlots(request.target, HOME_APP, hotlineApp)
         var attempt = 1
+        var confirmedAtGlare: SlotState? = null
         while (true) {
             val step = negotiation.withLock {
+                // The far end's Re-INVITE, taken during the back-off, changed the slots: its offer won the glare.
+                if (attempt > 1 && supersededDuringBackOff(confirmedAtGlare, confirmed)) {
+                    Log.i(TAG, "Re-INVITE for ${request.target} superseded by the far end's offer: confirmed=$confirmed")
+                    return@withLock OutcomeAction.SUPERSEDED to false
+                }
                 val plan = planSlotChange(desired, localSlots(), confirmed) ?: return@withLock null
                 applyPlan(plan)
                 val offered = localSlots()
@@ -652,14 +662,25 @@ class MiniAppManager(val activity: CallActivity) {
                             activity.sipManager.homeReqApp = null
                         }
                     }
+                    OutcomeAction.RETRY -> confirmedAtGlare = confirmed
                     else -> Unit
                 }
-                // No answer in time: nobody knows what the far end holds, so re-offer the local slots once.
-                action to (action == OutcomeAction.ROLLBACK && !request.sync && confirmed == null)
+                // The far end holds other slots than this side now does (rejected switch rolled back locally,
+                // or no answer in time): re-offer the local slots once.
+                action to (action == OutcomeAction.ROLLBACK && needsSyncAfterRollback(request.sync, localSlots(), confirmed))
             } ?: return ChangeResult.DONE
             val (action, needsSync) = step
             when (action) {
-                OutcomeAction.CONFIRM -> return ChangeResult.DONE
+                OutcomeAction.CONFIRM -> {
+                    // After a glare retry the page may show what an incoming Re-INVITE launched meanwhile.
+                    if (attempt > 1 && showsPage && !request.sync && hotlineApp == null) {
+                        pageToRelaunch(request.target, activity.currentAppId, HOME_APP)?.let {
+                            Log.i(TAG, "Glare retry confirmed ${request.target}: relaunching it over ${activity.currentAppId}")
+                            launchMiniApp(it, sendRemoteTrigger = false)
+                        }
+                    }
+                    return ChangeResult.DONE
+                }
                 OutcomeAction.SUPERSEDED -> return ChangeResult.SUPERSEDED
                 OutcomeAction.ROLLBACK -> {
                     if (needsSync && !requests.hasPending) submit(AdcRequest(hotlineApp ?: HOME_APP, sync = true))
