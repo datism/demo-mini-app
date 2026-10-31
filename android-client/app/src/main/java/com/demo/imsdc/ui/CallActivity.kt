@@ -1190,7 +1190,7 @@ class CallActivity : AppCompatActivity() {
                     sipManager.homeReqApp?.contains("operator-menu") == true -> "operator-menu"
                     else -> sipManager.homeReqApp
                 }
-                if (currentReqApp != targetId || webRtcManager.adcPC == null) {
+                if (currentReqApp != targetId || webRtcManager.homeAdcPC == null) {
                     android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
                     miniAppManager.triggerAppNegotiationReInvite(targetId)
                 } else {
