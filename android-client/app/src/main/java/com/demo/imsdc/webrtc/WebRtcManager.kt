@@ -551,14 +551,19 @@ class WebRtcManager(private val context: Context) {
     }
 
     /**
-     * Local answer of one PeerConnection. A STABLE PC with a local description reuses it (unchanged m-line);
+     * Local answer of one PeerConnection. A STABLE PC with a local description reuses it (unchanged m-line,
+     * with a=setup:actpass rewritten to the established role when that description is this side's offer);
      * a PC that holds no remote offer contributes no line.
      */
     private suspend fun answerFor(pc: PeerConnection?): String? {
         pc ?: return null
         val state = pc.signalingState()
-        if (state == PeerConnection.SignalingState.STABLE && pc.localDescription != null) {
-            return pc.localDescription.description
+        val local = pc.localDescription
+        if (state == PeerConnection.SignalingState.STABLE && local != null) {
+            // This side made the PC's last offer: reuse it with the established DTLS role, not actpass.
+            return if (local.type == SessionDescription.Type.OFFER)
+                AdcSdp.answerSetupFromOffer(local.description, pc.remoteDescription?.description)
+            else local.description
         }
         if (state != PeerConnection.SignalingState.HAVE_REMOTE_OFFER) {
             Log.i(TAG, "No answer from PC in signalingState $state (no remote offer applied)")

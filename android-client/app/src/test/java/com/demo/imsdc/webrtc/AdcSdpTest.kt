@@ -74,4 +74,19 @@ class AdcSdpTest {
         assertNull(p.home)
         assertTrue(p.app!!.contains("a=ice-ufrag:a"))
     }
+
+    @Test
+    fun answerFromOwnOffer_takesRoleOppositeToRemote() {
+        val offer = "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=setup:actpass\r\na=mid:0\r\n"
+        assertTrue(AdcSdp.answerSetupFromOffer(offer, "a=setup:passive\r\n").contains("a=setup:active\r\n"))
+        assertTrue(AdcSdp.answerSetupFromOffer(offer, "a=setup:active\r\n").contains("a=setup:passive\r\n"))
+        assertTrue(AdcSdp.answerSetupFromOffer(offer, null).contains("a=setup:passive\r\n"))
+        assertTrue(!AdcSdp.answerSetupFromOffer(offer, "a=setup:passive").contains("actpass"))
+    }
+
+    @Test
+    fun answerFromOwnOffer_keepsAnEstablishedRole() {
+        val desc = "a=setup:active\r\na=mid:0\r\n"
+        assertEquals(desc, AdcSdp.answerSetupFromOffer(desc, "a=setup:passive"))
+    }
 }

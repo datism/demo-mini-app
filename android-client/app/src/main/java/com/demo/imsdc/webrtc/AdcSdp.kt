@@ -69,6 +69,17 @@ object AdcSdp {
 
     fun normalizeToLocalMid(block: String): String = setMid(block, "0")
 
+    /**
+     * An answer carries a=setup:active or a=setup:passive, never actpass (RFC 5763 §5). A STABLE PC whose
+     * local description is its own earlier offer reuses it in an answer, so put in the DTLS role that PC
+     * took when the far end answered: the opposite of the far end's a=setup (absent = active, RFC 4145 §4).
+     */
+    fun answerSetupFromOffer(localOffer: String, remoteAnswer: String?): String {
+        val remote = Regex("a=setup:(\\w+)").find(remoteAnswer ?: "")?.groupValues?.get(1)
+        val role = if (remote == "passive") "active" else "passive"
+        return localOffer.replace("a=setup:actpass", "a=setup:$role")
+    }
+
     /** First application block of an ADC part (its m-line section), without the session header. */
     private fun firstApp(part: String): String? = splitMedia(part).apps.firstOrNull()
 
