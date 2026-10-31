@@ -273,54 +273,7 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 		return
 	}
 
-	// 1. Notify DCSF via DC1 (MEDIA_CHANGE_REQUEST)
-	dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, session.CallID)
-	dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
-
-	adcType := "P2P"
-	if reqAppId != "" {
-		if reqAppId == "fun-calling-app" || reqAppId == "caro" || reqAppId == "tic-tac-toe-app" {
-			adcType = "P2A2P"
-		} else if reqAppId == "operator-menu" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
-			adcType = "P2A"
-		}
-	}
-
-	var dcMediaPara *sba.DcMediaPara
-	if appBinding != nil {
-		dcMediaPara = &sba.DcMediaPara{
-			DcType:         "ADC",
-			AdcType:        adcType,
-			AppBindingInfo: appBinding,
-		}
-	}
-
-	notification := sba.SessionEventNotification{
-		SessionID: session.CallID,
-		NotificationEvent: sba.NotificationEvent{
-			ReferenceID:    11,
-			EventType:      "MEDIA_CHANGE_REQUEST",
-			EventInitiator: "served IMS subscriber",
-		},
-		AppBindingInfo: appBinding, // backwards compatibility
-		DcMediaPara:    dcMediaPara,
-		PsDataOff:      session.PsDataOff,
-		SessionInfo: sba.SessionInfo{
-			CallingIdentity: "sip:" + session.Caller + "@" + b.cfg.Domains.Ims,
-			CalledIdentity:  "sip:" + session.Callee + "@" + b.cfg.Domains.Ims,
-			SessionCase:     "ORIGINATING_IMS_SESSION",
-		},
-	}
-
-	go func() {
-		log.Printf("[IMS-AS] Sending Nimsas Nimsas_SessionEventControl_Notify (MEDIA_CHANGE_REQUEST) to DCSF")
-		_ = b.CallNimsasSessionEventNotify(dcsfURL, notification)
-	}()
-
-	// Drain any stale instructions
-	for len(session.InstructionChan) > 0 {
-		<-session.InstructionChan
-	}
+	b.notifyMediaChangeRequest(session, appBinding, reqAppId)
 
 	// Wait for media instruction from DCSF
 	select {
@@ -1045,4 +998,57 @@ func hotlineReInviteAnswer(offer string, mfInfoA, mfInfoB *MFAllocResponse, isCa
 		return offer
 	}
 	return RewriteSDP(offer, own, appID)
+}
+
+// notifyMediaChangeRequest sends MEDIA_CHANGE_REQUEST to the DCSF for the
+// requested app and drains stale media instructions before the caller waits.
+func (b *B2BUA) notifyMediaChangeRequest(session *CallSession, appBinding *sba.AppBindingInfo, reqAppId string) {
+	// 1. Notify DCSF via DC1 (MEDIA_CHANGE_REQUEST)
+	dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, session.CallID)
+	dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
+
+	adcType := "P2P"
+	if reqAppId != "" {
+		if reqAppId == "fun-calling-app" || reqAppId == "caro" || reqAppId == "tic-tac-toe-app" {
+			adcType = "P2A2P"
+		} else if reqAppId == "operator-menu" || reqAppId == "smart-menu" || reqAppId == "enterprise-callerid" || reqAppId == "flight-booking" {
+			adcType = "P2A"
+		}
+	}
+
+	var dcMediaPara *sba.DcMediaPara
+	if appBinding != nil {
+		dcMediaPara = &sba.DcMediaPara{
+			DcType:         "ADC",
+			AdcType:        adcType,
+			AppBindingInfo: appBinding,
+		}
+	}
+
+	notification := sba.SessionEventNotification{
+		SessionID: session.CallID,
+		NotificationEvent: sba.NotificationEvent{
+			ReferenceID:    11,
+			EventType:      "MEDIA_CHANGE_REQUEST",
+			EventInitiator: "served IMS subscriber",
+		},
+		AppBindingInfo: appBinding, // backwards compatibility
+		DcMediaPara:    dcMediaPara,
+		PsDataOff:      session.PsDataOff,
+		SessionInfo: sba.SessionInfo{
+			CallingIdentity: "sip:" + session.Caller + "@" + b.cfg.Domains.Ims,
+			CalledIdentity:  "sip:" + session.Callee + "@" + b.cfg.Domains.Ims,
+			SessionCase:     "ORIGINATING_IMS_SESSION",
+		},
+	}
+
+	go func() {
+		log.Printf("[IMS-AS] Sending Nimsas Nimsas_SessionEventControl_Notify (MEDIA_CHANGE_REQUEST) to DCSF")
+		_ = b.CallNimsasSessionEventNotify(dcsfURL, notification)
+	}()
+
+	// Drain any stale instructions
+	for len(session.InstructionChan) > 0 {
+		<-session.InstructionChan
+	}
 }
