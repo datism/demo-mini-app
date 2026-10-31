@@ -98,3 +98,45 @@ func TestCloseAppSlot(t *testing.T) {
 		t.Fatalf("state not reset: %+v %v %v", s.AppSlot, s.AppMfA, s.AppMfB)
 	}
 }
+
+const slottedOffer = "v=0\r\no=- 1 1 IN IP4 10.0.0.5\r\ns=-\r\nt=0 0\r\n" +
+	"m=audio 5000 RTP/AVP 8\r\nc=IN IP4 10.0.0.5\r\n" +
+	"m=application 5001 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 10.0.0.5\r\na=mid:2\r\n" +
+	"m=application 5002 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 10.0.0.5\r\na=mid:3\r\n" +
+	"m=application 5003 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 10.0.0.5\r\na=mid:4\r\n" +
+	"a=3gpp-req-app:\"caro\";1000-UE\r\n"
+
+func homeSection(sdp string) string {
+	parts := strings.Split(sdp, "m=application ")
+	return parts[2] // [0] session+audio, [1] BDC, [2] Home, [3] App
+}
+
+func TestRejectedAppOffer(t *testing.T) {
+	s := &CallSession{MfInfoB: &MFAllocResponse{SessionID: "sb", IP: "1.1.1.1", Port: 40000, AdcPort: 40001, AdcIceUfrag: "hu"}}
+	target := s.slotsFor(false)
+	got := rejectedAppOffer(slottedOffer, target)
+	if !strings.Contains(got, "m=application 0 UDP/DTLS/SCTP webrtc-datachannel") {
+		t.Fatalf("App line not port 0:\n%s", got)
+	}
+	if strings.Contains(got, "10.0.0.5") || strings.Contains(got, "caro") {
+		t.Fatalf("initiator address or App binding leaked:\n%s", got)
+	}
+	if want := homeSection(RewriteSDP(slottedOffer, s.slotsFor(false), "")); homeSection(got) != want {
+		t.Fatalf("Home line changed:\ngot  %q\nwant %q", homeSection(got), want)
+	}
+	if out := rejectedAppOffer(slottedOffer, nil); !strings.Contains(out, "m=application 0 ") {
+		t.Fatalf("nil target must still close the App line:\n%s", out)
+	}
+}
+
+func TestRewriteSDP_SlotsWithoutAppMFClosesAppLine(t *testing.T) {
+	s := &CallSession{MfInfoA: &MFAllocResponse{SessionID: "sa", IP: "1.1.1.1", Port: 40000, AdcPort: 40001, AdcIceUfrag: "hu"}}
+	got := RewriteSDP(slottedOffer, s.slotsFor(true), "caro")
+	app := strings.Split(got, "m=application ")[3]
+	if !strings.HasPrefix(app, "0 UDP/DTLS/SCTP webrtc-datachannel") {
+		t.Fatalf("App line must be port 0, got %q", app)
+	}
+	if strings.Contains(app, "ice-ufrag") || strings.Contains(got, getTLSId("sa-adc")) {
+		t.Fatalf("App line borrowed Home credentials: %q", app)
+	}
+}

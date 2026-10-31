@@ -181,7 +181,9 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 				if f := strings.Fields(trimmed); len(f) >= 2 {
 					fmt.Sscanf(f[1], "%d", &origPort)
 				}
-				if slot == SlotApp && origPort == 0 {
+				// An App line with no App-slot MF endpoint must not borrow the
+				// Home credentials: send it as port 0.
+				if slot == SlotApp && (origPort == 0 || (mfInfo.Slots != nil && sm == nil)) {
 					// Inactive App slot: keep the line, port 0, no MF endpoint.
 					newLines = append(newLines, "m=application 0 UDP/DTLS/SCTP webrtc-datachannel")
 					newLines = append(newLines, fmt.Sprintf("c=IN IP4 %s", externalIP))

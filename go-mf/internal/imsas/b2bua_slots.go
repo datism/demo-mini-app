@@ -5,6 +5,7 @@ import "github.com/demo/ims-dc-mf/internal/sba"
 type slotState struct {
 	AppID      string
 	CtxCreated bool
+	AdcType    string // App slot only: P2A / P2A2P from the DCSF instruction
 }
 
 func appContextID(callID string) string { return callID + slotSuffix(SlotApp) }

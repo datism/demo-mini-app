@@ -124,6 +124,7 @@ type SerializableCallSession struct {
 	ActiveAppID           string           `json:"activeAppId"`
 	AppSlotAppID          string           `json:"appSlotAppId"`
 	AppSlotCtx            bool             `json:"appSlotCtx"`
+	AppSlotAdcType        string           `json:"appSlotAdcType,omitempty"`
 	AppMfA                *SlotMF          `json:"appMfA"`
 	AppMfB                *SlotMF          `json:"appMfB"`
 	OrigMsgRaw            string           `json:"origMsgRaw"`
@@ -163,6 +164,7 @@ func (s *CallSession) ToSerializable() SerializableCallSession {
 		ActiveAppID:           s.ActiveAppID,
 		AppSlotAppID:          s.AppSlot.AppID,
 		AppSlotCtx:            s.AppSlot.CtxCreated,
+		AppSlotAdcType:        s.AppSlot.AdcType,
 		AppMfA:                s.AppMfA,
 		AppMfB:                s.AppMfB,
 		IsPlayingAnnouncement: s.IsPlayingAnnouncement,
@@ -208,7 +210,7 @@ func (scs *SerializableCallSession) ToCallSession() *CallSession {
 		IsInterworking:        scs.IsInterworking,
 		PsDataOff:             scs.PsDataOff,
 		ActiveAppID:           scs.ActiveAppID,
-		AppSlot:               slotState{AppID: scs.AppSlotAppID, CtxCreated: scs.AppSlotCtx},
+		AppSlot:               slotState{AppID: scs.AppSlotAppID, CtxCreated: scs.AppSlotCtx, AdcType: scs.AppSlotAdcType},
 		AppMfA:                scs.AppMfA,
 		AppMfB:                scs.AppMfB,
 		IsPlayingAnnouncement: scs.IsPlayingAnnouncement,

@@ -153,7 +153,12 @@ func (b *B2BUA) handleSlottedReInvite(session *CallSession, msg *SIPMessage, rem
 		case session.ResponseChan <- instruction:
 		default:
 		}
-		if mSpec == nil || mSpec.AdcType == "P2P" {
+		if mSpec == nil {
+			log.Printf("[IMS-AS] App slot: no DC media instruction; disabling the App line")
+			b.rejectAppLine(session, msg, isCallerInitiator)
+			return
+		}
+		if mSpec.AdcType == "P2P" {
 			b.forwardReInvite(session, msg, msg.Body)
 			return
 		}
@@ -193,10 +198,9 @@ func (b *B2BUA) handleSlottedReInvite(session *CallSession, msg *SIPMessage, rem
 		appA, appB := slotMFFromContext(allocated)
 		session.mu.Lock()
 		session.AppMfA, session.AppMfB = appA, appB
-		session.AppSlot = slotState{AppID: binding.ReqAppId, CtxCreated: true}
+		session.AppSlot = slotState{AppID: binding.ReqAppId, CtxCreated: true, AdcType: mSpec.AdcType}
 		session.AppAnswerPending = true
 		session.mu.Unlock()
-		session.AdcType = mSpec.AdcType
 
 		offer := b.slotOffer(session, msg, isCallerInitiator, binding.ReqAppId)
 		if mSpec.AdcType == "P2A" {
@@ -206,10 +210,26 @@ func (b *B2BUA) handleSlottedReInvite(session *CallSession, msg *SIPMessage, rem
 
 	case <-time.After(5 * time.Second):
 		log.Printf("[IMS-AS] App slot: no media instruction in 5 s; disabling the App line [TS 24.186 9.4.4]")
-		// The App line goes out as port 0, so any App context still open is gone too.
-		b.closeAppSlot(session)
-		b.forwardReInvite(session, msg, ExcludeADCFromSDP(msg.Body))
+		b.rejectAppLine(session, msg, isCallerInitiator)
 	}
+}
+
+// rejectAppLine closes the App slot and forwards the offer with the App line at
+// port 0. Every other line is still rewritten to the MF, so the initiator's own
+// addresses never reach the peer.
+func (b *B2BUA) rejectAppLine(session *CallSession, msg *SIPMessage, isCallerInitiator bool) {
+	b.closeAppSlot(session)
+	b.forwardReInvite(session, msg, rejectedAppOffer(msg.Body, session.slotsFor(!isCallerInitiator)))
+}
+
+// rejectedAppOffer sets the App line to port 0 and, when the peer's MF view is
+// known, rewrites the rest of the offer to the MF.
+func rejectedAppOffer(sdp string, target *MFAllocResponse) string {
+	body := setAppLinePort(sdp, 0)
+	if target != nil {
+		body = RewriteSDP(body, target, "")
+	}
+	return body
 }
 
 // answerSlots returns the per-slot MF view for an answer: every slot passive
@@ -237,7 +257,7 @@ func (b *B2BUA) handleSlottedAnswer(session *CallSession, msg *SIPMessage, dcsfU
 	session.AppAnswerPending = false
 	session.mu.Unlock()
 
-	if pending && app.CtxCreated && session.AdcType != "P2A" {
+	if pending && app.CtxCreated && app.AdcType != "P2A" {
 		path := "/terminations/1/sdp"
 		if !isCallerInitiator {
 			path = "/terminations/0/sdp"
@@ -263,7 +283,7 @@ func (b *B2BUA) handleSlottedAnswer(session *CallSession, msg *SIPMessage, dcsfU
 
 	// The answer returns to the initiator: toward the caller when the caller initiated.
 	body := msg.Body
-	if app.CtxCreated && session.AdcType == "P2A" {
+	if app.CtxCreated && app.AdcType == "P2A" {
 		// P2A: the peer was offered the App line at port 0; the MF terminates it,
 		// so the initiator must still get an active App line.
 		body = setAppLinePort(body, 9)
