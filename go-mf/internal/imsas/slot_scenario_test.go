@@ -53,7 +53,16 @@ func TestScenario_OneReInvitePerStep_HomeNeverDeleted(t *testing.T) {
 		{"resend same offer", "9", "caro", appNone, 3, 2},
 		{"back to emotes again", "0", "", appClose, 3, 3},
 	}
-	var prevHomeLine string
+	// Step 0: Re-INVITE #1 opens Home on the legacy path (one ADC line, Slots == nil).
+	legacyOffer := strings.SplitN(offer(true, "0", ""), "m=application 0 ", 2)[0]
+	if n := len(parseAdcLines(legacyOffer)); n != 1 {
+		t.Fatalf("step 0: want 1 ADC line, got %d", n)
+	}
+	legacyHome := *home
+	legacyHome.AdcSetupRole = "actpass" // the legacy offer path sets actpass
+	legacyOut := RewriteSDP(legacyOffer, &legacyHome, "fun-calling-app")
+	prevHomeLine := homeSectionOf(legacyOut)
+
 	for _, st := range steps {
 		sdp := offer(true, st.appPort, st.appID)
 		lines := parseAdcLines(sdp)
@@ -77,10 +86,8 @@ func TestScenario_OneReInvitePerStep_HomeNeverDeleted(t *testing.T) {
 			}
 		}
 		// Home line is byte-identical across every step.
-		i := strings.Index(out, "a=mid:3")
-		j := strings.Index(out[i:], "m=application")
-		homeLine := out[i : i+j]
-		if prevHomeLine != "" && homeLine != prevHomeLine {
+		homeLine := homeSectionOf(out)
+		if homeLine != prevHomeLine {
 			t.Fatalf("%s: Home section changed:\n--- before\n%s\n--- after\n%s", st.name, prevHomeLine, homeLine)
 		}
 		prevHomeLine = homeLine
@@ -92,4 +99,26 @@ func TestScenario_OneReInvitePerStep_HomeNeverDeleted(t *testing.T) {
 			t.Fatalf("%s: App line state does not match slot state:\n%s", st.name, out)
 		}
 	}
+}
+
+// homeSectionOf returns the whole Home media section (the second
+// m=application line up to the next m= line or the end), credentials included.
+func homeSectionOf(sdp string) string {
+	parts := strings.SplitAfter(sdp, "\r\n")
+	var b strings.Builder
+	n := 0
+	for _, l := range parts {
+		if strings.HasPrefix(l, "m=") {
+			if strings.HasPrefix(l, "m=application ") {
+				n++
+			}
+			if n > 2 || (n == 2 && !strings.HasPrefix(l, "m=application ")) {
+				break
+			}
+		}
+		if n == 2 {
+			b.WriteString(l)
+		}
+	}
+	return b.String()
 }

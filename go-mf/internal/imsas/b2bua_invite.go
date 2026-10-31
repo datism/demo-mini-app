@@ -201,7 +201,7 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	session.OrigMsg = msg
 	log.Printf("[IMS-AS] Processing re-INVITE for session %s (caller=%s callee=%s)", session.CallID, session.Caller, session.Callee)
-	if lines := parseAdcLines(msg.Body); len(lines) == 2 && !config.IsHotline(session.Callee) {
+	if lines := parseAdcLines(msg.Body); useSlottedPath(session, lines) {
 		b.handleSlottedReInvite(session, msg, remoteAddr, lines)
 		return
 	}

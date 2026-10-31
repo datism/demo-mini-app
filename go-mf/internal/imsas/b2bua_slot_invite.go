@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/demo/ims-dc-mf/internal/config"
 	"github.com/demo/ims-dc-mf/internal/sba"
 )
 
@@ -112,6 +113,9 @@ func (b *B2BUA) slotOffer(session *CallSession, msg *SIPMessage, isCallerInitiat
 
 func (b *B2BUA) handleSlottedReInvite(session *CallSession, msg *SIPMessage, remoteAddr *net.UDPAddr, lines []adcLine) {
 	isCallerInitiator := msg.ExtractUsername("From") == session.Caller
+	session.mu.Lock()
+	session.SlottedAnswerPending = true
+	session.mu.Unlock()
 	// Every slotted answer is returned against the request that started it.
 	if isCallerInitiator {
 		session.LastCallerReInviteMsg = msg
@@ -159,7 +163,10 @@ func (b *B2BUA) handleSlottedReInvite(session *CallSession, msg *SIPMessage, rem
 			return
 		}
 		if mSpec.AdcType == "P2P" {
-			b.forwardReInvite(session, msg, msg.Body)
+			// No MF anchoring for a P2P App line in the slotted model: reject it
+			// rather than forward the raw offer (DCSF maps unknown apps to P2P).
+			log.Printf("[IMS-AS] App slot: %q is P2P; disabling the App line", binding.ReqAppId)
+			b.rejectAppLine(session, msg, isCallerInitiator)
 			return
 		}
 
@@ -255,7 +262,16 @@ func (b *B2BUA) handleSlottedAnswer(session *CallSession, msg *SIPMessage, dcsfU
 	pending := session.AppAnswerPending
 	app := session.AppSlot
 	session.AppAnswerPending = false
+	session.SlottedAnswerPending = false
 	session.mu.Unlock()
+
+	if pending && app.CtxCreated && app.AdcType != "P2A" && !appLineActive(msg.Body) {
+		// The peer refused the new App line: drop the App context and give the
+		// initiator port 0 for it. No MF patch, no success event.
+		log.Printf("[IMS-AS] App slot: peer answered the App line with port 0; closing %s", appContextID(session.CallID))
+		b.closeAppSlot(session)
+		pending, app = false, slotState{}
+	}
 
 	if pending && app.CtxCreated && app.AdcType != "P2A" {
 		path := "/terminations/1/sdp"
@@ -293,6 +309,19 @@ func (b *B2BUA) handleSlottedAnswer(session *CallSession, msg *SIPMessage, dcsfU
 		out = RewriteSDP(body, view, app.AppID)
 	}
 	b.sendAnswerToInitiator(session, msg, isCallerInitiator, out)
+}
+
+// appLineActive reports whether the SDP has an App ADC line with a non-zero port.
+func appLineActive(sdp string) bool {
+	l := adcLineFor(parseAdcLines(sdp), SlotApp)
+	return l != nil && l.Active()
+}
+
+// useSlottedPath reports whether a re-INVITE goes to the slotted handler: two
+// ADC lines, an existing Home context, and not a hotline call. An App line
+// offered before the Home slot exists takes the legacy path.
+func useSlottedPath(session *CallSession, lines []adcLine) bool {
+	return len(lines) == 2 && session.IsAnchorCtxCreated && !config.IsHotline(session.Callee)
 }
 
 // setAppLinePort sets the port of the App ADC m-line (the third m=application)
@@ -344,6 +373,7 @@ func (b *B2BUA) rollbackAppSlotChange(session *CallSession) {
 	session.mu.Lock()
 	pending := session.AppAnswerPending
 	session.AppAnswerPending = false
+	session.SlottedAnswerPending = false
 	session.mu.Unlock()
 	if pending {
 		b.closeAppSlot(session)

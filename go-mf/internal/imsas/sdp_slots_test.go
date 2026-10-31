@@ -55,7 +55,7 @@ func TestRewriteSDP_SlotsUseOwnMfEndpoints(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "a=tls-id:"+getTLSId("call-A-home")) || !strings.Contains(out, "a=tls-id:"+getTLSId("call-A-app")) {
+	if !strings.Contains(out, "a=tls-id:"+getTLSId("call-A-adc")) || !strings.Contains(out, "a=tls-id:"+getTLSId("call-A-app-au")) {
 		t.Fatalf("tls-ids not per slot:\n%s", out)
 	}
 }

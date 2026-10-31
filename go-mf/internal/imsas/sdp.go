@@ -193,7 +193,15 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 				var adcIceUfrag, adcIcePwd, adcFingerprint, role, tlsKey string
 				if sm != nil {
 					adcPort, adcIceUfrag, adcIcePwd, adcFingerprint, role = sm.Port, sm.IceUfrag, sm.IcePwd, sm.Fingerprint, sm.Setup
-					tlsKey = mfInfo.SessionID + "-" + string(slot)
+					if slot == SlotHome {
+						// Same key as the legacy (Slots == nil) rewrite of Re-INVITE #1,
+						// so the Home line keeps its tls-id once a second ADC line appears.
+						tlsKey = mfInfo.SessionID + "-adc"
+					} else {
+						// Stable while the App context lives; a new context (new ufrag)
+						// is a new DTLS association and gets a new tls-id.
+						tlsKey = mfInfo.SessionID + "-app-" + sm.IceUfrag
+					}
 				} else {
 					adcPort = mfInfo.AdcPort
 					if adcPort == 0 {
@@ -234,9 +242,6 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 						endpointType = "Server"
 					}
 					newLines = append(newLines, fmt.Sprintf("a=dcmap:1000 subprotocol=\"%s\"", appId))
-					if slot == SlotHome && sm != nil {
-						newLines = append(newLines, "a=dcmap:1001 subprotocol=\"emoji\"")
-					}
 					newLines = append(newLines, fmt.Sprintf("a=3gpp-req-app:\"%s\";1000-%s", appId, endpointType))
 				}
 			}

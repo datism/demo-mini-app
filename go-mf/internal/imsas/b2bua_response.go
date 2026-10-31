@@ -56,13 +56,14 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, session.CallID)
 		dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
 
-		// Answer to a slotted (Home + App ADC) Re-INVITE. An answer with two ADC
-		// lines can only mirror a slotted offer, so it always takes this path, also
-		// when the App slot was unchanged (the legacy path would forward it raw).
+		// Answer to a slotted (Home + App ADC) Re-INVITE, including one that left
+		// the App slot unchanged (the legacy path would forward it raw). A two-ADC
+		// offer sent before the Home slot existed went the legacy way, and so does
+		// its answer.
 		session.mu.Lock()
-		appPending := session.AppAnswerPending
+		slotted := session.SlottedAnswerPending || session.AppAnswerPending
 		session.mu.Unlock()
-		if appPending || len(parseAdcLines(msg.Body)) == 2 {
+		if slotted {
 			b.handleSlottedAnswer(session, msg, dcsfURL, !isCalleeInitiatedAnswer)
 			return
 		}

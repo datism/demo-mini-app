@@ -34,7 +34,7 @@ import (
 // CallSession represents an active end-to-end B2BUA call session in IMS-AS.
 // It maintains dual-leg dialog mappings, media endpoints on Media Function, and SBA DC1/DC2 contexts.
 type CallSession struct {
-	// mu guards the App-slot fields (AppSlot, AppMfA, AppMfB, AppAnswerPending)
+	// mu guards the App-slot fields (AppSlot, AppMfA, AppMfB, AppAnswerPending, SlottedAnswerPending)
 	// and the Home snapshot taken from MfInfoA/MfInfoB. Never hold it across SBA calls.
 	mu sync.Mutex
 
@@ -83,6 +83,8 @@ type CallSession struct {
 	AppSlot          slotState // App ADC slot; the Home slot is ActiveAppID + IsAnchorCtxCreated
 	AppMfA, AppMfB   *SlotMF   // MF endpoints for the App slot, toward caller / callee
 	AppAnswerPending bool      // a Re-INVITE that changed the App slot awaits its 200 OK
+	// SlottedAnswerPending: a Re-INVITE handled by handleSlottedReInvite awaits its 200 OK.
+	SlottedAnswerPending bool
 	LastCallerReInviteMsg  *SIPMessage
 	LastCalleeReInviteMsg  *SIPMessage
 
