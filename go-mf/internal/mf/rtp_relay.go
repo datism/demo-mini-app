@@ -157,6 +157,9 @@ func (m *MediaFunction) runGlobalRtpForwarder(conn *net.UDPConn, peerConn *net.U
 		if activeSession == nil {
 			senderIP := addr.IP.String()
 			for _, sess := range m.sessions {
+				if _, isShadow := appParentID(sess.CallID); isShadow {
+					continue // App-slot shadow sessions carry no RTP of their own
+				}
 				sess.mu.Lock()
 				sessIP := sess.RtpIP
 				sessAudioPort := sess.LocalAudioPort
