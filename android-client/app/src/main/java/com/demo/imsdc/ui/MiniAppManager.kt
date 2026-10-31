@@ -29,7 +29,6 @@ import android.os.Build
 import android.view.SurfaceHolder
 import android.view.WindowManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.json.JSONArray
@@ -528,7 +527,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     companion object {
-        const val HOME_APP = "fun-calling-app"
+        private const val HOME_APP = CallActivity.HOME_APP
         private const val ANSWER_TIMEOUT_MS = 5000L
     }
 

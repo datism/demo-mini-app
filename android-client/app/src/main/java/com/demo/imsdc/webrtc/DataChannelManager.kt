@@ -200,21 +200,6 @@ class DataChannelManager(
         Log.i(TAG, "BDC (id=${bdc.id()}): HTTP GET sent ($success): $request")
     }
 
-    /**
-     * Wait (bounded) until the package requested for [appId] has been installed, so the SIP Re-INVITE
-     * that follows does not tear the BDC down mid-download. Returns true when there is nothing to wait
-     * for (no request in flight) or the download completed OK; false on timeout or failure (the caller proceeds anyway and the
-     * pending request is re-sent when the BDC reopens).
-     */
-    suspend fun awaitAppDownload(appId: String, timeoutMs: Long): Boolean {
-        val done = synchronized(this) { if (downloadAppId == appId) downloadDone else null } ?: return true
-        // Only worth waiting if the GET actually went out; with the BDC closed the old behaviour applies.
-        if (synchronized(inFlightRequests) { !inFlightRequests.contains(appId) }) return true
-        val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { done.await() }
-        Log.i(TAG, "awaitAppDownload($appId): ${when (ok) { true -> "done"; false -> "failed"; null -> "timed out" }}")
-        return ok == true
-    }
-
     /** Forget a pending download, e.g. when the user goes back to the operator-menu. */
     fun cancelPendingDownload() {
         synchronized(this) {

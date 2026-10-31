@@ -60,7 +60,7 @@
 ### `sip/SdpHelper.kt`
 - Parse application blocks by `a=mid`, not by position (`appBlocks.getOrNull(0/1)` today).
 - `translateWebRtcOfferToSipOffer` emits up to three application m-lines (mid 2, 3, 4; mid 4 as port 0 when no app is open).
-- `a=tls-id` generated once per m-line per call and reused (today `tlsid${System.currentTimeMillis()}` per offer).
+- `a=tls-id` is one per DTLS association: stable while the PeerConnection lives, new with a new PeerConnection (derived from the certificate fingerprint) (today `tlsid${System.currentTimeMillis()}` per offer).
 - `translateSipAnswerToWebRtcAnswer` splits the answer into BDC / home / app parts for their PCs.
 
 ### `ui/MiniAppManager.kt`
