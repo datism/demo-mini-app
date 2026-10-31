@@ -17,6 +17,7 @@ import com.demo.imsdc.databinding.ActivityCallBinding
 import com.demo.imsdc.sip.SipManager
 import com.demo.imsdc.webrtc.AndroidBridgeInterface
 import com.demo.imsdc.webrtc.DataChannelManager
+import com.demo.imsdc.webrtc.LatestRequestQueue
 import com.demo.imsdc.webrtc.WebRtcManager
 import com.demo.imsdc.media.RtpMediaManager
 import android.app.KeyguardManager
@@ -32,7 +33,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.isActive
 import org.webrtc.PeerConnection
 import java.net.InetAddress
 
@@ -419,6 +419,7 @@ class MiniAppManager(val activity: CallActivity) {
                 else -> appId
             }
             activity.currentAppId = targetId
+            activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu")
             Log.i(TAG, "launchMiniApp targetId=$targetId")
             applyWebViewBounds(targetId)
 
@@ -430,7 +431,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
 
                 if (sendRemoteTrigger) {
-                    triggerAppNegotiationReInvite("operator-menu")
+                    triggerAppNegotiationReInvite(HOME_APP)
                 }
 
                 activity.binding.layoutMiddleDetails.visibility = View.GONE
@@ -525,102 +526,86 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    // The Re-INVITE in flight and the app it is for. Its target is tracked here rather than read from
-    // sipManager.homeReqApp, which is only set once the app download wait is over.
-    private var reInviteJob: kotlinx.coroutines.Job? = null
-    private var reInviteTargetId: String? = null
-    private var reInviteWaitingForDownload = false
-    private val APP_DOWNLOAD_WAIT_MS = 3000L
-
-    fun triggerAppNegotiationReInvite(appId: String) {
-        val targetId = when {
-            appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
-            appId.contains("operator-menu") -> "operator-menu"
-            else -> appId
-        }
-        val previous = reInviteJob
-        if (previous?.isActive == true) {
-            if (reInviteTargetId == targetId) {
-                Log.d(TAG, "Re-INVITE already in progress for $targetId, skipping duplicate trigger")
-                return
-            }
-            // The user left the app (e.g. back to operator-menu) while its Re-INVITE was still waiting
-            // for the package: drop it, or it would go out after this one and re-open the app on the network.
-            if (reInviteWaitingForDownload) {
-                Log.i(TAG, "Cancelling pending Re-INVITE for $reInviteTargetId (superseded by $targetId)")
-                previous.cancel()
-            }
-        }
-        reInviteTargetId = targetId
-        reInviteWaitingForDownload = false
-        reInviteJob = activity.lifecycleScope.launch(Dispatchers.Main) {
-            val self = coroutineContext[kotlinx.coroutines.Job]
-            try {
-                if (targetId != "operator-menu") {
-                    // The Re-INVITE re-negotiates media and can close the BDC; let the app package
-                    // requested for this launch arrive first (bounded, proceeds on timeout).
-                    if (reInviteJob === self) reInviteWaitingForDownload = true
-                    try {
-                        activity.dcManager.awaitAppDownload(targetId, APP_DOWNLOAD_WAIT_MS)
-                    } finally {
-                        if (reInviteJob === self) reInviteWaitingForDownload = false
-                    }
-                }
-                // The MF cannot move an open ADC to another app in place: it keeps the old DTLS association
-                // and ignores the new ADC offer, so the new app never connects. Release the current app's
-                // ADC first (the app → operator-menu → app sequence), then open the new one.
-                val currentApp = activity.sipManager.homeReqApp
-                if (targetId != "operator-menu" && currentApp != null && currentApp != "operator-menu" && currentApp != targetId) {
-                    Log.i(TAG, "Releasing ADC of $currentApp before switching to $targetId")
-                    sendAppReInvite("operator-menu")
-                    val answered = kotlinx.coroutines.withTimeoutOrNull(REINVITE_ANSWER_WAIT_MS) { reInviteAnswer?.await() }
-                    Log.i(TAG, "ADC release for $currentApp ${if (answered != null) "answered" else "not answered in time"}")
-                }
-                sendAppReInvite(targetId)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                Log.d(TAG, "Re-INVITE coroutine cancelled for app $targetId (call ended/navigated)")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send Re-INVITE for app: $targetId: ${e.message}")
-            } finally {
-                // Keep the job active briefly so a repeated trigger for the same app is still deduplicated.
-                if (isActive) kotlinx.coroutines.delay(1000)
-            }
-        }
+    companion object {
+        const val HOME_APP = "fun-calling-app"
+        private const val ANSWER_TIMEOUT_MS = 5000L
     }
 
-    // Completed when the 200 OK of the Re-INVITE sent by sendAppReInvite() has been applied.
+    private val requests = LatestRequestQueue<String>()
     private var reInviteAnswer: kotlinx.coroutines.CompletableDeferred<Unit>? = null
-    private val REINVITE_ANSWER_WAIT_MS = 5000L
 
     fun onReInviteAnswered() {
         reInviteAnswer?.complete(Unit)
     }
 
-    private suspend fun sendAppReInvite(targetId: String) {
-        activity.sipManager.homeReqApp = targetId
-        // Always close existing ADC first to isolate sessions
-        activity.webRtcManager.closeADC()
-        if (targetId != "operator-menu") {
-            Log.i(TAG, "Re-creating ADC for requested app: $targetId")
-            activity.webRtcManager.createADC()
-            activity.dcManager.setupADC()
-            if (targetId == "fun-calling-app") {
-                activity.webRtcManager.createADC2()
-                activity.dcManager.setupADC2()
-            }
+    private fun normalizeTarget(appId: String): String {
+        val id = when {
+            appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
+            else -> appId
         }
-        val localOffer = activity.webRtcManager.createOffer()
-        reInviteAnswer = kotlinx.coroutines.CompletableDeferred()
-        Log.i(TAG, "Creating standard-compliant Re-INVITE for app: $targetId")
-        withContext(Dispatchers.IO) {
-            activity.sipManager.sendReInviteWithSdp(localOffer)
+        val homeOpen = activity.webRtcManager.homeAdcPC != null
+        return if (id.contains("operator-menu") && homeOpen) HOME_APP else id
+    }
+
+    fun triggerAppNegotiationReInvite(appId: String) {
+        val target = normalizeTarget(appId)
+        if (target.contains("operator-menu")) return // Home not open: local menu, nothing to negotiate
+        requests.submit(target)?.let { runRequest(it) }
+            ?: Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $target")
+    }
+
+    private fun runRequest(target: String) {
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                if (target != HOME_APP && activity.webRtcManager.homeAdcPC == null) {
+                    sendChange(HOME_APP)            // Home first (mid 3), see ruling
+                }
+                sendChange(target)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Re-INVITE coroutine cancelled for $target (call ended)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send Re-INVITE for $target: ${e.message}")
+            } finally {
+                requests.complete()?.let { runRequest(it) }
+            }
         }
     }
 
+    /** Applies the local ADC change for [target] and sends exactly one Re-INVITE (or none if nothing changes). */
+    private suspend fun sendChange(target: String) {
+        val web = activity.webRtcManager
+        val sip = activity.sipManager
+        if (target == HOME_APP) {
+            val homeOpen = web.homeAdcPC != null
+            val appOpen = sip.appReqApp != null
+            if (homeOpen && !appOpen) return          // already on emotes: nothing to negotiate
+            if (!homeOpen) {
+                sip.homeReqApp = HOME_APP
+                web.createADC(); activity.dcManager.setupADC()
+                web.createADC2(); activity.dcManager.setupADC2()
+            }
+            if (appOpen) {
+                sip.appReqApp = null                  // mid 4 -> port 0
+                web.closeAppADC()
+            }
+        } else {
+            if (sip.appReqApp == target && web.appAdcPC != null) return
+            web.closeAppADC()                         // replace in place: new PC, new credentials, new tls-id
+            sip.appReqApp = target
+            sip.appSlotUsed = true
+            web.createAppADC()
+            activity.dcManager.setupAppADC()
+        }
+        val localOffer = web.createOffer()
+        reInviteAnswer = kotlinx.coroutines.CompletableDeferred()
+        Log.i(TAG, "Re-INVITE for $target (home=${sip.homeReqApp}, app=${sip.appReqApp})")
+        withContext(Dispatchers.IO) { sip.sendReInviteWithSdp(localOffer) }
+        val answered = kotlinx.coroutines.withTimeoutOrNull(ANSWER_TIMEOUT_MS) { reInviteAnswer?.await() }
+        if (answered == null) onReInviteUnanswered(target) // Task 9
+    }
+
+    // Replaced in Task 9; until then a missing answer is only logged.
+    private fun onReInviteUnanswered(target: String) {
+        Log.w(TAG, "No 200 OK for the Re-INVITE of $target within ${ANSWER_TIMEOUT_MS} ms")
+    }
 }
-
-
-
-
-
-
