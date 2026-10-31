@@ -84,7 +84,9 @@ class SipManager(
     private var initialRegRetryJob: kotlinx.coroutines.Job? = null
     private var authRetryJob: kotlinx.coroutines.Job? = null
     var activeToHeader: String? = null
-    var activeReqAppId: String? = null
+    var homeReqApp: String? = null
+    var appReqApp: String? = null     // mid 4; null while no app is open
+    var appSlotUsed: Boolean = false  // mid 4 has appeared in this call; it stays in every SDP from then on
     var isCallHoldActive: Boolean = false
     var onReInviteReceived: ((String, String) -> Unit)? = null
     // CSeq of the initial INVITE — responses with higher CSeq are Re-INVITE responses
@@ -732,7 +734,9 @@ class SipManager(
     fun resetCallState() {
         isCallActive = false
         activeToHeader = null
-        activeReqAppId = null
+        homeReqApp = null
+        appReqApp = null
+        appSlotUsed = false
         isCallHoldActive = false
         initialInviteCSeq = -1
         lastReInviteCSeq = -1
@@ -878,7 +882,7 @@ class SipManager(
             callLocalIp = effectiveIp
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("INVITE sip:$toUser@$sipServerHost SIP/2.0")
@@ -928,7 +932,7 @@ class SipManager(
 
             lastLocalOfferSdp = sdpBody
 
-            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
+            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
             val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
 
             val msg = buildString {
@@ -964,7 +968,7 @@ class SipManager(
             val localIp = getLocalIp()
             lastLocalIp = localIp
             callLocalIp = localIp
-            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
+            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(
                 originalInvite, 200, "OK",
@@ -1070,7 +1074,7 @@ class SipManager(
             val localIp = getLocalIp()
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, activeReqAppId, isCallHoldActive, RtpPorts.current().first, RtpPorts.current().second)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("ACK sip:$remoteUser@$sipServerHost:$sipServerPort SIP/2.0")

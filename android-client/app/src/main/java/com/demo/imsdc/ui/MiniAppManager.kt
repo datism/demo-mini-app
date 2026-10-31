@@ -526,7 +526,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     // The Re-INVITE in flight and the app it is for. Its target is tracked here rather than read from
-    // sipManager.activeReqAppId, which is only set once the app download wait is over.
+    // sipManager.homeReqApp, which is only set once the app download wait is over.
     private var reInviteJob: kotlinx.coroutines.Job? = null
     private var reInviteTargetId: String? = null
     private var reInviteWaitingForDownload = false
@@ -569,7 +569,7 @@ class MiniAppManager(val activity: CallActivity) {
                 // The MF cannot move an open ADC to another app in place: it keeps the old DTLS association
                 // and ignores the new ADC offer, so the new app never connects. Release the current app's
                 // ADC first (the app → operator-menu → app sequence), then open the new one.
-                val currentApp = activity.sipManager.activeReqAppId
+                val currentApp = activity.sipManager.homeReqApp
                 if (targetId != "operator-menu" && currentApp != null && currentApp != "operator-menu" && currentApp != targetId) {
                     Log.i(TAG, "Releasing ADC of $currentApp before switching to $targetId")
                     sendAppReInvite("operator-menu")
@@ -597,7 +597,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private suspend fun sendAppReInvite(targetId: String) {
-        activity.sipManager.activeReqAppId = targetId
+        activity.sipManager.homeReqApp = targetId
         // Always close existing ADC first to isolate sessions
         activity.webRtcManager.closeADC()
         if (targetId != "operator-menu") {

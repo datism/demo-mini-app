@@ -1043,7 +1043,7 @@ class CallActivity : AppCompatActivity() {
                     } else if (hasAdcPort0) {
                         Log.i(TAG, "Re-INVITE: ADC port=0 detected but reqApp=$reqApp present, keeping app")
                     }
-                    sipManager.activeReqAppId = reqApp
+                    sipManager.homeReqApp = reqApp
 
                     // Always close existing ADC connection first to isolate sessions
                     webRtcManager.closeADC()
@@ -1184,11 +1184,11 @@ class CallActivity : AppCompatActivity() {
                     else -> appId
                 }
                 val currentReqApp = when {
-                    sipManager.activeReqAppId?.contains("0003210000000038") == true ||
-                            sipManager.activeReqAppId?.contains("tuyaapp") == true ||
-                            sipManager.activeReqAppId?.contains("sketch-sync-app") == true -> "sketch-sync-app"
-                    sipManager.activeReqAppId?.contains("operator-menu") == true -> "operator-menu"
-                    else -> sipManager.activeReqAppId
+                    sipManager.homeReqApp?.contains("0003210000000038") == true ||
+                            sipManager.homeReqApp?.contains("tuyaapp") == true ||
+                            sipManager.homeReqApp?.contains("sketch-sync-app") == true -> "sketch-sync-app"
+                    sipManager.homeReqApp?.contains("operator-menu") == true -> "operator-menu"
+                    else -> sipManager.homeReqApp
                 }
                 if (currentReqApp != targetId || webRtcManager.adcPC == null) {
                     android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
