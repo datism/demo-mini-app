@@ -18,6 +18,7 @@ import com.demo.imsdc.sip.SipManager
 import com.demo.imsdc.webrtc.AndroidBridgeInterface
 import com.demo.imsdc.webrtc.DataChannelManager
 import com.demo.imsdc.webrtc.LatestRequestQueue
+import com.demo.imsdc.webrtc.reInviteRetryDelayMs
 import com.demo.imsdc.webrtc.WebRtcManager
 import com.demo.imsdc.media.RtpMediaManager
 import android.app.KeyguardManager
@@ -532,6 +533,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private val requests = LatestRequestQueue<String>()
+    private var lastTarget: String? = null
     private var reInviteAnswer: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
     fun onReInviteAnswered() {
@@ -573,6 +575,7 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Applies the local ADC change for [target] and sends exactly one Re-INVITE (or none if nothing changes). */
     private suspend fun sendChange(target: String) {
+        lastTarget = target
         val web = activity.webRtcManager
         val sip = activity.sipManager
         if (target == HOME_APP) {
@@ -604,8 +607,38 @@ class MiniAppManager(val activity: CallActivity) {
         if (answered == null) onReInviteUnanswered(target) // Task 9
     }
 
-    // Replaced in Task 9; until then a missing answer is only logged.
+    /** Drops queued work; call at call end because a cancelled scope can leave the queue busy. */
+    fun resetRequests() {
+        requests.reset()
+        reInviteAnswer?.complete(Unit)
+    }
+
+    /** Roll back the App slot only. Home ADC and BDC are untouched. */
+    private fun rollbackAppSlot(reason: String) {
+        Log.w(TAG, "Rolling back App ADC: $reason")
+        activity.webRtcManager.closeAppADC()
+        activity.sipManager.appReqApp = null          // mid 4 -> port 0 locally; appSlotUsed stays true
+        android.widget.Toast.makeText(activity, "Không mở được ứng dụng, quay về emote", android.widget.Toast.LENGTH_SHORT).show()
+        launchMiniApp(HOME_APP, sendRemoteTrigger = false)
+    }
+
     private fun onReInviteUnanswered(target: String) {
-        Log.w(TAG, "No 200 OK for the Re-INVITE of $target within ${ANSWER_TIMEOUT_MS} ms")
+        if (target != HOME_APP) rollbackAppSlot("no 200 OK within ${ANSWER_TIMEOUT_MS} ms for $target")
+        else Log.w(TAG, "No 200 OK for the Home Re-INVITE")
+    }
+
+    fun onReInviteFailed(code: Int) {
+        val target = lastTarget ?: return
+        reInviteAnswer?.complete(Unit)                // unblock the waiting request
+        if (code == 491) {
+            val delayMs = reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner)
+            Log.i(TAG, "491 glare for $target, retrying in $delayMs ms")
+            activity.lifecycleScope.launch(Dispatchers.Main) {
+                kotlinx.coroutines.delay(delayMs)
+                triggerAppNegotiationReInvite(target)
+            }
+        } else if (target != HOME_APP) {
+            rollbackAppSlot("Re-INVITE for $target failed with $code")
+        }
     }
 }

@@ -89,6 +89,9 @@ class SipManager(
     var appSlotUsed: Boolean = false  // mid 4 has appeared in this call; it stays in every SDP from then on
     var isCallHoldActive: Boolean = false
     var onReInviteReceived: ((String, String) -> Unit)? = null
+    var onReInviteFailed: ((Int) -> Unit)? = null
+    /** True when this side sent the initial INVITE (owns the Call-ID), RFC 3261 14.1. */
+    @Volatile var isCallIdOwner = false
     // CSeq of the initial INVITE — responses with higher CSeq are Re-INVITE responses
     private var initialInviteCSeq: Int = -1
     var lastReInviteCSeq: Int = -1
@@ -569,6 +572,7 @@ class SipManager(
                     if (isReInvite) {
                         // Re-INVITE failures should NOT terminate the ongoing call
                         Log.w(TAG, "Re-INVITE failed with $statusCode — call continues")
+                        onReInviteFailed?.invoke(statusCode)
                     } else {
                         Log.w(TAG, "INVITE response: $statusCode")
                         onInviteResponse?.invoke(statusCode, null, "", null)
@@ -600,6 +604,7 @@ class SipManager(
         // Save call info for callee (B-side) to send BYE or ACK
         val from     = getHeader(msg, "from") ?: ""
         val to       = getHeader(msg, "to") ?: ""
+        isCallIdOwner = false
         pendingCallId = callId
         pendingRemoteUser = fromUser
         activeToHeader = from
@@ -740,6 +745,7 @@ class SipManager(
         isCallHoldActive = false
         initialInviteCSeq = -1
         lastReInviteCSeq = -1
+        isCallIdOwner = false
         pendingCallId = null
         pendingFromTag = null
         pendingBranch = null
@@ -871,6 +877,7 @@ class SipManager(
             val cseq    = cseqCounter.getAndIncrement()
 
             // Lưu lại để gửi ACK sau
+            isCallIdOwner = true
             pendingCallId  = callId
             pendingFromTag = fromTag
             pendingBranch  = branch

@@ -73,6 +73,12 @@ class LatestRequestQueue<T> {
     }
 
     @Synchronized
+    fun reset() {
+        inFlight = false
+        pending = null
+    }
+
+    @Synchronized
     fun complete(): T? {
         val next = pending
         pending = null
@@ -80,3 +86,7 @@ class LatestRequestQueue<T> {
         return next
     }
 }
+
+/** RFC 3261 14.1: the Call-ID owner retries a glared Re-INVITE after 2.1-4 s, the other side after 0-2 s. */
+fun reInviteRetryDelayMs(isCallIdOwner: Boolean, random: kotlin.random.Random = kotlin.random.Random): Long =
+    if (isCallIdOwner) random.nextLong(2100, 4001) else random.nextLong(0, 2001)

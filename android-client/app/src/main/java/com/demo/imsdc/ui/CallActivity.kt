@@ -1011,6 +1011,10 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
+        sipManager.onReInviteFailed = { code ->
+            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteFailed(code) }
+        }
+
         sipManager.onReInviteReceived = { sdp, rawMsg ->
             Log.i(TAG, "Handling incoming Re-INVITE automatically...")
             lifecycleScope.launch(Dispatchers.IO) {
@@ -1673,6 +1677,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onIpChangedDuringCall = null
         sipManager.onAckWithSdp = null
         sipManager.onReInviteReceived = null
+        sipManager.onReInviteFailed = null
+        if (::miniAppManager.isInitialized) miniAppManager.resetRequests()
         sipManager.onReInviteResponse = null
         try {
             (binding.webviewMiniapp.parent as? android.view.ViewGroup)?.removeView(binding.webviewMiniapp)

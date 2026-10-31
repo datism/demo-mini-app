@@ -65,4 +65,12 @@ class AdcSlotsTest {
         assertFalse(q.busy)
         assertEquals("d", q.submit("d"))
     }
+
+    @Test
+    fun retryDelayFollowsRfc3261() {
+        repeat(200) {
+            assertTrue(reInviteRetryDelayMs(true) in 2100L..4000L)
+            assertTrue(reInviteRetryDelayMs(false) in 0L..2000L)
+        }
+    }
 }
