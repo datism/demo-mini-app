@@ -34,6 +34,10 @@ import (
 // CallSession represents an active end-to-end B2BUA call session in IMS-AS.
 // It maintains dual-leg dialog mappings, media endpoints on Media Function, and SBA DC1/DC2 contexts.
 type CallSession struct {
+	// mu guards the App-slot fields (AppSlot, AppMfA, AppMfB, AppAnswerPending)
+	// and the Home snapshot taken from MfInfoA/MfInfoB. Never hold it across SBA calls.
+	mu sync.Mutex
+
 	CallID    string
 	Caller    string
 	Callee    string
@@ -541,12 +545,9 @@ func (b *B2BUA) handleSIP(data string, remoteAddr *net.UDPAddr) {
 						mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 					}
 					mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+					b.closeAppSlot(session)
 					log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
 					_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-					if session.IsAnchorCtxCreated {
-						log.Printf("[IMS-AS] Releasing ADC MF Context %s-adc", session.CallID)
-						_ = b.CallNmfDeleteMediaContext(mfURL, session.CallID+"-adc")
-					}
 				}
 
 				if ok && session != nil {
@@ -647,11 +648,9 @@ func (b *B2BUA) handleUnreachableAnnouncement(session *CallSession) {
 			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 		}
 		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+		b.closeAppSlot(session)
 		log.Printf("[IMS-AS] Releasing initial unused MF Context %s before announcement", session.ContextID)
 		_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-		if session.IsAnchorCtxCreated {
-			_ = b.CallNmfDeleteMediaContext(mfURL, callID+"-adc")
-		}
 	}
 
 	// Release DCSF Event Subscription

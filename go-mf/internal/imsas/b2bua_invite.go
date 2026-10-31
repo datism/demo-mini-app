@@ -201,6 +201,10 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	session.OrigMsg = msg
 	log.Printf("[IMS-AS] Processing re-INVITE for session %s (caller=%s callee=%s)", session.CallID, session.Caller, session.Callee)
+	if lines := parseAdcLines(msg.Body); len(lines) == 2 && !config.IsHotline(session.Callee) {
+		b.handleSlottedReInvite(session, msg, remoteAddr, lines)
+		return
+	}
 
 	// Parse a=3gpp-req-app from SDP body (AC.5 Step 2)
 	appBinding := parseReqApp(msg.Body)
