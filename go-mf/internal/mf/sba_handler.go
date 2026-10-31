@@ -446,7 +446,7 @@ func (m *MediaFunction) CreateMediaContext(ctx *sba.MediaContext) (*sba.MediaCon
 		}
 		resTerminations = append(resTerminations, resTerm)
 
-	} else if strings.HasSuffix(contextID, "-adc") {
+	} else if isAdcContext(contextID) {
 		// ADC Sub-context: find parent BDC context, reuse existing sessions,
 		// create separate AdcPC PeerConnections on ephemeral ports.
 		parentContextID := strings.TrimSuffix(contextID, "-adc")
