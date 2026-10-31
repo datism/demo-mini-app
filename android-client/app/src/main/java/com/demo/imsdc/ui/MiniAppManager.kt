@@ -527,7 +527,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     companion object {
-        private const val HOME_APP = CallActivity.HOME_APP
+        const val HOME_APP = CallActivity.HOME_APP
         private const val ANSWER_TIMEOUT_MS = 5000L
     }
 
