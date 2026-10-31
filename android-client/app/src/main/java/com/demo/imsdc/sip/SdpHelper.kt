@@ -20,7 +20,16 @@ import kotlin.random.Random
 
 object SdpHelper {
 
-    
+    /**
+     * a=tls-id for an m-line (RFC 8842). It must change only when the line's DTLS association does, so
+     * derive it from the line's certificate fingerprint: the same PeerConnection gives the same id on
+     * every Re-INVITE, a new PeerConnection (new certificate) gives a new one.
+     */
+    fun tlsIdFor(label: String, fingerprintLine: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest("$label|$fingerprintLine".toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
     fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, activeReqAppId: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004): String {
     Log.i("SipManager", "Raw local SDP to translate:\n$sdp")
     val validIp = if (!localIpAddress.isNullOrBlank() && !localIpAddress.contains(":") && localIpAddress != "0.0.0.0" && localIpAddress != "127.0.0.1" && localIpAddress != "::") {
@@ -231,7 +240,7 @@ object SdpHelper {
     newLines.add("a=setup:actpass")
     }
     if (bdcCandidate.isNotEmpty()) newLines.add(bdcCandidate)
-    newLines.add("a=tls-id:tlsid${System.currentTimeMillis()}bdc")
+    newLines.add("a=tls-id:${tlsIdFor("bdc", bdcCreds.fingerprint)}")
     newLines.add("a=dcmap:10 subprotocol=\"http\"")
     newLines.add("a=3gpp-bdc-used-by:sender")
     newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
@@ -256,7 +265,7 @@ object SdpHelper {
     newLines.add("a=setup:actpass")
     }
     if (adcCandidate.isNotEmpty()) newLines.add(adcCandidate)
-    newLines.add("a=tls-id:tlsid${System.currentTimeMillis()}adc")
+    newLines.add("a=tls-id:${tlsIdFor("adc", adcCreds.fingerprint)}")
     newLines.add("a=dcmap:1000 subprotocol=\"$appId\"")
     newLines.add("a=3gpp-req-app:\"$appId\";1000-UE")
     newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
