@@ -604,7 +604,6 @@ class SipManager(
         // Save call info for callee (B-side) to send BYE or ACK
         val from     = getHeader(msg, "from") ?: ""
         val to       = getHeader(msg, "to") ?: ""
-        isCallIdOwner = false
         pendingCallId = callId
         pendingRemoteUser = fromUser
         activeToHeader = from
@@ -631,6 +630,10 @@ class SipManager(
             onReInviteReceived?.invoke(translatedSdp, msg)
             return
         }
+
+        // Initial INVITE: the far end created the Call-ID. Not cleared for a Re-INVITE, which would make
+        // both sides use the 0-2 s glare back-off (RFC 3261 14.1).
+        isCallIdOwner = false
 
         // Gửi 100 Trying ngay lập tức
         lastIncomingInviteMsg = msg
