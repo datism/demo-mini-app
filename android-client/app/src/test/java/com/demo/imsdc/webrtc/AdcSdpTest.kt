@@ -60,4 +60,18 @@ class AdcSdpTest {
     fun closedAppLineShape() {
         assertEquals("m=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:4\r\n", closedAppLine())
     }
+
+    @Test
+    fun splitPicksHomeAndAppByMid_evenWhenReordered() {
+        val p = AdcSdp.split(header + av + block("2", 9, "b") + block("4", 9, "a") + block("3", 9, "h"))
+        assertTrue(p.home!!.contains("a=ice-ufrag:h"))
+        assertTrue(p.app!!.contains("a=ice-ufrag:a"))
+    }
+
+    @Test
+    fun splitAppOnlyIsNotTakenForHome() {
+        val p = AdcSdp.split(header + av + block("2", 9, "b") + block("4", 9, "a"))
+        assertNull(p.home)
+        assertTrue(p.app!!.contains("a=ice-ufrag:a"))
+    }
 }

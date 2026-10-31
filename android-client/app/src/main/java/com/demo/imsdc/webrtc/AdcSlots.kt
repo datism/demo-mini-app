@@ -38,6 +38,17 @@ fun parseAppLines(sdp: String): List<SdpAppLine> {
     return out
 }
 
+/**
+ * Home (mid 3) and App (mid 4) sections among the application sections that follow the BDC, chosen by
+ * a=mid. Only when no section carries mid 3 or 4 (a peer with other mids) does position decide:
+ * first = Home, second = App.
+ */
+fun <T> pickSlots(later: List<T>, midOf: (T) -> String?): Pair<T?, T?> {
+    val byMid = later.any { midOf(it) == AdcMid.HOME || midOf(it) == AdcMid.APP }
+    return if (byMid) later.firstOrNull { midOf(it) == AdcMid.HOME } to later.firstOrNull { midOf(it) == AdcMid.APP }
+    else later.getOrNull(0) to later.getOrNull(1)
+}
+
 sealed class AppSlotChange {
     object None : AppSlotChange()
     data class Open(val appId: String) : AppSlotChange()

@@ -78,4 +78,39 @@ class SdpHelperSlotsTest {
         assertEquals(3, Regex("m=application").findAll(out).count())
         assertTrue(out.contains("a=mid:3") && out.contains("a=mid:4"))
     }
+
+    @Test
+    fun mid4WithoutHome_emitsClosedMid3First() {
+        val s = sections(translate(true, null, "caro", true))
+        assertEquals(3, s.size)
+        assertTrue(s[1].startsWith("m=application 0 ") && s[1].contains("a=mid:3"))
+        assertTrue(s[2].contains("a=mid:4"))
+    }
+
+    private fun sipAnswer(vararg secs: Pair<String, Int>): String {
+        val l = mutableListOf("v=0", "o=- 1 2 IN IP4 1.1.1.1", "s=-", "t=0 0")
+        secs.forEach { (mid, port) ->
+            l += listOf("m=application $port UDP/DTLS/SCTP webrtc-datachannel", "c=IN IP4 1.1.1.1", "a=mid:$mid")
+            if (port != 0) l += listOf("a=ice-ufrag:u$mid", "a=ice-pwd:p", "a=fingerprint:sha-256 AA", "a=setup:passive")
+        }
+        return l.joinToString("\r\n") + "\r\n"
+    }
+
+    @Test
+    fun sipAnswer_closedSectionHasNoCandidateOrIceLite() {
+        val out = sections(SdpHelper.translateSipAnswerToWebRtcAnswer(sipAnswer("2" to 40000, "3" to 40001, "4" to 0)))
+        val app = out.single { it.contains("a=mid:4") }
+        assertTrue(app.startsWith("m=application 0 "))
+        assertFalse(app.contains("a=candidate:"))
+        assertFalse(app.contains("a=ice-lite"))
+        assertTrue(out.single { it.contains("a=mid:3") }.contains("a=candidate:"))
+    }
+
+    @Test
+    fun sipAnswer_selectsSlotsByMid() {
+        val out = sections(SdpHelper.translateSipAnswerToWebRtcAnswer(sipAnswer("2" to 40000, "4" to 40002, "3" to 40001)))
+        assertEquals(3, out.size)
+        assertTrue(out[1].contains("a=mid:3") && out[1].contains("a=ice-ufrag:u3"))
+        assertTrue(out[2].contains("a=mid:4") && out[2].contains("a=ice-ufrag:u4"))
+    }
 }

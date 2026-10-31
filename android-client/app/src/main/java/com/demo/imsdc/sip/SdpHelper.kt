@@ -251,16 +251,22 @@ object SdpHelper {
 
     
 
-    // 5. Home ADC (mid 3)
+    // 6. App ADC (mid 4): once it has appeared it stays in every offer, as port 0 while no app is open
+    val appOpen = appReqApp != null && appBlock != null
+    val emitApp = appOpen || appSlotUsed || appBlock != null
+
+    // 5. Home ADC (mid 3). Always present (port 0 if closed) when mid 4 is, so mid 3 precedes mid 4 and a
+    // positional reader (go-mf parseAdcLines) never takes mid 4 for the Home line.
     if (hasADC) {
         val appId = homeReqApp!!
         if (appId == "close" || appId == "operator-menu") addClosedSection("3")
         else addAdcSection("3", "home", homeCreds, homeEp, appId)
+    } else if (emitApp) {
+        addClosedSection("3")
     }
-    // 6. App ADC (mid 4): once it has appeared it stays in every offer, as port 0 while no app is open
-    if (appReqApp != null && appBlock != null) {
-        addAdcSection("4", "app", appCreds, appEp, appReqApp)
-    } else if (appSlotUsed || appBlock != null) {
+    if (appOpen) {
+        addAdcSection("4", "app", appCreds, appEp, appReqApp!!)
+    } else if (emitApp) {
         addClosedSection("4")
     }
     
@@ -351,18 +357,21 @@ object SdpHelper {
     if (app1.setup.isNotEmpty()) newLines.add(app1.setup)
     newLines.add(candidateLine)
     
-    appSections.drop(1).take(2).forEachIndexed { index, app ->
-        val candidateLine = "a=candidate:1 1 udp 2122260991 ${app.remoteIp} ${app.appPort} typ host generation 0"
+    // Home (mid 3) then App (mid 4), chosen by a=mid; position decides only when no line carries mid 3/4.
+    val (homeSection, appSection) = com.demo.imsdc.webrtc.pickSlots(appSections.drop(1)) { it.mid.ifEmpty { null } }
+    listOf(homeSection to com.demo.imsdc.webrtc.AdcMid.HOME, appSection to com.demo.imsdc.webrtc.AdcMid.APP).forEach { (app, defaultMid) ->
+        if (app == null) return@forEach
         newLines.add("m=application ${app.appPort} UDP/DTLS/SCTP webrtc-datachannel")
         newLines.add("c=IN IP4 ${app.remoteIp}")
-        newLines.add("a=mid:${if (app.mid.isNotEmpty()) app.mid else (index + 3).toString()}")
+        newLines.add("a=mid:${app.mid.ifEmpty { defaultMid }}")
+        if (app.appPort == "0") return@forEach // closed line: no ICE/DTLS attributes, no candidate
         newLines.add("a=sctp-port:5000")
         newLines.add("a=ice-lite")
         if (app.iceUfrag.isNotEmpty()) newLines.add(app.iceUfrag)
         if (app.icePwd.isNotEmpty()) newLines.add(app.icePwd)
         if (app.fingerprint.isNotEmpty()) newLines.add(app.fingerprint)
         if (app.setup.isNotEmpty()) newLines.add(app.setup)
-        newLines.add(candidateLine)
+        newLines.add("a=candidate:1 1 udp 2122260991 ${app.remoteIp} ${app.appPort} typ host generation 0")
     }
     } else {
     // Pure DataChannel mode (1 m-line, app=mid:0)

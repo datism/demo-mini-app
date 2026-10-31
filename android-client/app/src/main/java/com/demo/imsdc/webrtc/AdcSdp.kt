@@ -49,17 +49,18 @@ object AdcSdp {
         return if (hasUfrag) sb.toString() else null
     }
 
+    private fun midOf(block: String): String? = block.replace("\r", "").split("\n").map { it.trim() }
+        .firstOrNull { it.startsWith("a=mid:") }?.substringAfter("a=mid:")?.trim()
+
+    /** BDC = first application section; Home and App are chosen by a=mid (see [pickSlots]). */
     fun split(sdp: String): AdcParts {
         val m = splitMedia(sdp)
         val bdc = StringBuilder(m.header)
         m.audio?.let { bdc.append(it) }
         m.video?.let { bdc.append(it) }
         m.apps.firstOrNull()?.let { bdc.append(it) }
-        return AdcParts(
-            bdc.toString(),
-            m.apps.getOrNull(1)?.let { standalone(m, it) },
-            m.apps.getOrNull(2)?.let { standalone(m, it) }
-        )
+        val (home, app) = pickSlots(m.apps.drop(1)) { midOf(it) }
+        return AdcParts(bdc.toString(), home?.let { standalone(m, it) }, app?.let { standalone(m, it) })
     }
 
     private fun setMid(block: String, mid: String): String =

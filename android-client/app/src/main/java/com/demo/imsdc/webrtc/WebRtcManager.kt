@@ -480,9 +480,9 @@ class WebRtcManager(private val context: Context) {
 
     suspend fun setRemoteOffer(sdpOffer: String) {
         val parts = AdcSdp.split(sdpOffer)
-        val lines = parseAppLines(sdpOffer)
-        remoteHomeMid = lines.getOrNull(1)?.mid
-        remoteAppMid = lines.getOrNull(2)?.mid
+        val (homeLine, appLine) = pickSlots(parseAppLines(sdpOffer).drop(1)) { it.mid }
+        remoteHomeMid = homeLine?.mid
+        remoteAppMid = appLine?.mid
         val bdcOffer = addCandidateIfMissing(parts.bdc)
         if (bdcPC != null) {
             if (bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription == null) {

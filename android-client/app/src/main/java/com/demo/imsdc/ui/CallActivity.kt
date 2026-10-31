@@ -1026,8 +1026,8 @@ class CallActivity : AppCompatActivity() {
                     }
 
                     val appLines = com.demo.imsdc.webrtc.parseAppLines(rawSdp)
-                    val homeLine = appLines.getOrNull(1)          // mid 3
-                    val appLine = appLines.getOrNull(2)           // mid 4
+                    // Home = mid 3, App = mid 4, chosen by a=mid (the BDC is the first application line).
+                    val (homeLine, appLine) = com.demo.imsdc.webrtc.pickSlots(appLines.drop(1)) { it.mid }
                     if (appLine != null) sipManager.appSlotUsed = true
 
                     // Home ADC: opened by the first offer that carries it, never closed by a Re-INVITE.

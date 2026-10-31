@@ -73,4 +73,26 @@ class AdcSlotsTest {
             assertTrue(reInviteRetryDelayMs(false) in 0L..2000L)
         }
     }
+
+    @Test
+    fun pickSlotsUsesMidNotPosition() {
+        val later = listOf(SdpAppLine("4", 9, "caro"), SdpAppLine("3", 9, "fun-calling-app"))
+        val (home, app) = pickSlots(later) { it.mid }
+        assertEquals("3", home!!.mid)
+        assertEquals("4", app!!.mid)
+    }
+
+    @Test
+    fun pickSlotsAppOnlyLeavesHomeEmpty() {
+        val (home, app) = pickSlots(listOf(SdpAppLine("4", 0, null))) { it.mid }
+        assertNull(home)
+        assertEquals("4", app!!.mid)
+    }
+
+    @Test
+    fun pickSlotsFallsBackToPositionWithoutKnownMids() {
+        val (home, app) = pickSlots(listOf("x", "y")) { null }
+        assertEquals("x", home)
+        assertEquals("y", app)
+    }
 }
