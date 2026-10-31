@@ -42,7 +42,7 @@ class ImsDcSdk(
     }
 
     fun flushPendingAdc() {
-        val adc = webRtcManager.adcChannel
+        val adc = webRtcManager.foregroundAdcChannel
         if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
             while (pendingAdcQueue.isNotEmpty()) {
                 val bytes = pendingAdcQueue.poll() ?: break
@@ -54,7 +54,7 @@ class ImsDcSdk(
     }
 
     fun sendOrQueueAdc(bytes: ByteArray) {
-        val adc = webRtcManager.adcChannel
+        val adc = webRtcManager.foregroundAdcChannel
         if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
             val buffer = org.webrtc.DataChannel.Buffer(java.nio.ByteBuffer.wrap(bytes), true)
             adc.send(buffer)
@@ -65,7 +65,7 @@ class ImsDcSdk(
             kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 for (i in 1..25) {
                     kotlinx.coroutines.delay(300)
-                    val curAdc = webRtcManager.adcChannel
+                    val curAdc = webRtcManager.foregroundAdcChannel
                     if (curAdc != null && curAdc.state() == org.webrtc.DataChannel.State.OPEN) {
                         flushPendingAdc()
                         break

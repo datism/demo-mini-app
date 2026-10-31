@@ -468,8 +468,11 @@ class DataChannelManager(
      *   2. Parse action
      *   3. Gọi JavaScript window.receiveData() trong WebView
      */
-    fun setupADC() {
-        val adc = webRtcManager.adcChannel
+    fun setupADC() = attachAdcObserver(webRtcManager.adcChannel, isHome = true)
+
+    fun setupAppADC() = attachAdcObserver(webRtcManager.appAdcChannel, isHome = false)
+
+    private fun attachAdcObserver(adc: DataChannel?, isHome: Boolean) {
         if (adc != null) {
             adc.registerObserver(object : DataChannel.Observer {
                 override fun onStateChange() {
@@ -508,6 +511,10 @@ class DataChannelManager(
                 override fun onMessage(buffer: DataChannel.Buffer?) {
                     try {
                         buffer ?: return
+                        if (isHome && !webRtcManager.foregroundIsHome) {
+                            Log.i(TAG, "Home ADC message dropped: an app is in front (${buffer.data.remaining()} bytes)")
+                            return
+                        }
                         val byteBuffer = buffer.data
                         val bytes = ByteArray(byteBuffer.remaining())
                         byteBuffer.get(bytes)
@@ -656,7 +663,7 @@ class DataChannelManager(
      * Được gọi bởi AndroidBridgeInterface khi JS gọi AndroidBridge.sendData().
      */
     fun sendViaADC(jsonData: String, streamId: Int = 1000) {
-        val adc = webRtcManager.adcChannel
+        val adc = webRtcManager.foregroundAdcChannel
         if (adc == null) {
             Log.e(TAG, "ADC (stream $streamId) is null")
             return
