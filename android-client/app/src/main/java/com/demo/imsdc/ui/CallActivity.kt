@@ -1021,42 +1021,37 @@ class CallActivity : AppCompatActivity() {
                         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
                     }
 
-                    var reqApp = com.demo.imsdc.sip.SdpHelper.parseReqApp(rawMsg)
+                    val appLines = com.demo.imsdc.webrtc.parseAppLines(rawSdp)
+                    val homeLine = appLines.getOrNull(1)          // mid 3
+                    val appLine = appLines.getOrNull(2)           // mid 4
+                    if (appLine != null) sipManager.appSlotUsed = true
 
-                    // Phân tích các m=application lines trong SDP offer
-                    val appLines = rawSdp.replace("\r", "").split("\n")
-                        .map { it.trim() }
-                        .filter { it.startsWith("m=application ") }
-                    // ADC bị disable chỉ khi có block application port 0
-                    val hasAdcPort0 = appLines.any { it.startsWith("m=application 0") }
-                    // isSingleAppLine: chỉ có 1 block application (không có ADC riêng)
-                    val isSingleAppLine = appLines.size <= 1
-
-                    Log.i(TAG, "Re-INVITE: reqApp(raw)=$reqApp appLines=${appLines.size} hasAdcPort0=$hasAdcPort0 isSingleAppLine=$isSingleAppLine")
-
-                    // Chỉ fallback operator-menu khi KHÔNG có appId thật từ a=3gpp-req-app.
-                    // KHÔNG ép reqApp về operator-menu chỉ vì SDP có 1 block hay ADC port 0,
-                    // vì điều đó làm mất app (ví dụ "fun-calling-app") trên máy đối phương.
-                    val isCloseOrEmpty = (reqApp == null || reqApp == "close")
-                    if (isCloseOrEmpty || (reqApp == "operator-menu" && isSingleAppLine)) {
-                        reqApp = "operator-menu"
-                    } else if (hasAdcPort0) {
-                        Log.i(TAG, "Re-INVITE: ADC port=0 detected but reqApp=$reqApp present, keeping app")
+                    // Home ADC: opened by the first offer that carries it, never closed by a Re-INVITE.
+                    val homeJustOpened = homeLine != null && homeLine.isOpen && webRtcManager.homeAdcPC == null
+                    if (homeJustOpened) {
+                        val homeId = homeLine!!.reqApp ?: MiniAppManager.HOME_APP
+                        sipManager.homeReqApp = homeId
+                        webRtcManager.createADC(); dcManager.setupADC()
+                        if (homeId == MiniAppManager.HOME_APP) { webRtcManager.createADC2(); dcManager.setupADC2() }
                     }
-                    sipManager.homeReqApp = reqApp
 
-                    // Always close existing ADC connection first to isolate sessions
-                    webRtcManager.closeADC()
-                    if (reqApp != "operator-menu") {
-                        Log.i(TAG, "Re-creating ADC for requested app: $reqApp")
-                        webRtcManager.createADC()
-                        dcManager.setupADC()
-                        if (reqApp == "fun-calling-app") {
-                            webRtcManager.createADC2()
-                            dcManager.setupADC2()
+                    // App ADC: rebuild only the PeerConnection of mid 4, and only when mid 4 changed.
+                    val change = com.demo.imsdc.webrtc.diffAppSlot(sipManager.appReqApp, appLine)
+                    Log.i(TAG, "Re-INVITE: home=${homeLine?.reqApp}/${homeLine?.port} app=${appLine?.reqApp}/${appLine?.port} change=$change")
+                    when (change) {
+                        is com.demo.imsdc.webrtc.AppSlotChange.Open, is com.demo.imsdc.webrtc.AppSlotChange.Replace -> {
+                            val id = if (change is com.demo.imsdc.webrtc.AppSlotChange.Open) change.appId
+                                     else (change as com.demo.imsdc.webrtc.AppSlotChange.Replace).appId
+                            webRtcManager.closeAppADC()
+                            sipManager.appReqApp = id
+                            webRtcManager.createAppADC(); dcManager.setupAppADC()
                         }
+                        com.demo.imsdc.webrtc.AppSlotChange.Close -> {
+                            webRtcManager.closeAppADC()
+                            sipManager.appReqApp = null
+                        }
+                        com.demo.imsdc.webrtc.AppSlotChange.None -> Unit
                     }
-
                     if (sdp.trim().isNotEmpty()) {
                         Log.i(TAG, "B (Re-INVITE): Setting remote offer...")
                         webRtcManager.setRemoteOffer(sdp)
@@ -1067,8 +1062,13 @@ class CallActivity : AppCompatActivity() {
 
                     withContext(Dispatchers.Main) {
                         Log.i(TAG, "? Re-INVITE auto-answered successfully")
-                        Log.i(TAG, "Re-INVITE requested app: $reqApp")
-                        miniAppManager.launchMiniApp(reqApp, sendRemoteTrigger = false)
+                        val launch = when (change) {
+                            is com.demo.imsdc.webrtc.AppSlotChange.Open -> change.appId
+                            is com.demo.imsdc.webrtc.AppSlotChange.Replace -> change.appId
+                            com.demo.imsdc.webrtc.AppSlotChange.Close -> MiniAppManager.HOME_APP
+                            com.demo.imsdc.webrtc.AppSlotChange.None -> if (homeJustOpened) (sipManager.homeReqApp ?: MiniAppManager.HOME_APP) else null
+                        }
+                        if (launch != null) miniAppManager.launchMiniApp(launch, sendRemoteTrigger = false)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error auto-answering Re-INVITE: ${e.message}", e)
@@ -1183,16 +1183,20 @@ class CallActivity : AppCompatActivity() {
                     appId.contains("operator-menu") -> "operator-menu"
                     else -> appId
                 }
-                val currentReqApp = when {
-                    sipManager.homeReqApp?.contains("0003210000000038") == true ||
-                            sipManager.homeReqApp?.contains("tuyaapp") == true ||
-                            sipManager.homeReqApp?.contains("sketch-sync-app") == true -> "sketch-sync-app"
-                    sipManager.homeReqApp?.contains("operator-menu") == true -> "operator-menu"
-                    else -> sipManager.homeReqApp
-                }
-                if (currentReqApp != targetId || webRtcManager.homeAdcPC == null) {
+                val isHome = targetId == MiniAppManager.HOME_APP
+                val alreadyOpen = if (isHome) webRtcManager.homeAdcPC != null
+                                  else sipManager.appReqApp == targetId && webRtcManager.appAdcPC != null
+                if (!alreadyOpen) {
                     android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
                     miniAppManager.triggerAppNegotiationReInvite(targetId)
+                } else if (isHome) {
+                    // The Home ADC has been open since the first emote Re-INVITE: bind the page to it.
+                    val adc = webRtcManager.adcChannel
+                    if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
+                        imsDcSdk.notifyDataChannelState(imsDcSdk.getPrimaryDcLabel(), 1)
+                        imsDcSdk.flushPendingAdc()
+                    }
+                    android.util.Log.i(TAG, "Home ADC already open, page bound without a Re-INVITE")
                 } else {
                     android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
                 }
