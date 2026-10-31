@@ -982,6 +982,69 @@ func appendReqAppToSDPClose(sdp string, appId string) string {
 	return strings.Join(newLines, "\r\n") + "\r\n"
 }
 
+// setAppSlotReqApp edits the 3rd m=application section (the App ADC slot, mid 4).
+func setAppSlotReqApp(sdp, appId string, open bool) string {
+	lines := strings.Split(strings.ReplaceAll(sdp, "\r\n", "\n"), "\n")
+	count := 0
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "m=application ") {
+			count++
+		}
+	}
+	if count < 3 {
+		return sdp
+	}
+	var out []string
+	appIdx, inApp := 0, false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "m=") {
+			inApp = false
+		}
+		if strings.HasPrefix(t, "m=application ") {
+			appIdx++
+			if appIdx == 3 {
+				inApp = true
+				parts := strings.Split(t, " ")
+				if open {
+					parts[1] = "9"
+				} else {
+					parts[1] = "0"
+				}
+				out = append(out, strings.Join(parts, " "))
+				if open {
+					out = append(out, fmt.Sprintf("a=dcmap:1000 subprotocol=%q", appId),
+						fmt.Sprintf("a=3gpp-req-app:%q;1000-UE", appId))
+				}
+				continue
+			}
+		}
+		if inApp && (strings.HasPrefix(t, "a=3gpp-req-app:") || strings.HasPrefix(t, "a=dcmap:")) {
+			continue // replaced above on open, dropped on close
+		}
+		out = append(out, t)
+	}
+	return strings.Join(out, "\r\n") + "\r\n"
+}
+
+// isHomeSlotApp reports apps that live in the Home slot (2nd application section).
+func isHomeSlotApp(appId string) bool {
+	return appId == "emoji" || appId == "fun-calling-app"
+}
+
+func countAppSections(sdp string) int {
+	n := 0
+	for _, l := range strings.Split(sdp, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "m=application ") {
+			n++
+		}
+	}
+	return n
+}
+
 func getInterfaceNameByIP(ipStr string) string {
 	if ipStr == "" || ipStr == "127.0.0.1" {
 		return ""
