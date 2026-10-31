@@ -76,6 +76,9 @@ type CallSession struct {
 	IsInterworking         bool
 	PsDataOff              string
 	ActiveAppID            string
+	AppSlot          slotState // App ADC slot; the Home slot is ActiveAppID + IsAnchorCtxCreated
+	AppMfA, AppMfB   *SlotMF   // MF endpoints for the App slot, toward caller / callee
+	AppAnswerPending bool      // a Re-INVITE that changed the App slot awaits its 200 OK
 	LastCallerReInviteMsg  *SIPMessage
 	LastCalleeReInviteMsg  *SIPMessage
 
@@ -115,6 +118,10 @@ type SerializableCallSession struct {
 	IsInterworking        bool             `json:"isInterworking"`
 	PsDataOff             string           `json:"psDataOff"`
 	ActiveAppID           string           `json:"activeAppId"`
+	AppSlotAppID          string           `json:"appSlotAppId"`
+	AppSlotCtx            bool             `json:"appSlotCtx"`
+	AppMfA                *SlotMF          `json:"appMfA"`
+	AppMfB                *SlotMF          `json:"appMfB"`
 	OrigMsgRaw            string           `json:"origMsgRaw"`
 	IsPlayingAnnouncement bool             `json:"isPlayingAnnouncement"`
 	AnnouncementCallID    string           `json:"announcementCallId"`
@@ -150,6 +157,10 @@ func (s *CallSession) ToSerializable() SerializableCallSession {
 		IsInterworking:        s.IsInterworking,
 		PsDataOff:             s.PsDataOff,
 		ActiveAppID:           s.ActiveAppID,
+		AppSlotAppID:          s.AppSlot.AppID,
+		AppSlotCtx:            s.AppSlot.CtxCreated,
+		AppMfA:                s.AppMfA,
+		AppMfB:                s.AppMfB,
 		IsPlayingAnnouncement: s.IsPlayingAnnouncement,
 		AnnouncementCallID:    s.AnnouncementCallID,
 	}
@@ -193,6 +204,9 @@ func (scs *SerializableCallSession) ToCallSession() *CallSession {
 		IsInterworking:        scs.IsInterworking,
 		PsDataOff:             scs.PsDataOff,
 		ActiveAppID:           scs.ActiveAppID,
+		AppSlot:               slotState{AppID: scs.AppSlotAppID, CtxCreated: scs.AppSlotCtx},
+		AppMfA:                scs.AppMfA,
+		AppMfB:                scs.AppMfB,
 		IsPlayingAnnouncement: scs.IsPlayingAnnouncement,
 		AnnouncementCallID:    scs.AnnouncementCallID,
 		InstructionChan:       make(chan *sba.MediaInstructionData),
