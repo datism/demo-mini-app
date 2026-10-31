@@ -363,7 +363,7 @@ class WebRtcManager(private val context: Context) {
     }
 
     suspend fun createOffer(): String {
-        createBDC(10)
+        ensureBdcChannel()
         
         val finalBdcOffer = if (bdcPC != null && bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription != null) {
             Log.i(TAG, "Reusing existing BDC local description (STABLE) for offer")
@@ -565,7 +565,7 @@ class WebRtcManager(private val context: Context) {
     }
 
     suspend fun createAnswer(): String {
-        createBDC(10)
+        ensureBdcChannel()
         
         val finalBdcAnswer = if (bdcPC != null && bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription != null) {
             Log.i(TAG, "Reusing existing BDC local description (STABLE) for answer")
@@ -745,7 +745,26 @@ class WebRtcManager(private val context: Context) {
         return bdcChannel
     }
 
+    /**
+     * Returns the BDC, creating it only when needed. A Re-INVITE must not replace it: the channel's observer
+     * (DataChannelManager.setupBDC) is registered once per call, and a replacement channel would have none.
+     */
+    fun ensureBdcChannel(): DataChannel? {
+        val existing = bdcChannel
+        val isClosed = existing?.state() == DataChannel.State.CLOSED
+        if (!needsNewBdcChannel(existing?.id(), isClosed)) return existing
+        if (existing != null) Log.w(TAG, "Replacing BDC (id=${existing.id()}, closed=$isClosed)")
+        return createBDC(BDC_STREAM_ID)
+    }
 
+    companion object {
+        /** BDC stream id, announced as a=dcmap:10 in every offer/answer. */
+        const val BDC_STREAM_ID = 10
+
+        /** A new BDC is needed only when there is no usable stream-10 channel; an open one is never replaced. */
+        fun needsNewBdcChannel(existingId: Int?, isClosed: Boolean): Boolean =
+            existingId != BDC_STREAM_ID || isClosed
+    }
 
     /**
      * Tạo ADC (Application Data Channel) — Stream ID 1000

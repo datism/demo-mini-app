@@ -1274,7 +1274,7 @@ class CallActivity : AppCompatActivity() {
                 webRtcManager.createPlaceholderChannel()
 
                 // 3. T?o BDC (pre-negotiated, chua m?  ch? ICE connected)
-                webRtcManager.createBDC(0)
+                webRtcManager.ensureBdcChannel()
 
                 // 4. T?o WebRTC offer d? c SDP km INVITE (early offer)
                 val localOffer = webRtcManager.createOffer()
@@ -1390,7 +1390,7 @@ class CallActivity : AppCompatActivity() {
                 }
 
                 // 2. T?o BDC (pre-negotiated, ID c? d?nh)
-                webRtcManager.createBDC(100)
+                webRtcManager.ensureBdcChannel()
 
                 if (remoteSdp.trim().isEmpty()) {
                     Log.i(TAG, "B (Delayed Offer): Creating local SDP Offer...")
