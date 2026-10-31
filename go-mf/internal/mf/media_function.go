@@ -75,6 +75,7 @@ type SessionInfo struct {
 	AdcDTLSParams  string
 	AdcFingerprint webrtc.DTLSFingerprint
 	AdcLocalPort   int // ADC port (separate UDP socket)
+	AdcBlock       int // index of the m=application block carrying this session's ADC; 0 means 1 (Home)
 
 	LocalIP string
 
@@ -1673,7 +1674,7 @@ func (m *MediaFunction) SetRemoteAnswer(sessionID, sdpAnswer string) error {
 	session.RtpVideoPort = mediaInfo.VideoPort
 	session.mu.Unlock()
 
-	bdcAns, adcAns := splitSDPAnswer(sdpAnswer)
+	bdcAns, adcAns := splitSDPAnswerN(sdpAnswer, session.adcBlock())
 
 	isADCContext := isAdcContext(session.CallID)
 	log.Printf("[MF] SetRemoteAnswer: session=%s call=%s isADCContext=%v bdcAns len=%d adcAns len=%d",
