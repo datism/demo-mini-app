@@ -275,7 +275,7 @@ class MiniAppManager(val activity: CallActivity) {
                     Log.i(TAG, "TuYaApp page finished loading, scheduling dataChannelNotify re-send")
                     // Use longer delay (500ms) to ensure GSMA bridge JS is fully initialized
                     view?.postDelayed({
-                        val adcState = activity.webRtcManager.adcChannel?.state()
+                        val adcState = activity.webRtcManager.foregroundAdcChannel?.state()
                         Log.i(TAG, "Re-sending dataChannelNotify: ADC State=$adcState")
                         if (adcState == org.webrtc.DataChannel.State.OPEN) {
                             val dcLabel = activity.imsDcSdk.activeDcLabels.firstOrNull() ?: "local_${activity.currentAppId}_1_data"

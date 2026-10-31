@@ -1180,32 +1180,35 @@ class CallActivity : AppCompatActivity() {
 
         // Kh?i t?o v� dang k� GSMA SDK controller
         imsDcSdk = com.demo.imsdc.webrtc.ImsDcSdk(applicationContext, binding.webviewMiniapp, webRtcManager, dcManager)
+        // Called on the JS bridge thread: hop to Main before reading WebRTC/SIP slot state or queueing a Re-INVITE.
         imsDcSdk.onJsRequestedAdc = { appId ->
-            if (isMiniAppInitiator) {
-                val targetId = when {
-                    appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
-                    appId.contains("operator-menu") -> "operator-menu"
-                    else -> appId
-                }
-                val isHome = targetId == MiniAppManager.HOME_APP
-                val alreadyOpen = if (isHome) webRtcManager.homeAdcPC != null
-                                  else sipManager.appReqApp == targetId && webRtcManager.appAdcPC != null
-                if (!alreadyOpen) {
-                    android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
-                    miniAppManager.triggerAppNegotiationReInvite(targetId)
-                } else if (isHome) {
-                    // The Home ADC has been open since the first emote Re-INVITE: bind the page to it.
-                    val adc = webRtcManager.adcChannel
-                    if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
-                        imsDcSdk.notifyDataChannelState(imsDcSdk.getPrimaryDcLabel(), 1)
-                        imsDcSdk.flushPendingAdc()
+            lifecycleScope.launch(Dispatchers.Main) {
+                if (isMiniAppInitiator) {
+                    val targetId = when {
+                        appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
+                        appId.contains("operator-menu") -> "operator-menu"
+                        else -> appId
                     }
-                    android.util.Log.i(TAG, "Home ADC already open, page bound without a Re-INVITE")
+                    val isHome = targetId == MiniAppManager.HOME_APP
+                    val alreadyOpen = if (isHome) webRtcManager.homeAdcPC != null
+                                      else sipManager.appReqApp == targetId && webRtcManager.appAdcPC != null
+                    if (!alreadyOpen) {
+                        android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
+                        miniAppManager.triggerAppNegotiationReInvite(targetId)
+                    } else if (isHome) {
+                        // The Home ADC has been open since the first emote Re-INVITE: bind the page to it.
+                        val adc = webRtcManager.adcChannel
+                        if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
+                            imsDcSdk.notifyDataChannelState(imsDcSdk.getPrimaryDcLabel(), 1)
+                            imsDcSdk.flushPendingAdc()
+                        }
+                        android.util.Log.i(TAG, "Home ADC already open, page bound without a Re-INVITE")
+                    } else {
+                        android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
+                    }
                 } else {
-                    android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
+                    android.util.Log.i(TAG, "Not initiator for app $appId. Waiting for incoming Re-INVITE.")
                 }
-            } else {
-                android.util.Log.i(TAG, "Not initiator for app $appId. Waiting for incoming Re-INVITE.")
             }
         }
         androidBridge.onJsRequestedAdc = imsDcSdk.onJsRequestedAdc
