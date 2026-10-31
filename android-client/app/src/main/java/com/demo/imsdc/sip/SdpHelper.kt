@@ -30,7 +30,7 @@ object SdpHelper {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, activeReqAppId: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004): String {
+    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, homeReqApp: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004, appReqApp: String? = null, appSlotUsed: Boolean = false): String {
     Log.i("SipManager", "Raw local SDP to translate:\n$sdp")
     val validIp = if (!localIpAddress.isNullOrBlank() && !localIpAddress.contains(":") && localIpAddress != "0.0.0.0" && localIpAddress != "127.0.0.1" && localIpAddress != "::") {
         localIpAddress
@@ -103,63 +103,47 @@ object SdpHelper {
     return Credentials(ufrag, pwd, fp, setup)
     }
     
-    val bdcCreds = extractCreds(orig.appBlocks.getOrNull(0))
-    val adcCreds = extractCreds(orig.appBlocks.getOrNull(1))
-    
-    var bdcPort = 40000
-    var bdcCandidate = ""
-    orig.appBlocks.getOrNull(0)?.let { block ->
-    val mLine = block.split("\n").find { it.startsWith("m=application ") }
-    mLine?.split(" ")?.getOrNull(1)?.toIntOrNull()?.let { bdcPort = it }
-    val cand = block.split("\n").find { 
-        it.startsWith("a=candidate:") && 
-        it.contains(" typ host", ignoreCase = true) && 
-        it.contains(" udp ", ignoreCase = true) &&
-        (it.split(" ").getOrNull(4)?.contains(":") == false) // Prefer IPv4 (no colon)
-    } ?: block.split("\n").find { 
-        it.startsWith("a=candidate:") && 
-        it.contains(" typ host", ignoreCase = true) && 
-        it.contains(" udp ", ignoreCase = true) 
-    }
-    if (cand != null) {
-        val tokens = cand.trim().split(" ").toMutableList()
-        if (tokens.size >= 8) {
-            tokens[4] = validIp
-            tokens[5] = bdcPort.toString()
+    fun midOf(block: String): String? = block.split("\n").map { it.trim() }
+        .firstOrNull { it.startsWith("a=mid:") }?.substringAfter("a=mid:")?.trim()
+
+    val bdcBlock = orig.appBlocks.getOrNull(0)
+    val laterBlocks = orig.appBlocks.drop(1)
+    val homeBlock = laterBlocks.firstOrNull { midOf(it) == "3" } ?: laterBlocks.firstOrNull { midOf(it) != "4" }
+    val appBlock = laterBlocks.firstOrNull { midOf(it) == "4" }
+
+    class Endpoint(val port: Int, val candidate: String)
+    fun endpointOf(block: String?, defaultPort: Int): Endpoint {
+        var port = defaultPort
+        var candidate = ""
+        if (block != null) {
+            val blockLines = block.split("\n")
+            blockLines.find { it.startsWith("m=application ") }?.split(" ")?.getOrNull(1)?.toIntOrNull()?.let { port = it }
+            val cand = blockLines.find {
+                it.startsWith("a=candidate:") && it.contains(" typ host", ignoreCase = true) &&
+                    it.contains(" udp ", ignoreCase = true) && (it.split(" ").getOrNull(4)?.contains(":") == false)
+            } ?: blockLines.find {
+                it.startsWith("a=candidate:") && it.contains(" typ host", ignoreCase = true) && it.contains(" udp ", ignoreCase = true)
+            }
+            if (cand != null) {
+                val tokens = cand.trim().split(" ").toMutableList()
+                if (tokens.size >= 8) {
+                    tokens[4] = validIp
+                    tokens[5] = port.toString()
+                }
+                candidate = tokens.joinToString(" ")
+            }
         }
-        bdcCandidate = tokens.joinToString(" ")
+        return Endpoint(port, candidate)
     }
-    }
-    
-    var adcPort = 40006
-    var adcCandidate = ""
-    var adcMid = "3"
-    orig.appBlocks.getOrNull(1)?.let { block ->
-    val mLine = block.split("\n").find { it.startsWith("m=application ") }
-    mLine?.split(" ")?.getOrNull(1)?.toIntOrNull()?.let { adcPort = it }
-    val cand = block.split("\n").find { 
-        it.startsWith("a=candidate:") && 
-        it.contains(" typ host", ignoreCase = true) && 
-        it.contains(" udp ", ignoreCase = true) &&
-        (it.split(" ").getOrNull(4)?.contains(":") == false) // Prefer IPv4 (no colon)
-    } ?: block.split("\n").find { 
-        it.startsWith("a=candidate:") && 
-        it.contains(" typ host", ignoreCase = true) && 
-        it.contains(" udp ", ignoreCase = true) 
-    }
-    if (cand != null) {
-        val tokens = cand.trim().split(" ").toMutableList()
-        if (tokens.size >= 8) {
-            tokens[4] = validIp
-            tokens[5] = adcPort.toString()
-        }
-        adcCandidate = tokens.joinToString(" ")
-    }
-    val midLine = block.split("\n").find { it.startsWith("a=mid:") }
-    if (midLine != null) {
-        adcMid = midLine.substringAfter("a=mid:").trim()
-    }
-    }
+
+    val bdcCreds = extractCreds(bdcBlock)
+    val homeCreds = extractCreds(homeBlock)
+    val appCreds = extractCreds(appBlock)
+    val bdcEp = endpointOf(bdcBlock, 40000)
+    val homeEp = endpointOf(homeBlock, 40006)
+    val appEp = endpointOf(appBlock, 40008)
+    val bdcPort = bdcEp.port
+    val bdcCandidate = bdcEp.candidate
     
     // 1.5. Extract only the first SSRC mapping lines for audio and video
     var currentSection = ""
@@ -207,7 +191,7 @@ object SdpHelper {
     if (trimmed.startsWith("a=group:BUNDLE") || trimmed.startsWith("a=msid-semantic:")) continue
     newLines.add(trimmed)
     }
-    val hasADC = activeReqAppId != null
+    val hasADC = homeReqApp != null
     
     // 3. Synthesize m=audio and m=video sections with candidates and ssrcs
     newLines.add("m=audio $localAudioPort RTP/AVP 8")
@@ -245,31 +229,39 @@ object SdpHelper {
     newLines.add("a=3gpp-bdc-used-by:sender")
     newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
     
-    // 5. Synthesize ADC application section (mid 3) if active
+    fun addAdcSection(mid: String, label: String, creds: Credentials, ep: Endpoint, appId: String) {
+        newLines.add("m=application ${ep.port} UDP/DTLS/SCTP webrtc-datachannel")
+        newLines.add("c=IN IP4 $validIp")
+        newLines.add("a=mid:$mid")
+        if (creds.ufrag.isNotEmpty()) newLines.add(creds.ufrag)
+        if (creds.pwd.isNotEmpty()) newLines.add(creds.pwd)
+        if (creds.fingerprint.isNotEmpty()) newLines.add(creds.fingerprint)
+        newLines.add(if (creds.setup.isNotEmpty()) creds.setup else "a=setup:actpass")
+        if (ep.candidate.isNotEmpty()) newLines.add(ep.candidate)
+        newLines.add("a=tls-id:${tlsIdFor(label, creds.fingerprint)}")
+        newLines.add("a=dcmap:1000 subprotocol=\"$appId\"")
+        newLines.add("a=3gpp-req-app:\"$appId\";1000-UE")
+        newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
+    }
+    fun addClosedSection(mid: String) {
+        newLines.add("m=application 0 UDP/DTLS/SCTP webrtc-datachannel")
+        newLines.add("c=IN IP4 127.0.0.1")
+        newLines.add("a=mid:$mid")
+    }
+
+    
+
+    // 5. Home ADC (mid 3)
     if (hasADC) {
-    val appId = activeReqAppId!!
-    if (appId == "close" || appId == "operator-menu") {
-    newLines.add("m=application 0 UDP/DTLS/SCTP webrtc-datachannel")
-    newLines.add("c=IN IP4 127.0.0.1")
-    newLines.add("a=mid:$adcMid")
-    } else {
-    newLines.add("m=application $adcPort UDP/DTLS/SCTP webrtc-datachannel")
-    newLines.add("c=IN IP4 $validIp")
-    newLines.add("a=mid:$adcMid")
-    if (adcCreds.ufrag.isNotEmpty()) newLines.add(adcCreds.ufrag)
-    if (adcCreds.pwd.isNotEmpty()) newLines.add(adcCreds.pwd)
-    if (adcCreds.fingerprint.isNotEmpty()) newLines.add(adcCreds.fingerprint)
-    if (adcCreds.setup.isNotEmpty()) {
-    newLines.add(adcCreds.setup)
-    } else {
-    newLines.add("a=setup:actpass")
+        val appId = homeReqApp!!
+        if (appId == "close" || appId == "operator-menu") addClosedSection("3")
+        else addAdcSection("3", "home", homeCreds, homeEp, appId)
     }
-    if (adcCandidate.isNotEmpty()) newLines.add(adcCandidate)
-    newLines.add("a=tls-id:${tlsIdFor("adc", adcCreds.fingerprint)}")
-    newLines.add("a=dcmap:1000 subprotocol=\"$appId\"")
-    newLines.add("a=3gpp-req-app:\"$appId\";1000-UE")
-    newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
-    }
+    // 6. App ADC (mid 4): once it has appeared it stays in every offer, as port 0 while no app is open
+    if (appReqApp != null && appBlock != null) {
+        addAdcSection("4", "app", appCreds, appEp, appReqApp)
+    } else if (appSlotUsed || appBlock != null) {
+        addClosedSection("4")
     }
     
     val result = newLines.joinToString("\r\n") + "\r\n"
@@ -359,25 +351,18 @@ object SdpHelper {
     if (app1.setup.isNotEmpty()) newLines.add(app1.setup)
     newLines.add(candidateLine)
     
-    if (appSections.size > 1) {
-    val app2 = appSections[1]
-    val effectiveIp2 = app2.remoteIp
-    val candidateLine2 = "a=candidate:1 1 udp 2122260991 $effectiveIp2 ${app2.appPort} typ host generation 0"
-    
-    newLines.add("m=application ${app2.appPort} UDP/DTLS/SCTP webrtc-datachannel")
-    newLines.add("c=IN IP4 $effectiveIp2")
-    if (app2.mid.isNotEmpty()) {
-    newLines.add("a=mid:${app2.mid}")
-    } else {
-    newLines.add("a=mid:1")
-    }
-    newLines.add("a=sctp-port:5000")
-    newLines.add("a=ice-lite")
-    if (app2.iceUfrag.isNotEmpty()) newLines.add(app2.iceUfrag)
-    if (app2.icePwd.isNotEmpty()) newLines.add(app2.icePwd)
-    if (app2.fingerprint.isNotEmpty()) newLines.add(app2.fingerprint)
-    if (app2.setup.isNotEmpty()) newLines.add(app2.setup)
-    newLines.add(candidateLine2)
+    appSections.drop(1).take(2).forEachIndexed { index, app ->
+        val candidateLine = "a=candidate:1 1 udp 2122260991 ${app.remoteIp} ${app.appPort} typ host generation 0"
+        newLines.add("m=application ${app.appPort} UDP/DTLS/SCTP webrtc-datachannel")
+        newLines.add("c=IN IP4 ${app.remoteIp}")
+        newLines.add("a=mid:${if (app.mid.isNotEmpty()) app.mid else (index + 3).toString()}")
+        newLines.add("a=sctp-port:5000")
+        newLines.add("a=ice-lite")
+        if (app.iceUfrag.isNotEmpty()) newLines.add(app.iceUfrag)
+        if (app.icePwd.isNotEmpty()) newLines.add(app.icePwd)
+        if (app.fingerprint.isNotEmpty()) newLines.add(app.fingerprint)
+        if (app.setup.isNotEmpty()) newLines.add(app.setup)
+        newLines.add(candidateLine)
     }
     } else {
     // Pure DataChannel mode (1 m-line, app=mid:0)
