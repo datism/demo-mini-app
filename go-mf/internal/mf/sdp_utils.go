@@ -248,7 +248,7 @@ func splitSDPToMediaBlocks(sdp string) (sessionHeader string, audioBlock string,
 	return
 }
 
-func splitSDPAnswer(sdpAnswer string) (bdcAnswer string, adcAnswer string) {
+func splitSDPAnswerN(sdpAnswer string, adcBlock int) (bdcAnswer string, adcAnswer string) {
 	sessionHeader, audioBlock, videoBlock, appBlocks := splitSDPToMediaBlocks(sdpAnswer)
 
 	var bdcMid string
@@ -288,8 +288,8 @@ func splitSDPAnswer(sdpAnswer string) (bdcAnswer string, adcAnswer string) {
 	bdcAnswer = bdcSb.String()
 
 	// ADC Answer
-	if len(appBlocks) > 1 {
-		matchedBlock := appBlocks[1]
+	if len(appBlocks) > adcBlock {
+		matchedBlock := appBlocks[adcBlock]
 		var adcMid string
 		for _, line := range strings.Split(matchedBlock, "\n") {
 			trimmed := strings.TrimSpace(line)
@@ -489,3 +489,5 @@ func rewriteAdcPortInSDP(sdp string, ip string, port int) string {
 	}
 	return strings.Join(newLines, "\r\n") + "\r\n"
 }
+
+func splitSDPAnswer(sdpAnswer string) (string, string) { return splitSDPAnswerN(sdpAnswer, 1) }

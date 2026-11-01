@@ -23,365 +23,45 @@ func (m *MediaFunction) CreateMediaContext(ctx *sba.MediaContext) (*sba.MediaCon
 	m.mu.Unlock()
 
 	if exists {
-		log.Printf("[MF] CreateMediaContext: context %s already exists. Separating ADC transport...", contextID)
-
 		m.mu.Lock()
 		sessA := m.sessions[existingCtx.SessionA]
 		sessB := m.sessions[existingCtx.SessionB]
 		m.mu.Unlock()
+		return m.buildAdcTransport(contextID, ctx, sessA, sessB), nil
+	}
 
-		var sdpOfferA, sdpOfferB string
-		var dcMedia *sba.DcMedia
-
-		termA := ctx.Terminations[0]
-		if len(termA.Medias) > 0 {
-			sdpOfferA = termA.Medias[0].SDP
-			for _, m := range termA.Medias {
-				if m.DcMedia != nil {
-					if m.DcMedia.MediaProxyConfig == "UDP_PROXY" || dcMedia == nil {
-						dcMedia = m.DcMedia
-					}
-				}
+	if parentID, ok := appParentID(contextID); ok {
+		m.mu.Lock()
+		parent := m.contexts[parentID]
+		var pa, pb *SessionInfo
+		if parent != nil {
+			pa, pb = m.sessions[parent.SessionA], m.sessions[parent.SessionB]
+		}
+		m.mu.Unlock()
+		if pa == nil {
+			return nil, fmt.Errorf("parent context %s not found for app slot", parentID)
+		}
+		shA := newShadowSession(pa, pa.ID+"-app", contextID, 2)
+		var shB *SessionInfo
+		if pb != nil {
+			shB = newShadowSession(pb, pb.ID+"-app", contextID, 2)
+		}
+		cinfo := &ContextInfo{ContextID: contextID, SessionA: shA.ID}
+		m.mu.Lock()
+		m.sessions[shA.ID] = shA
+		if shB != nil {
+			m.sessions[shB.ID] = shB
+			cinfo.SessionB = shB.ID
+		}
+		m.contexts[contextID] = cinfo
+		m.mu.Unlock()
+		if shB != nil {
+			if err := m.LinkSessions(shA.ID, shB.ID); err != nil {
+				return nil, err
 			}
 		}
-
-		if len(ctx.Terminations) > 1 {
-			termB := ctx.Terminations[1]
-			if len(termB.Medias) > 0 {
-				sdpOfferB = termB.Medias[0].SDP
-				for _, m := range termB.Medias {
-					if m.DcMedia != nil {
-						if m.DcMedia.MediaProxyConfig == "UDP_PROXY" || dcMedia == nil {
-							dcMedia = m.DcMedia
-						}
-					}
-				}
-			}
-		}
-
-		if dcMedia != nil {
-			if sessA != nil {
-				sessA.mu.Lock()
-				sessA.ProxyMode = dcMedia.MediaProxyConfig
-				if dcMedia.Mdc2Info != nil {
-					sessA.Mdc2Protocol = dcMedia.Mdc2Info.Mdc2Protocol
-					if dcMedia.Mdc2Info.RemoteMdc2Endpoint != nil {
-						sessA.DcasIP = dcMedia.Mdc2Info.RemoteMdc2Endpoint.IP
-						sessA.DcasPort = dcMedia.Mdc2Info.RemoteMdc2Endpoint.Port
-					}
-				}
-				sessA.mu.Unlock()
-			}
-			if sessB != nil {
-				sessB.mu.Lock()
-				sessB.ProxyMode = dcMedia.MediaProxyConfig
-				if dcMedia.Mdc2Info != nil {
-					sessB.Mdc2Protocol = dcMedia.Mdc2Info.Mdc2Protocol
-					if dcMedia.Mdc2Info.RemoteMdc2Endpoint != nil {
-						sessB.DcasIP = dcMedia.Mdc2Info.RemoteMdc2Endpoint.IP
-						sessB.DcasPort = dcMedia.Mdc2Info.RemoteMdc2Endpoint.Port
-					}
-				}
-				sessB.mu.Unlock()
-			}
-		}
-
-		if sessA != nil {
-			sessA.mu.Lock()
-			if sessA.AdcPC != nil {
-				log.Printf("[MF] Recreating AdcPC for session A: closing old PeerConnection")
-				_ = sessA.AdcPC.Close()
-				sessA.AdcPC = nil
-				sessA.mu.Unlock()
-				// Allow UDPMux to fully release old ICE ufrag/DTLS state before re-creating
-				time.Sleep(500 * time.Millisecond)
-				sessA.mu.Lock()
-			}
-			isAnswererA := (sdpOfferA != "")
-			if err := m.initSessionAdcPC(sessA, isAnswererA); err != nil {
-				log.Printf("[MF] Failed to initialize AdcPC for session A: %v", err)
-			}
-			if sessA.AdcPC != nil {
-				if sdpOfferA != "" {
-					_, adcOffer := splitSDPAnswer(sdpOfferA)
-					if adcOffer != "" {
-						cleanOffer := stripAudioVideoFromSDP(adcOffer)
-						translatedOffer := translateSipOfferToWebRtcOffer(cleanOffer)
-						translatedOffer = rewriteMidToZero(translatedOffer)
-						offer := webrtc.SessionDescription{
-							Type: webrtc.SDPTypeOffer,
-							SDP:  translatedOffer,
-						}
-						if err := sessA.AdcPC.SetRemoteDescription(offer); err == nil {
-							answer, err2 := sessA.AdcPC.CreateAnswer(nil)
-							if err2 == nil {
-								gatherComplete := webrtc.GatheringCompletePromise(sessA.AdcPC)
-								_ = sessA.AdcPC.SetLocalDescription(answer)
-								<-gatherComplete
-
-								sessA.AdcLocalPort = extractPortFromSDP(sessA.AdcPC.LocalDescription().SDP, sessA.LocalIP)
-								cleanSDP := strings.ReplaceAll(sessA.AdcPC.LocalDescription().SDP, "a=setup:active", "a=setup:passive")
-								log.Printf("[MF] AdcPC Local SDP for Session A (LocalPort=%d):\n%s", sessA.AdcLocalPort, cleanSDP)
-								iceParams, dtlsFingerprint, err3 := extractICEDTLSFromSDP(cleanSDP)
-								if err3 == nil {
-									sessA.AdcICEParams = iceParams
-									sessA.AdcDTLSParams = cleanSDP
-									sessA.AdcFingerprint = dtlsFingerprint
-								}
-							}
-						} else {
-							log.Printf("[MF] Failed to set remote description on AdcPC for session A: %v", err)
-						}
-					}
-				} else {
-					offer, err := sessA.AdcPC.CreateOffer(nil)
-					if err == nil {
-						gatherComplete := webrtc.GatheringCompletePromise(sessA.AdcPC)
-						_ = sessA.AdcPC.SetLocalDescription(offer)
-						<-gatherComplete
-
-						sessA.AdcLocalPort = extractPortFromSDP(sessA.AdcPC.LocalDescription().SDP, sessA.LocalIP)
-						iceParams, dtlsFingerprint, err2 := extractICEDTLSFromSDP(sessA.AdcPC.LocalDescription().SDP)
-						if err2 == nil {
-							sessA.AdcICEParams = iceParams
-							sessA.AdcDTLSParams = sessA.AdcPC.LocalDescription().SDP
-							sessA.AdcFingerprint = dtlsFingerprint
-						}
-					}
-				}
-			}
-			sessA.mu.Unlock()
-
-			if sessA.ProxyMode == "UDP_PROXY" {
-				go func(s *SessionInfo) {
-					log.Printf("[MF] Pre-connecting MDC2 TCP to DCAS for session A %s", s.ID)
-					_, _ = m.GetOrCreateDcasConn(s, 1000)
-					_, _ = m.GetOrCreateDcasConn(s, 1001)
-				}(sessA)
-			}
-		}
-
-		if sessB != nil {
-			sessB.mu.Lock()
-			if sessB.AdcPC != nil {
-				log.Printf("[MF] Recreating AdcPC for session B: closing old PeerConnection")
-				_ = sessB.AdcPC.Close()
-				sessB.AdcPC = nil
-				sessB.mu.Unlock()
-				// Allow UDPMux to fully release old ICE ufrag/DTLS state before re-creating
-				time.Sleep(500 * time.Millisecond)
-				sessB.mu.Lock()
-			}
-			isAnswererB := (sdpOfferB != "")
-			if err := m.initSessionAdcPC(sessB, isAnswererB); err != nil {
-				log.Printf("[MF] Failed to initialize AdcPC for session B: %v", err)
-			}
-			if sessB.AdcPC != nil {
-				if sdpOfferB != "" {
-					_, adcOffer := splitSDPAnswer(sdpOfferB)
-					if adcOffer != "" {
-						cleanOffer := stripAudioVideoFromSDP(adcOffer)
-						translatedOffer := translateSipOfferToWebRtcOffer(cleanOffer)
-						translatedOffer = rewriteMidToZero(translatedOffer)
-						offer := webrtc.SessionDescription{
-							Type: webrtc.SDPTypeOffer,
-							SDP:  translatedOffer,
-						}
-						if err := sessB.AdcPC.SetRemoteDescription(offer); err == nil {
-							answer, err2 := sessB.AdcPC.CreateAnswer(nil)
-							if err2 == nil {
-								gatherComplete := webrtc.GatheringCompletePromise(sessB.AdcPC)
-								_ = sessB.AdcPC.SetLocalDescription(answer)
-								<-gatherComplete
-
-								sessB.AdcLocalPort = extractPortFromSDP(sessB.AdcPC.LocalDescription().SDP, sessB.LocalIP)
-								cleanSDP := strings.ReplaceAll(sessB.AdcPC.LocalDescription().SDP, "a=setup:active", "a=setup:passive")
-								log.Printf("[MF] AdcPC Local SDP for Session B (LocalPort=%d):\n%s", sessB.AdcLocalPort, cleanSDP)
-								iceParams, dtlsFingerprint, err3 := extractICEDTLSFromSDP(cleanSDP)
-								if err3 == nil {
-									sessB.AdcICEParams = iceParams
-									sessB.AdcDTLSParams = cleanSDP
-									sessB.AdcFingerprint = dtlsFingerprint
-								}
-							}
-						} else {
-							log.Printf("[MF] Failed to set remote description on AdcPC for session B: %v", err)
-						}
-					}
-				} else {
-					offer, err := sessB.AdcPC.CreateOffer(nil)
-					if err == nil {
-						gatherComplete := webrtc.GatheringCompletePromise(sessB.AdcPC)
-						_ = sessB.AdcPC.SetLocalDescription(offer)
-						<-gatherComplete
-
-						sessB.AdcLocalPort = extractPortFromSDP(sessB.AdcPC.LocalDescription().SDP, sessB.LocalIP)
-						iceParams, dtlsFingerprint, err2 := extractICEDTLSFromSDP(sessB.AdcPC.LocalDescription().SDP)
-						if err2 == nil {
-							sessB.AdcICEParams = iceParams
-							sessB.AdcDTLSParams = sessB.AdcPC.LocalDescription().SDP
-							sessB.AdcFingerprint = dtlsFingerprint
-						}
-					}
-				}
-			}
-			sessB.mu.Unlock()
-
-			if sessB.ProxyMode == "UDP_PROXY" {
-				go func(s *SessionInfo) {
-					log.Printf("[MF] Pre-connecting MDC2 TCP to DCAS for session B %s", s.ID)
-					_, _ = m.GetOrCreateDcasConn(s, 1000)
-					_, _ = m.GetOrCreateDcasConn(s, 1001)
-				}(sessB)
-			}
-		}
-
-		// Reconstruct and return terminations with separate BDC and ADC MediaItems
-		resTerminations := []sba.Termination{}
-		if sessA != nil {
-			setupA_BDC := "active"
-			if sessA.BdcPC != nil && sessA.BdcPC.LocalDescription() != nil {
-				setupA_BDC = extractSetupRoleFromSDP(sessA.BdcPC.LocalDescription().SDP)
-			}
-			setupA_ADC := "actpass"
-			if sdpOfferA != "" {
-				setupA_ADC = "passive"
-			} else if sessA.AdcPC != nil && sessA.AdcPC.LocalDescription() != nil {
-				setupA_ADC = extractSetupRoleFromSDP(sessA.AdcPC.LocalDescription().SDP)
-			}
-
-			medias := []sba.MediaItem{
-				{
-					MediaID:           "audio",
-					MediaResourceType: "RTP",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessA.LocalIP,
-						Port: sessA.LocalAudioPort,
-					},
-				},
-				{
-					MediaID:           "video",
-					MediaResourceType: "RTP",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessA.LocalIP,
-						Port: sessA.LocalVideoPort,
-					},
-				},
-				{
-					MediaID:           "1",
-					MediaResourceType: "DC",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessA.LocalIP,
-						Port: sessA.BdcLocalPort,
-					},
-					LocalDcEndpoint: &sba.DcEndpoint{
-						SctpPort:      sessA.BdcLocalPort,
-						Fingerprint:   fmt.Sprintf("%s %s", sessA.BdcFingerprint.Algorithm, sessA.BdcFingerprint.Value),
-						SecuritySetup: setupA_BDC,
-						IceUfrag:      sessA.BdcICEParams.UsernameFragment,
-						IcePwd:        sessA.BdcICEParams.Password,
-					},
-				},
-			}
-			if sessA.AdcLocalPort != 0 {
-				medias = append(medias, sba.MediaItem{
-					MediaID:           "adc-media",
-					MediaResourceType: "DC",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessA.LocalIP,
-						Port: sessA.AdcLocalPort,
-					},
-					LocalDcEndpoint: &sba.DcEndpoint{
-						SctpPort:      sessA.AdcLocalPort,
-						Fingerprint:   fmt.Sprintf("%s %s", sessA.AdcFingerprint.Algorithm, sessA.AdcFingerprint.Value),
-						SecuritySetup: setupA_ADC,
-						IceUfrag:      sessA.AdcICEParams.UsernameFragment,
-						IcePwd:        sessA.AdcICEParams.Password,
-					},
-				})
-			}
-			resTerminations = append(resTerminations, sba.Termination{
-				TerminationID: "term-caller-a",
-				Medias:        medias,
-			})
-		}
-		if sessB != nil {
-			setupB_BDC := "active"
-			if sessB.BdcPC != nil && sessB.BdcPC.LocalDescription() != nil {
-				setupB_BDC = extractSetupRoleFromSDP(sessB.BdcPC.LocalDescription().SDP)
-			}
-			setupB_ADC := "actpass"
-			if sdpOfferB != "" {
-				setupB_ADC = "passive"
-			} else if sessB.AdcPC != nil && sessB.AdcPC.LocalDescription() != nil {
-				setupB_ADC = extractSetupRoleFromSDP(sessB.AdcPC.LocalDescription().SDP)
-			}
-
-			medias := []sba.MediaItem{
-				{
-					MediaID:           "audio",
-					MediaResourceType: "RTP",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessB.LocalIP,
-						Port: sessB.LocalAudioPort,
-					},
-				},
-				{
-					MediaID:           "video",
-					MediaResourceType: "RTP",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessB.LocalIP,
-						Port: sessB.LocalVideoPort,
-					},
-				},
-				{
-					MediaID:           "3",
-					MediaResourceType: "DC",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessB.LocalIP,
-						Port: sessB.BdcLocalPort,
-					},
-					LocalDcEndpoint: &sba.DcEndpoint{
-						SctpPort:      sessB.BdcLocalPort,
-						Fingerprint:   fmt.Sprintf("%s %s", sessB.BdcFingerprint.Algorithm, sessB.BdcFingerprint.Value),
-						SecuritySetup: setupB_BDC,
-						IceUfrag:      sessB.BdcICEParams.UsernameFragment,
-						IcePwd:        sessB.BdcICEParams.Password,
-					},
-				},
-			}
-			if sessB.AdcLocalPort != 0 {
-				localSDP := mergeSDPOffers(sessB.BdcPC.LocalDescription().SDP, sessB.AdcPC.LocalDescription().SDP)
-				localSDP = rewriteSDPPorts(localSDP, m.udpPort, m.publicPort)
-				localSDP = rewriteAdcPortInSDP(localSDP, sessB.LocalIP, sessB.AdcLocalPort)
-
-				medias = append(medias, sba.MediaItem{
-					MediaID:           "adc-media",
-					MediaResourceType: "DC",
-					LocalMbEndpoint: &sba.EndpointIPPort{
-						IP:   sessB.LocalIP,
-						Port: sessB.AdcLocalPort,
-					},
-					LocalDcEndpoint: &sba.DcEndpoint{
-						SctpPort:      sessB.AdcLocalPort,
-						Fingerprint:   fmt.Sprintf("%s %s", sessB.AdcFingerprint.Algorithm, sessB.AdcFingerprint.Value),
-						SecuritySetup: setupB_ADC,
-						IceUfrag:      sessB.AdcICEParams.UsernameFragment,
-						IcePwd:        sessB.AdcICEParams.Password,
-					},
-					SDP: localSDP,
-				})
-			}
-			resTerminations = append(resTerminations, sba.Termination{
-				TerminationID: "term-callee-b",
-				Medias:        medias,
-			})
-		}
-
-		return &sba.MediaContext{
-			ContextID:    contextID,
-			Terminations: resTerminations,
-		}, nil
+		log.Printf("[MF] Creating App-slot context %s (parent %s)", contextID, parentID)
+		return m.buildAdcTransport(contextID, ctx, shA, shB), nil
 	}
 
 	log.Printf("[MF] CreateMediaContext context=%s", contextID)
@@ -446,10 +126,10 @@ func (m *MediaFunction) CreateMediaContext(ctx *sba.MediaContext) (*sba.MediaCon
 		}
 		resTerminations = append(resTerminations, resTerm)
 
-	} else if strings.HasSuffix(contextID, "-adc") {
+	} else if isAdcContext(contextID) {
 		// ADC Sub-context: find parent BDC context, reuse existing sessions,
 		// create separate AdcPC PeerConnections on ephemeral ports.
-		parentContextID := strings.TrimSuffix(contextID, "-adc")
+		parentContextID := adcParentID(contextID)
 		log.Printf("[MF] Creating ADC Sub-context: context=%s, parent=%s", contextID, parentContextID)
 
 		m.mu.Lock()
@@ -1223,4 +903,364 @@ func (m *MediaFunction) DeleteMediaContext(contextID string) error {
 	}
 
 	return nil
+}
+
+func (m *MediaFunction) buildAdcTransport(contextID string, ctx *sba.MediaContext, sessA, sessB *SessionInfo) *sba.MediaContext {
+	log.Printf("[MF] CreateMediaContext: context %s already exists. Separating ADC transport...", contextID)
+
+	var sdpOfferA, sdpOfferB string
+	var dcMedia *sba.DcMedia
+
+	termA := ctx.Terminations[0]
+	if len(termA.Medias) > 0 {
+		sdpOfferA = termA.Medias[0].SDP
+		for _, m := range termA.Medias {
+			if m.DcMedia != nil {
+				if m.DcMedia.MediaProxyConfig == "UDP_PROXY" || dcMedia == nil {
+					dcMedia = m.DcMedia
+				}
+			}
+		}
+	}
+
+	if len(ctx.Terminations) > 1 {
+		termB := ctx.Terminations[1]
+		if len(termB.Medias) > 0 {
+			sdpOfferB = termB.Medias[0].SDP
+			for _, m := range termB.Medias {
+				if m.DcMedia != nil {
+					if m.DcMedia.MediaProxyConfig == "UDP_PROXY" || dcMedia == nil {
+						dcMedia = m.DcMedia
+					}
+				}
+			}
+		}
+	}
+
+	if dcMedia != nil {
+		if sessA != nil {
+			sessA.mu.Lock()
+			sessA.ProxyMode = dcMedia.MediaProxyConfig
+			if dcMedia.Mdc2Info != nil {
+				sessA.Mdc2Protocol = dcMedia.Mdc2Info.Mdc2Protocol
+				if dcMedia.Mdc2Info.RemoteMdc2Endpoint != nil {
+					sessA.DcasIP = dcMedia.Mdc2Info.RemoteMdc2Endpoint.IP
+					sessA.DcasPort = dcMedia.Mdc2Info.RemoteMdc2Endpoint.Port
+				}
+			}
+			sessA.mu.Unlock()
+		}
+		if sessB != nil {
+			sessB.mu.Lock()
+			sessB.ProxyMode = dcMedia.MediaProxyConfig
+			if dcMedia.Mdc2Info != nil {
+				sessB.Mdc2Protocol = dcMedia.Mdc2Info.Mdc2Protocol
+				if dcMedia.Mdc2Info.RemoteMdc2Endpoint != nil {
+					sessB.DcasIP = dcMedia.Mdc2Info.RemoteMdc2Endpoint.IP
+					sessB.DcasPort = dcMedia.Mdc2Info.RemoteMdc2Endpoint.Port
+				}
+			}
+			sessB.mu.Unlock()
+		}
+	}
+
+	if sessA != nil {
+		sessA.mu.Lock()
+		if sessA.AdcPC != nil {
+			log.Printf("[MF] Recreating AdcPC for session A: closing old PeerConnection")
+			_ = sessA.AdcPC.Close()
+			sessA.AdcPC = nil
+			sessA.mu.Unlock()
+			// Allow UDPMux to fully release old ICE ufrag/DTLS state before re-creating
+			time.Sleep(500 * time.Millisecond)
+			sessA.mu.Lock()
+		}
+		isAnswererA := (sdpOfferA != "")
+		if err := m.initSessionAdcPC(sessA, isAnswererA); err != nil {
+			log.Printf("[MF] Failed to initialize AdcPC for session A: %v", err)
+		}
+		if sessA.AdcPC != nil {
+			if sdpOfferA != "" {
+				_, adcOffer := splitSDPAnswerN(sdpOfferA, sessA.adcBlock())
+				if adcOffer != "" {
+					cleanOffer := stripAudioVideoFromSDP(adcOffer)
+					translatedOffer := translateSipOfferToWebRtcOffer(cleanOffer)
+					translatedOffer = rewriteMidToZero(translatedOffer)
+					offer := webrtc.SessionDescription{
+						Type: webrtc.SDPTypeOffer,
+						SDP:  translatedOffer,
+					}
+					if err := sessA.AdcPC.SetRemoteDescription(offer); err == nil {
+						answer, err2 := sessA.AdcPC.CreateAnswer(nil)
+						if err2 == nil {
+							gatherComplete := webrtc.GatheringCompletePromise(sessA.AdcPC)
+							_ = sessA.AdcPC.SetLocalDescription(answer)
+							<-gatherComplete
+
+							sessA.AdcLocalPort = extractPortFromSDP(sessA.AdcPC.LocalDescription().SDP, sessA.LocalIP)
+							cleanSDP := strings.ReplaceAll(sessA.AdcPC.LocalDescription().SDP, "a=setup:active", "a=setup:passive")
+							log.Printf("[MF] AdcPC Local SDP for Session A (LocalPort=%d):\n%s", sessA.AdcLocalPort, cleanSDP)
+							iceParams, dtlsFingerprint, err3 := extractICEDTLSFromSDP(cleanSDP)
+							if err3 == nil {
+								sessA.AdcICEParams = iceParams
+								sessA.AdcDTLSParams = cleanSDP
+								sessA.AdcFingerprint = dtlsFingerprint
+							}
+						}
+					} else {
+						log.Printf("[MF] Failed to set remote description on AdcPC for session A: %v", err)
+					}
+				}
+			} else {
+				offer, err := sessA.AdcPC.CreateOffer(nil)
+				if err == nil {
+					gatherComplete := webrtc.GatheringCompletePromise(sessA.AdcPC)
+					_ = sessA.AdcPC.SetLocalDescription(offer)
+					<-gatherComplete
+
+					sessA.AdcLocalPort = extractPortFromSDP(sessA.AdcPC.LocalDescription().SDP, sessA.LocalIP)
+					iceParams, dtlsFingerprint, err2 := extractICEDTLSFromSDP(sessA.AdcPC.LocalDescription().SDP)
+					if err2 == nil {
+						sessA.AdcICEParams = iceParams
+						sessA.AdcDTLSParams = sessA.AdcPC.LocalDescription().SDP
+						sessA.AdcFingerprint = dtlsFingerprint
+					}
+				}
+			}
+		}
+		sessA.mu.Unlock()
+
+		if sessA.ProxyMode == "UDP_PROXY" {
+			go func(s *SessionInfo) {
+				log.Printf("[MF] Pre-connecting MDC2 TCP to DCAS for session A %s", s.ID)
+				_, _ = m.GetOrCreateDcasConn(s, 1000)
+				_, _ = m.GetOrCreateDcasConn(s, 1001)
+			}(sessA)
+		}
+	}
+
+	if sessB != nil {
+		sessB.mu.Lock()
+		if sessB.AdcPC != nil {
+			log.Printf("[MF] Recreating AdcPC for session B: closing old PeerConnection")
+			_ = sessB.AdcPC.Close()
+			sessB.AdcPC = nil
+			sessB.mu.Unlock()
+			// Allow UDPMux to fully release old ICE ufrag/DTLS state before re-creating
+			time.Sleep(500 * time.Millisecond)
+			sessB.mu.Lock()
+		}
+		isAnswererB := (sdpOfferB != "")
+		if err := m.initSessionAdcPC(sessB, isAnswererB); err != nil {
+			log.Printf("[MF] Failed to initialize AdcPC for session B: %v", err)
+		}
+		if sessB.AdcPC != nil {
+			if sdpOfferB != "" {
+				_, adcOffer := splitSDPAnswerN(sdpOfferB, sessB.adcBlock())
+				if adcOffer != "" {
+					cleanOffer := stripAudioVideoFromSDP(adcOffer)
+					translatedOffer := translateSipOfferToWebRtcOffer(cleanOffer)
+					translatedOffer = rewriteMidToZero(translatedOffer)
+					offer := webrtc.SessionDescription{
+						Type: webrtc.SDPTypeOffer,
+						SDP:  translatedOffer,
+					}
+					if err := sessB.AdcPC.SetRemoteDescription(offer); err == nil {
+						answer, err2 := sessB.AdcPC.CreateAnswer(nil)
+						if err2 == nil {
+							gatherComplete := webrtc.GatheringCompletePromise(sessB.AdcPC)
+							_ = sessB.AdcPC.SetLocalDescription(answer)
+							<-gatherComplete
+
+							sessB.AdcLocalPort = extractPortFromSDP(sessB.AdcPC.LocalDescription().SDP, sessB.LocalIP)
+							cleanSDP := strings.ReplaceAll(sessB.AdcPC.LocalDescription().SDP, "a=setup:active", "a=setup:passive")
+							log.Printf("[MF] AdcPC Local SDP for Session B (LocalPort=%d):\n%s", sessB.AdcLocalPort, cleanSDP)
+							iceParams, dtlsFingerprint, err3 := extractICEDTLSFromSDP(cleanSDP)
+							if err3 == nil {
+								sessB.AdcICEParams = iceParams
+								sessB.AdcDTLSParams = cleanSDP
+								sessB.AdcFingerprint = dtlsFingerprint
+							}
+						}
+					} else {
+						log.Printf("[MF] Failed to set remote description on AdcPC for session B: %v", err)
+					}
+				}
+			} else {
+				offer, err := sessB.AdcPC.CreateOffer(nil)
+				if err == nil {
+					gatherComplete := webrtc.GatheringCompletePromise(sessB.AdcPC)
+					_ = sessB.AdcPC.SetLocalDescription(offer)
+					<-gatherComplete
+
+					sessB.AdcLocalPort = extractPortFromSDP(sessB.AdcPC.LocalDescription().SDP, sessB.LocalIP)
+					iceParams, dtlsFingerprint, err2 := extractICEDTLSFromSDP(sessB.AdcPC.LocalDescription().SDP)
+					if err2 == nil {
+						sessB.AdcICEParams = iceParams
+						sessB.AdcDTLSParams = sessB.AdcPC.LocalDescription().SDP
+						sessB.AdcFingerprint = dtlsFingerprint
+					}
+				}
+			}
+		}
+		sessB.mu.Unlock()
+
+		if sessB.ProxyMode == "UDP_PROXY" {
+			go func(s *SessionInfo) {
+				log.Printf("[MF] Pre-connecting MDC2 TCP to DCAS for session B %s", s.ID)
+				_, _ = m.GetOrCreateDcasConn(s, 1000)
+				_, _ = m.GetOrCreateDcasConn(s, 1001)
+			}(sessB)
+		}
+	}
+
+	// Reconstruct and return terminations with separate BDC and ADC MediaItems
+	resTerminations := []sba.Termination{}
+	if sessA != nil {
+		setupA_BDC := "active"
+		if sessA.BdcPC != nil && sessA.BdcPC.LocalDescription() != nil {
+			setupA_BDC = extractSetupRoleFromSDP(sessA.BdcPC.LocalDescription().SDP)
+		}
+		setupA_ADC := "actpass"
+		if sdpOfferA != "" {
+			setupA_ADC = "passive"
+		} else if sessA.AdcPC != nil && sessA.AdcPC.LocalDescription() != nil {
+			setupA_ADC = extractSetupRoleFromSDP(sessA.AdcPC.LocalDescription().SDP)
+		}
+
+		medias := []sba.MediaItem{
+			{
+				MediaID:           "audio",
+				MediaResourceType: "RTP",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessA.LocalIP,
+					Port: sessA.LocalAudioPort,
+				},
+			},
+			{
+				MediaID:           "video",
+				MediaResourceType: "RTP",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessA.LocalIP,
+					Port: sessA.LocalVideoPort,
+				},
+			},
+			{
+				MediaID:           "1",
+				MediaResourceType: "DC",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessA.LocalIP,
+					Port: sessA.BdcLocalPort,
+				},
+				LocalDcEndpoint: &sba.DcEndpoint{
+					SctpPort:      sessA.BdcLocalPort,
+					Fingerprint:   fmt.Sprintf("%s %s", sessA.BdcFingerprint.Algorithm, sessA.BdcFingerprint.Value),
+					SecuritySetup: setupA_BDC,
+					IceUfrag:      sessA.BdcICEParams.UsernameFragment,
+					IcePwd:        sessA.BdcICEParams.Password,
+				},
+			},
+		}
+		if sessA.AdcLocalPort != 0 {
+			medias = append(medias, sba.MediaItem{
+				MediaID:           "adc-media",
+				MediaResourceType: "DC",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessA.LocalIP,
+					Port: sessA.AdcLocalPort,
+				},
+				LocalDcEndpoint: &sba.DcEndpoint{
+					SctpPort:      sessA.AdcLocalPort,
+					Fingerprint:   fmt.Sprintf("%s %s", sessA.AdcFingerprint.Algorithm, sessA.AdcFingerprint.Value),
+					SecuritySetup: setupA_ADC,
+					IceUfrag:      sessA.AdcICEParams.UsernameFragment,
+					IcePwd:        sessA.AdcICEParams.Password,
+				},
+			})
+		}
+		resTerminations = append(resTerminations, sba.Termination{
+			TerminationID: "term-caller-a",
+			Medias:        medias,
+		})
+	}
+	if sessB != nil {
+		setupB_BDC := "active"
+		if sessB.BdcPC != nil && sessB.BdcPC.LocalDescription() != nil {
+			setupB_BDC = extractSetupRoleFromSDP(sessB.BdcPC.LocalDescription().SDP)
+		}
+		setupB_ADC := "actpass"
+		if sdpOfferB != "" {
+			setupB_ADC = "passive"
+		} else if sessB.AdcPC != nil && sessB.AdcPC.LocalDescription() != nil {
+			setupB_ADC = extractSetupRoleFromSDP(sessB.AdcPC.LocalDescription().SDP)
+		}
+
+		medias := []sba.MediaItem{
+			{
+				MediaID:           "audio",
+				MediaResourceType: "RTP",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessB.LocalIP,
+					Port: sessB.LocalAudioPort,
+				},
+			},
+			{
+				MediaID:           "video",
+				MediaResourceType: "RTP",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessB.LocalIP,
+					Port: sessB.LocalVideoPort,
+				},
+			},
+			{
+				MediaID:           "3",
+				MediaResourceType: "DC",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessB.LocalIP,
+					Port: sessB.BdcLocalPort,
+				},
+				LocalDcEndpoint: &sba.DcEndpoint{
+					SctpPort:      sessB.BdcLocalPort,
+					Fingerprint:   fmt.Sprintf("%s %s", sessB.BdcFingerprint.Algorithm, sessB.BdcFingerprint.Value),
+					SecuritySetup: setupB_BDC,
+					IceUfrag:      sessB.BdcICEParams.UsernameFragment,
+					IcePwd:        sessB.BdcICEParams.Password,
+				},
+			},
+		}
+		if sessB.AdcLocalPort != 0 {
+			localSDP := sessB.AdcPC.LocalDescription().SDP
+			if sessB.BdcPC != nil {
+				localSDP = mergeSDPOffers(sessB.BdcPC.LocalDescription().SDP, localSDP)
+			}
+			localSDP = rewriteSDPPorts(localSDP, m.udpPort, m.publicPort)
+			localSDP = rewriteAdcPortInSDP(localSDP, sessB.LocalIP, sessB.AdcLocalPort)
+
+			medias = append(medias, sba.MediaItem{
+				MediaID:           "adc-media",
+				MediaResourceType: "DC",
+				LocalMbEndpoint: &sba.EndpointIPPort{
+					IP:   sessB.LocalIP,
+					Port: sessB.AdcLocalPort,
+				},
+				LocalDcEndpoint: &sba.DcEndpoint{
+					SctpPort:      sessB.AdcLocalPort,
+					Fingerprint:   fmt.Sprintf("%s %s", sessB.AdcFingerprint.Algorithm, sessB.AdcFingerprint.Value),
+					SecuritySetup: setupB_ADC,
+					IceUfrag:      sessB.AdcICEParams.UsernameFragment,
+					IcePwd:        sessB.AdcICEParams.Password,
+				},
+				SDP: localSDP,
+			})
+		}
+		resTerminations = append(resTerminations, sba.Termination{
+			TerminationID: "term-callee-b",
+			Medias:        medias,
+		})
+	}
+
+	return &sba.MediaContext{
+		ContextID:    contextID,
+		Terminations: resTerminations,
+	}
 }

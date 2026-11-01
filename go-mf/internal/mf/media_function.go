@@ -75,6 +75,7 @@ type SessionInfo struct {
 	AdcDTLSParams  string
 	AdcFingerprint webrtc.DTLSFingerprint
 	AdcLocalPort   int // ADC port (separate UDP socket)
+	AdcBlock       int // index of the m=application block carrying this session's ADC; 0 means 1 (Home)
 
 	LocalIP string
 
@@ -464,7 +465,7 @@ func (m *MediaFunction) AllocateSession(userID, callID string, isCore bool, forc
 		}
 	})
 
-	isADC := strings.HasSuffix(callID, "-adc")
+	isADC := isAdcContext(callID)
 	var bdcStreams []uint16
 	if isADC {
 		bdcStreams = []uint16{1000, 1001}
@@ -729,7 +730,7 @@ func (m *MediaFunction) AllocateAnswererSession(userID, callID, sdpOffer string,
 		}
 	})
 
-	isADC := strings.HasSuffix(callID, "-adc")
+	isADC := isAdcContext(callID)
 	var bdcStreams []uint16
 	if isADC {
 		bdcStreams = []uint16{1000, 1001}
@@ -1673,9 +1674,9 @@ func (m *MediaFunction) SetRemoteAnswer(sessionID, sdpAnswer string) error {
 	session.RtpVideoPort = mediaInfo.VideoPort
 	session.mu.Unlock()
 
-	bdcAns, adcAns := splitSDPAnswer(sdpAnswer)
+	bdcAns, adcAns := splitSDPAnswerN(sdpAnswer, session.adcBlock())
 
-	isADCContext := strings.HasSuffix(session.CallID, "-adc")
+	isADCContext := isAdcContext(session.CallID)
 	log.Printf("[MF] SetRemoteAnswer: session=%s call=%s isADCContext=%v bdcAns len=%d adcAns len=%d",
 		sessionID, session.CallID, isADCContext, len(bdcAns), len(adcAns))
 	if isADCContext {

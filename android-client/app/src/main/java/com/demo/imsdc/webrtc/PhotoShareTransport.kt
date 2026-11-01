@@ -213,7 +213,7 @@ class PhotoShareTransport(
     private suspend fun awaitOpenChannel(): DataChannel? {
         var waited = 0L
         while (waited < 10_000) {
-            val adc = webRtcManager.adcChannel
+            val adc = webRtcManager.foregroundAdcChannel
             if (adc != null && adc.state() == DataChannel.State.OPEN) return adc
             kotlinx.coroutines.delay(100)
             waited += 100

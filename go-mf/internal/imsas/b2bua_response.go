@@ -56,6 +56,18 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, session.CallID)
 		dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
 
+		// Answer to a slotted (Home + App ADC) Re-INVITE, including one that left
+		// the App slot unchanged (the legacy path would forward it raw). A two-ADC
+		// offer sent before the Home slot existed went the legacy way, and so does
+		// its answer.
+		session.mu.Lock()
+		slotted := session.SlottedAnswerPending || session.AppAnswerPending
+		session.mu.Unlock()
+		if slotted {
+			b.handleSlottedAnswer(session, msg, dcsfURL, !isCalleeInitiatedAnswer)
+			return
+		}
+
 		// ADC Release passthrough: operator-menu Re-INVITE 200 OK — just forward back unchanged
 		if session.IsADCReleasing {
 			log.Printf("[IMS-AS] ADC Release 200 OK received. Forwarding to caller, resetting ADC state.")
@@ -228,20 +240,7 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 		log.Printf("[IMS-AS] P2A2P: Rewrote terminating ADC SDP Answer pointing to MF. Result:\n%s", rewrittenSDP)
 
-		headers := map[string]string{
-			"Content-Type": "application/sdp",
-			"To":           msg.GetHeader("To"),
-		}
-		if contact := msg.GetHeader("Contact"); contact != "" {
-			headers["Contact"] = contact
-		}
-		origMsgForResp := session.OrigMsg
-		if isCalleeInitiatedAnswer && session.LastCalleeReInviteMsg != nil {
-			origMsgForResp = session.LastCalleeReInviteMsg
-		}
-		resp := b.BuildSIPResponse(origMsgForResp, 200, "OK", headers, rewrittenSDP)
-		b.forwardToSCSCF(resp)
-		log.Printf("[IMS-AS] Forwarded rewritten 200 OK Answer back to S-CSCF")
+		b.sendAnswerToInitiator(session, msg, isCallerInitiator, rewrittenSDP)
 		session.IsAnchorPatched = true
 		return
 	}
@@ -378,6 +377,7 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 		}
 		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+		b.closeAppSlot(session)
 		if session.ContextID != "" {
 			log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
 			_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
@@ -486,6 +486,7 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 		}
 		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+		b.closeAppSlot(session)
 		log.Printf("[IMS-AS] Releasing MF Context %s due to CANCEL", session.ContextID)
 		_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
 		if session.IsAnchorCtxCreated {
@@ -554,4 +555,23 @@ func (b *B2BUA) handleAck(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	}
 	ackReq := b.BuildSIPRequest("ACK", msg.RURI, msg, headers, "")
 	b.forwardToSCSCF(ackReq)
+}
+
+// sendAnswerToInitiator returns a re-INVITE 200 OK with the given SDP to the
+// leg that sent the re-INVITE.
+func (b *B2BUA) sendAnswerToInitiator(session *CallSession, msg *SIPMessage, isCallerInitiator bool, sdp string) {
+	headers := map[string]string{
+		"Content-Type": "application/sdp",
+		"To":           msg.GetHeader("To"),
+	}
+	if contact := msg.GetHeader("Contact"); contact != "" {
+		headers["Contact"] = contact
+	}
+	origMsgForResp := session.OrigMsg
+	if !isCallerInitiator && session.LastCalleeReInviteMsg != nil {
+		origMsgForResp = session.LastCalleeReInviteMsg
+	}
+	resp := b.BuildSIPResponse(origMsgForResp, 200, "OK", headers, sdp)
+	b.forwardToSCSCF(resp)
+	log.Printf("[IMS-AS] Forwarded rewritten 200 OK Answer back to S-CSCF")
 }

@@ -1,7 +1,7 @@
 package imsas
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -28,6 +28,16 @@ type MFAllocResponse struct {
 	AdcIcePwd          string `json:"adc_ice_pwd,omitempty"`
 	AdcDtlsFingerprint string `json:"adc_dtls_fingerprint,omitempty"`
 	AdcSetupRole       string `json:"adc_setup_role,omitempty"`
+
+	Slots map[AdcSlot]*SlotMF `json:"-"`
+}
+
+type SlotMF struct {
+	Port        int
+	IceUfrag    string
+	IcePwd      string
+	Fingerprint string
+	Setup       string
 }
 
 func shouldDiscardLine(line string) bool {
@@ -159,40 +169,80 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 					newLines = append(newLines, fmt.Sprintf("a=3gpp-bdc-used-by:%s", mfInfo.BdcRole))
 				}
 			} else {
-				// ADC media block
-				adcPort := mfInfo.AdcPort
-				if adcPort == 0 {
-					adcPort = mfInfo.Port + 100 // fallback
+				slot := SlotHome
+				if appCount >= 3 {
+					slot = SlotApp
 				}
-				adcIceUfrag := mfInfo.AdcIceUfrag
-				if adcIceUfrag == "" {
-					adcIceUfrag = mfInfo.IceUfrag
+				sm := (*SlotMF)(nil)
+				if mfInfo.Slots != nil {
+					sm = mfInfo.Slots[slot]
 				}
-				adcIcePwd := mfInfo.AdcIcePwd
-				if adcIcePwd == "" {
-					adcIcePwd = mfInfo.IcePwd
+				origPort := 9
+				if f := strings.Fields(trimmed); len(f) >= 2 {
+					fmt.Sscanf(f[1], "%d", &origPort)
 				}
-				adcFingerprint := mfInfo.AdcDtlsFingerprint
-				if adcFingerprint == "" {
-					adcFingerprint = mfInfo.DtlsFingerprint
+				// An App line with no App-slot MF endpoint must not borrow the
+				// Home credentials: send it as port 0.
+				if slot == SlotApp && (origPort == 0 || (mfInfo.Slots != nil && sm == nil)) {
+					// Inactive App slot: keep the line, port 0, no MF endpoint.
+					newLines = append(newLines, "m=application 0 UDP/DTLS/SCTP webrtc-datachannel")
+					newLines = append(newLines, fmt.Sprintf("c=IN IP4 %s", externalIP))
+					continue
+				}
+				var adcPort int
+				var adcIceUfrag, adcIcePwd, adcFingerprint, role, tlsKey string
+				if sm != nil {
+					adcPort, adcIceUfrag, adcIcePwd, adcFingerprint, role = sm.Port, sm.IceUfrag, sm.IcePwd, sm.Fingerprint, sm.Setup
+					if slot == SlotHome {
+						// Same key as the legacy (Slots == nil) rewrite of Re-INVITE #1,
+						// so the Home line keeps its tls-id once a second ADC line appears.
+						tlsKey = mfInfo.SessionID + "-adc"
+					} else {
+						// Stable while the App context lives; a new context (new ufrag)
+						// is a new DTLS association and gets a new tls-id.
+						tlsKey = mfInfo.SessionID + "-app-" + sm.IceUfrag
+					}
+				} else {
+					adcPort = mfInfo.AdcPort
+					if adcPort == 0 {
+						adcPort = mfInfo.Port + 100 // fallback
+					}
+					adcIceUfrag = mfInfo.AdcIceUfrag
+					if adcIceUfrag == "" {
+						adcIceUfrag = mfInfo.IceUfrag
+					}
+					adcIcePwd = mfInfo.AdcIcePwd
+					if adcIcePwd == "" {
+						adcIcePwd = mfInfo.IcePwd
+					}
+					adcFingerprint = mfInfo.AdcDtlsFingerprint
+					if adcFingerprint == "" {
+						adcFingerprint = mfInfo.DtlsFingerprint
+					}
+					role = adcSetupRole
+					tlsKey = mfInfo.SessionID + "-adc"
 				}
 				newLines = append(newLines, fmt.Sprintf("m=application %d UDP/DTLS/SCTP webrtc-datachannel", adcPort))
 				newLines = append(newLines, fmt.Sprintf("c=IN IP4 %s", externalIP))
 				newLines = append(newLines, fmt.Sprintf("a=ice-ufrag:%s", adcIceUfrag))
 				newLines = append(newLines, fmt.Sprintf("a=ice-pwd:%s", adcIcePwd))
 				newLines = append(newLines, fmt.Sprintf("a=fingerprint:%s", adcFingerprint))
-				newLines = append(newLines, fmt.Sprintf("a=setup:%s", adcSetupRole))
+				newLines = append(newLines, fmt.Sprintf("a=setup:%s", role))
 				newLines = append(newLines, "a=connection:new")
 				newLines = append(newLines, "a=sctp-port:5000")
 				newLines = append(newLines, fmt.Sprintf("a=candidate:1 1 UDP 2122260991 %s %d typ host", externalIP, adcPort))
-				newLines = append(newLines, fmt.Sprintf("a=tls-id:%s", getTLSId(mfInfo.SessionID+"-adc")))
-				if activeAppId != "" {
+				newLines = append(newLines, fmt.Sprintf("a=tls-id:%s", getTLSId(tlsKey)))
+				appId := activeAppId
+				if slot == SlotHome && sm != nil {
+					appId = "fun-calling-app"
+				}
+				if appId != "" {
 					endpointType := "UE"
-					if activeAppId == "enterprise-callerid" {
+					if appId == "enterprise-callerid" {
 						endpointType = "Server"
 					}
-					newLines = append(newLines, fmt.Sprintf("a=dcmap:1000 subprotocol=\"%s\"", activeAppId))
-					newLines = append(newLines, fmt.Sprintf("a=3gpp-req-app:\"%s\";1000-%s", activeAppId, endpointType))
+					newLines = append(newLines, fmt.Sprintf("a=dcmap:1000 subprotocol=\"%s\"", appId))
+					newLines = append(newLines, fmt.Sprintf("a=3gpp-req-app:\"%s\";1000-%s", appId, endpointType))
 				}
 			}
 			continue
@@ -204,17 +254,11 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 	return strings.Join(newLines, "\r\n") + "\r\n"
 }
 
-func getTLSId(sessionID string) string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to deterministic if crypto/rand fails
-		val := uint64(0)
-		for i := 0; i < len(sessionID); i++ {
-			val = val*31 + uint64(sessionID[i])
-		}
-		return fmt.Sprintf("tlsid%016xabcde", val)
-	}
-	return hex.EncodeToString(b)
+// getTLSId is deterministic: an unchanged m-line must keep the same a=tls-id
+// across rewrites (RFC 8842: a new value means a new DTLS association).
+func getTLSId(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:16])
 }
 
 func ExcludeADCFromSDP(origSDP string) string {
@@ -239,7 +283,7 @@ func ExcludeADCFromSDP(origSDP string) string {
 
 		if strings.HasPrefix(trimmed, "m=application ") {
 			appCount++
-			shouldDisable := (totalApps == 1 && appCount == 1) || (totalApps > 1 && appCount == 2)
+			shouldDisable := (totalApps == 1 && appCount == 1) || (totalApps == 2 && appCount == 2) || (totalApps >= 3 && appCount == 3)
 			if shouldDisable {
 				inAppMedia = true
 				parts := strings.Split(trimmed, " ")

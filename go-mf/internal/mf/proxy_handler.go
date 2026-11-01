@@ -233,7 +233,7 @@ func (m *MediaFunction) registerBdcHandlers(session *SessionInfo) {
 		}
 		proto := dc.Protocol()
 
-		isADCContext := strings.HasSuffix(session.CallID, "-adc")
+		isADCContext := isAdcContext(session.CallID)
 		if isADCContext {
 			if id == 1000 || id == 1001 {
 				session.mu.Lock()

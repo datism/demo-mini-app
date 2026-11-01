@@ -675,7 +675,11 @@ func (ue *UESimulator) sendReInvite(appId string) {
 
 	localSDP := MergeAdcOffer(bdcPC.LocalDescription().SDP, adcPC.LocalDescription().SDP, false)
 	localSDP = reorderSDPMedia(localSDP, ue.localIP, ue.localAudioPort, ue.localVideoPort)
-	localSDP = appendReqAppToSDP(localSDP, appId)
+	if !isHomeSlotApp(appId) && countAppSections(localSDP) >= 3 {
+		localSDP = setAppSlotReqApp(localSDP, appId, true)
+	} else {
+		localSDP = appendReqAppToSDP(localSDP, appId)
+	}
 	log.Printf("[UE-%s] Generated Re-INVITE SDP offer to send:\n%s", ue.username, localSDP)
 
 	var sb strings.Builder
@@ -742,7 +746,12 @@ func (ue *UESimulator) sendReInviteClose(appId string) {
 		return
 	}
 
-	localSDP := appendReqAppToSDPClose(mergedSDP, appId)
+	var localSDP string
+	if !isHomeSlotApp(appId) && countAppSections(mergedSDP) >= 3 {
+		localSDP = setAppSlotReqApp(mergedSDP, appId, false)
+	} else {
+		localSDP = appendReqAppToSDPClose(mergedSDP, appId)
+	}
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("INVITE sip:%s@%s SIP/2.0\r\n", ue.target, ue.cfg.Domains.Ims))

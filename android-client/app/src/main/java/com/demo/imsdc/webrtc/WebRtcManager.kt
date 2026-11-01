@@ -5,11 +5,13 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.webrtc.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 private const val TAG = "WebRtcManager"
+private const val ICE_GATHERING_TIMEOUT_MS = 3000L
 
 /**
  * WebRtcManager — Quản lý WebRTC PeerConnection cho IMS DC
@@ -41,7 +43,15 @@ class WebRtcManager(private val context: Context) {
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var eglContext: EglBase.Context? = null
     internal var bdcPC: PeerConnection? = null
-    internal var adcPC: PeerConnection? = null
+    internal var homeAdcPC: PeerConnection? = null
+    internal var appAdcPC: PeerConnection? = null
+    var appAdcChannel: DataChannel? = null
+    @Volatile var foregroundIsHome: Boolean = true
+    val foregroundAdcChannel: DataChannel? get() = if (foregroundIsHome) adcChannel else appAdcChannel
+    private var remoteHomeMid: String? = null
+    private var remoteAppMid: String? = null
+
+    enum class AdcKind { HOME, APP }
 
     // Video/Audio renderers and tracks
     var localVideoView: SurfaceViewRenderer? = null
@@ -57,7 +67,6 @@ class WebRtcManager(private val context: Context) {
     var bdcChannel: DataChannel? = null
 
     var adcChannel: DataChannel? = null
-    var currentAdcMid = 3
     private var onIceGatheringComplete: (() -> Unit)? = null
 
     // ─── Init ────────────────────────────────────────────────────────────────
@@ -235,7 +244,7 @@ class WebRtcManager(private val context: Context) {
         // WebRTC is strictly used for DataChannel only.
     }
 
-    fun createAdcPeerConnection(onStateChange: (PeerConnection.PeerConnectionState) -> Unit) {
+    fun createAdcPeerConnection(kind: AdcKind = AdcKind.HOME, onStateChange: (PeerConnection.PeerConnectionState) -> Unit) {
         ensureVpnBound()
         if (peerConnectionFactory == null) {
             initialize(eglContext)
@@ -250,23 +259,23 @@ class WebRtcManager(private val context: Context) {
 
         val observer = object : PeerConnection.Observer {
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                Log.i(TAG, "ADC ICE connection state: $state")
+                Log.i(TAG, "$kind ADC ICE connection state: $state")
             }
 
             override fun onConnectionChange(state: PeerConnection.PeerConnectionState?) {
-                Log.i(TAG, "ADC PeerConnection state: $state")
+                Log.i(TAG, "$kind ADC PeerConnection state: $state")
                 state?.let { onStateChange(it) }
             }
 
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
-                Log.d(TAG, "ADC ICE Gathering: $state")
+                Log.d(TAG, "$kind ADC ICE Gathering: $state")
                 if (state == PeerConnection.IceGatheringState.COMPLETE) {
                     onIceGatheringComplete?.invoke()
                 }
             }
             override fun onIceCandidate(candidate: IceCandidate?) {
-                Log.d(TAG, "ADC Local ICE candidate: ${candidate?.sdp}")
+                Log.d(TAG, "$kind ADC Local ICE candidate: ${candidate?.sdp}")
             }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
             override fun onAddStream(stream: MediaStream?) {}
@@ -305,8 +314,9 @@ class WebRtcManager(private val context: Context) {
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
         }
 
-        adcPC = peerConnectionFactory?.createPeerConnection(config, observer)
-        Log.i(TAG, "ADC PeerConnection created")
+        val created = peerConnectionFactory?.createPeerConnection(config, observer)
+        if (kind == AdcKind.HOME) homeAdcPC = created else appAdcPC = created
+        Log.i(TAG, "ADC PeerConnection created ($kind)")
     }
 
     // ─── Create Offer ─────────────────────────────────────────────────────────
@@ -332,7 +342,7 @@ class WebRtcManager(private val context: Context) {
             cont.resumeWithException(Exception("PeerConnection is null"))
             return@suspendCancellableCoroutine
         }
-        val isAdc = (pc == adcPC)
+        val isAdc = (pc == homeAdcPC || pc == appAdcPC)
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
@@ -362,51 +372,41 @@ class WebRtcManager(private val context: Context) {
         }, constraints)
     }
 
+    /** Gathering may never report COMPLETE (e.g. an unreachable STUN server); send what was gathered by then. */
+    private suspend fun awaitIceGathering(pc: PeerConnection?) {
+        if (withTimeoutOrNull(ICE_GATHERING_TIMEOUT_MS) { awaitIceGatheringComplete(pc) } == null) {
+            Log.w(TAG, "ICE gathering not complete after $ICE_GATHERING_TIMEOUT_MS ms, using the candidates so far")
+        }
+    }
+
+    /**
+     * Local offer of one PeerConnection. A STABLE PC with a local description reuses it: an unchanged
+     * m-line keeps the same ICE credentials, fingerprint and tls-id. A PC still holding an unanswered
+     * offer (HAVE_LOCAL_OFFER, after a 491 or a timeout) re-sends that same offer.
+     */
+    private suspend fun offerFor(pc: PeerConnection?): String? {
+        pc ?: return null
+        val state = pc.signalingState()
+        if (pc.localDescription != null &&
+            (state == PeerConnection.SignalingState.STABLE || state == PeerConnection.SignalingState.HAVE_LOCAL_OFFER)) {
+            return pc.localDescription.description // unchanged m-line: same credentials, same tls-id
+        }
+        val raw = createOfferRaw(pc).description
+        awaitIceGathering(pc)
+        return pc.localDescription?.description ?: raw
+    }
+
     suspend fun createOffer(): String {
-        createBDC(10)
-        
-        val finalBdcOffer = if (bdcPC != null && bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription != null) {
-            Log.i(TAG, "Reusing existing BDC local description (STABLE) for offer")
-            bdcPC!!.localDescription.description
-        } else {
-            val bdcOffer = createOfferRaw(bdcPC).description
-            Log.i(TAG, "Waiting for BDC ICE gathering complete (offer)...")
-            awaitIceGatheringComplete(bdcPC)
-            bdcPC?.localDescription?.description ?: bdcOffer
-        }
-
-        val adcPCLocal = adcPC
-        val finalAdcOffer = if (adcPCLocal != null) {
-            val adcOffer = createOfferRaw(adcPCLocal).description
-            Log.i(TAG, "Waiting for ADC ICE gathering complete (offer)...")
-            awaitIceGatheringComplete(adcPCLocal)
-            adcPCLocal.localDescription?.description ?: adcOffer
-        } else {
-            null
-        }
-
-        return if (finalAdcOffer != null) {
-            MergeAdcOffer(finalBdcOffer, finalAdcOffer)
-        } else {
+        ensureBdcChannel()
+        val bdcOffer = offerFor(bdcPC) ?: ""
+        val merged = AdcSdp.merge(bdcOffer, offerFor(homeAdcPC), offerFor(appAdcPC), isAnswer = false)
+        return if (homeAdcPC == null) {
             // Rule 12: Set ADC port to 0 instead of completely dropping the m=application block
-            finalBdcOffer + "m=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:3\r\n"
-        }
+            merged + "m=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:3\r\n"
+        } else merged
     }
 
     // ─── Set Remote Answer ────────────────────────────────────────────────────
-
-    private fun replaceMidInSdp(sdp: String, newMid: String): String {
-        val lines = sdp.replace("\r", "").split("\n")
-        val newLines = lines.map { line ->
-            val trimmed = line.trim()
-            if (trimmed.startsWith("a=mid:")) {
-                "a=mid:$newMid"
-            } else {
-                line
-            }
-        }
-        return newLines.filter { it.trim().isNotEmpty() }.joinToString("\r\n") + "\r\n"
-    }
 
     private fun addCandidateIfMissing(sdp: String): String {
         val lines = sdp.replace("\r", "").split("\n").filter { it.trim().isNotEmpty() }
@@ -438,29 +438,26 @@ class WebRtcManager(private val context: Context) {
         return sdp
     }
 
+    private suspend fun applyAnswer(pc: PeerConnection?, part: String?, label: String) {
+        if (pc == null || part == null) return
+        if (pc.signalingState() != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+            Log.i(TAG, "Skipping setRemoteAnswer on $label PC because signalingState is ${pc.signalingState()}")
+            return
+        }
+        setRemoteDescriptionRaw(pc, AdcSdp.normalizeToLocalMid(addCandidateIfMissing(part)), SessionDescription.Type.ANSWER)
+    }
+
     suspend fun setRemoteAnswer(sdpAnswer: String) {
         Log.i(TAG, "setRemoteAnswer parsing sdpAnswer (length=${sdpAnswer.length})")
-        val (bdcAnswerRaw, adcAnswerRaw) = SplitAdcAnswer(sdpAnswer)
-        val bdcAnswer = addCandidateIfMissing(bdcAnswerRaw)
-        Log.i(TAG, "SplitAdcAnswer results: bdcAnswer.length=${bdcAnswer.length}, adcAnswer.length=${adcAnswerRaw?.length ?: 0}")
+        val parts = AdcSdp.split(sdpAnswer)
+        val bdcAnswer = addCandidateIfMissing(parts.bdc)
         if (bdcPC != null && bdcPC!!.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
-            Log.i(TAG, "Setting Remote Answer on BDC PC (length=${bdcAnswer.length}):\n$bdcAnswer")
             setRemoteDescriptionRaw(bdcPC, bdcAnswer, SessionDescription.Type.ANSWER)
         } else {
             Log.i(TAG, "Skipping setRemoteAnswer on BDC PC because signalingState is ${bdcPC?.signalingState()}")
         }
-        if (adcAnswerRaw != null && adcPC != null) {
-            Log.i(TAG, "adcPC state before setting answer: signalingState=${adcPC?.signalingState()}")
-            Log.i(TAG, "adcPC localDescription SDP:\n${adcPC?.localDescription?.description}")
-            if (adcPC!!.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
-                val withCandidate = addCandidateIfMissing(adcAnswerRaw)
-                val normalizedAdcAnswer = replaceMidInSdp(withCandidate, "0")
-                Log.i(TAG, "Setting Remote Answer on ADC PC (length=${normalizedAdcAnswer.length}):\n$normalizedAdcAnswer")
-                setRemoteDescriptionRaw(adcPC, normalizedAdcAnswer, SessionDescription.Type.ANSWER)
-            } else {
-                Log.i(TAG, "Skipping setRemoteAnswer on ADC PC because signalingState is ${adcPC?.signalingState()}")
-            }
-        }
+        applyAnswer(homeAdcPC, parts.home, "Home ADC")
+        applyAnswer(appAdcPC, parts.app, "App ADC")
     }
 
     private suspend fun setRemoteDescriptionRaw(pc: PeerConnection?, sdpText: String, type: SessionDescription.Type) = suspendCancellableCoroutine<Unit> { cont ->
@@ -484,35 +481,36 @@ class WebRtcManager(private val context: Context) {
 
     // ─── Set Remote Offer (B-side incoming call) ──────────────────────────────
 
+    private suspend fun applyOffer(pc: PeerConnection?, part: String?, label: String) {
+        if (pc == null || part == null) return
+        if (pc.signalingState() == PeerConnection.SignalingState.STABLE && pc.localDescription == null) {
+            setRemoteDescriptionRaw(pc, AdcSdp.normalizeToLocalMid(addCandidateIfMissing(part)), SessionDescription.Type.OFFER)
+        } else {
+            Log.i(TAG, "Skipping setRemoteOffer on $label PC because signalingState is ${pc.signalingState()}")
+        }
+    }
+
     suspend fun setRemoteOffer(sdpOffer: String) {
-        val (bdcOfferRaw, adcOfferRaw) = SplitAdcAnswer(sdpOffer)
-        val bdcOffer = addCandidateIfMissing(bdcOfferRaw)
+        val parts = AdcSdp.split(sdpOffer)
+        val (homeLine, appLine) = pickSlots(parseAppLines(sdpOffer).drop(1)) { it.mid }
+        remoteHomeMid = homeLine?.mid
+        remoteAppMid = appLine?.mid
+        val bdcOffer = addCandidateIfMissing(parts.bdc)
         if (bdcPC != null) {
             if (bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription == null) {
                 setRemoteDescriptionRaw(bdcPC, bdcOffer, SessionDescription.Type.OFFER)
             } else {
-                Log.i(TAG, "Skipping setRemoteOffer on BDC PC because signalingState is ${bdcPC?.signalingState()} and localDescription is set")
+                Log.i(TAG, "Skipping setRemoteOffer on BDC PC because signalingState is ${bdcPC?.signalingState()}")
             }
         }
-        if (adcOfferRaw != null && !adcOfferRaw.contains("m=application 0")) {
-            if (adcPC == null) {
-                createAdcPeerConnection { state ->
-                    Log.d(TAG, "ADC PC (B-side) ICE state: $state")
-                }
-                createADC()
-            }
-            if (adcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && adcPC!!.localDescription == null) {
-                val withCandidate = addCandidateIfMissing(adcOfferRaw)
-                val normalizedAdcOffer = replaceMidInSdp(withCandidate, "0")
-                Log.i(TAG, "Setting Remote Offer on ADC PC (length=${normalizedAdcOffer.length}):\n$normalizedAdcOffer")
-                setRemoteDescriptionRaw(adcPC, normalizedAdcOffer, SessionDescription.Type.OFFER)
-            } else {
-                Log.i(TAG, "Skipping setRemoteOffer on ADC PC because signalingState is ${adcPC?.signalingState()}")
-            }
-        } else {
-            Log.i(TAG, "ADC offer is null or disabled (port 0). Closing/skipping ADC.")
-            closeADC()
+        if (parts.home != null && homeAdcPC == null) {
+            createAdcPeerConnection(AdcKind.HOME) { state -> Log.d(TAG, "Home ADC (B-side) state: $state") }
+            createADC()
         }
+        // A Home line with port 0 in a later offer is ignored: the Home ADC is closed only by closeADC() at hang-up.
+        applyOffer(homeAdcPC, parts.home, "Home ADC")
+        // The App PC is created or closed by CallActivity from the mid-4 diff before this call.
+        applyOffer(appAdcPC, parts.app, "App ADC")
     }
 
     // ─── Create Answer (B-side) ───────────────────────────────────────────────
@@ -522,7 +520,7 @@ class WebRtcManager(private val context: Context) {
             cont.resumeWithException(Exception("PeerConnection is null"))
             return@suspendCancellableCoroutine
         }
-        val isAdc = (pc == adcPC)
+        val isAdc = (pc == homeAdcPC || pc == appAdcPC)
         pc.transceivers?.forEach { transceiver ->
             val kind = transceiver.mediaType
             if (kind == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO || kind == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) {
@@ -564,167 +562,33 @@ class WebRtcManager(private val context: Context) {
         }, constraints)
     }
 
+    /**
+     * Local answer of one PeerConnection. A STABLE PC with a local description reuses it (unchanged m-line,
+     * with a=setup:actpass rewritten to the established role when that description is this side's offer);
+     * a PC that holds no remote offer contributes no line.
+     */
+    private suspend fun answerFor(pc: PeerConnection?): String? {
+        pc ?: return null
+        val state = pc.signalingState()
+        val local = pc.localDescription
+        if (state == PeerConnection.SignalingState.STABLE && local != null) {
+            // This side made the PC's last offer: reuse it with the established DTLS role, not actpass.
+            return if (local.type == SessionDescription.Type.OFFER)
+                AdcSdp.answerSetupFromOffer(local.description, pc.remoteDescription?.description)
+            else local.description
+        }
+        if (state != PeerConnection.SignalingState.HAVE_REMOTE_OFFER) {
+            Log.i(TAG, "No answer from PC in signalingState $state (no remote offer applied)")
+            return null
+        }
+        val raw = createAnswerRaw(pc).description
+        awaitIceGathering(pc)
+        return pc.localDescription?.description ?: raw
+    }
+
     suspend fun createAnswer(): String {
-        createBDC(10)
-        
-        val finalBdcAnswer = if (bdcPC != null && bdcPC!!.signalingState() == PeerConnection.SignalingState.STABLE && bdcPC!!.localDescription != null) {
-            Log.i(TAG, "Reusing existing BDC local description (STABLE) for answer")
-            bdcPC!!.localDescription.description
-        } else {
-            val bdcAnswer = createAnswerRaw(bdcPC).description
-            Log.i(TAG, "Waiting for BDC ICE gathering complete (answer)...")
-            awaitIceGatheringComplete(bdcPC)
-            bdcPC?.localDescription?.description ?: bdcAnswer
-        }
-
-        val adcPCLocal = adcPC
-        val finalAdcAnswer = if (adcPCLocal != null) {
-            val adcAnswer = createAnswerRaw(adcPCLocal).description
-            Log.i(TAG, "Waiting for ADC ICE gathering complete (answer)...")
-            awaitIceGatheringComplete(adcPCLocal)
-            adcPCLocal.localDescription?.description ?: adcAnswer
-        } else {
-            null
-        }
-
-        return if (finalAdcAnswer != null) {
-            MergeAdcOffer(finalBdcAnswer, finalAdcAnswer, true)
-        } else {
-            finalBdcAnswer
-        }
-    }
-
-    // ─── SDP Helper Functions ───────────────────────────────────────────────
-
-    data class SdpMediaBlocks(
-        val sessionHeader: String,
-        val audioBlock: String?,
-        val videoBlock: String?,
-        val appBlocks: List<String>
-    )
-
-    fun splitSDPToMediaBlocks(sdp: String): SdpMediaBlocks {
-        val lines = sdp.replace("\r", "").split("\n")
-        val sessionHeader = StringBuilder()
-        var audioBlock: StringBuilder? = null
-        var videoBlock: StringBuilder? = null
-        val appBlocks = mutableListOf<StringBuilder>()
-        var currentBlock: StringBuilder? = sessionHeader
-
-        for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty()) continue
-            if (trimmed.startsWith("m=")) {
-                val sb = StringBuilder()
-                if (trimmed.startsWith("m=audio ")) {
-                    audioBlock = sb
-                    currentBlock = audioBlock
-                } else if (trimmed.startsWith("m=video ")) {
-                    videoBlock = sb
-                    currentBlock = videoBlock
-                } else if (trimmed.startsWith("m=application ")) {
-                    val newApp = sb
-                    appBlocks.add(newApp)
-                    currentBlock = newApp
-                } else {
-                    currentBlock = null
-                }
-            }
-            currentBlock?.append(trimmed)?.append("\r\n")
-        }
-        return SdpMediaBlocks(
-            sessionHeader.toString(),
-            audioBlock?.toString(),
-            videoBlock?.toString(),
-            appBlocks.map { it.toString() }
-        )
-    }
-
-    var lastRemoteAdcOfferMid: String? = null
-
-    fun extractMidFromSdp(sdp: String): String? {
-        for (line in sdp.replace("\r", "").split("\n")) {
-            val trimmed = line.trim()
-            if (trimmed.startsWith("a=mid:")) {
-                return trimmed.substringAfter("a=mid:").trim()
-            }
-        }
-        return null
-    }
-
-    fun SplitAdcAnswer(sdpAnswer: String): Pair<String, String?> {
-        val blocks = splitSDPToMediaBlocks(sdpAnswer)
-        val bdcSb = StringBuilder()
-        bdcSb.append(blocks.sessionHeader)
-        blocks.audioBlock?.let { bdcSb.append(it) }
-        blocks.videoBlock?.let { bdcSb.append(it) }
-        if (blocks.appBlocks.isNotEmpty()) {
-            bdcSb.append(blocks.appBlocks[0])
-        }
-        val bdcAnswer = bdcSb.toString()
-
-        var adcAnswer: String? = null
-        if (blocks.appBlocks.size > 1) {
-            val adcSessionHeader = StringBuilder()
-            // Giữ nguyên các session attribute cần thiết cho Pion:
-            //  - ice-ufrag/ice-pwd: cần để ICE negotiation hoạt động
-            //  - fingerprint/setup: cần cho DTLS-SRTP handshake
-            // Chỉ lọc a=group:BUNDLE ở cấp session (đã gỡ BUNDLE grouping
-            // vì ADC là PeerConnection riêng) và a=bundle-only (liên kết bundle).
-            blocks.sessionHeader.replace("\r", "").split("\n").forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("a=group:BUNDLE")) {
-                    adcSessionHeader.append(trimmed).append("\r\n")
-                }
-            }
-            val cleanAppBlock = StringBuilder()
-            blocks.appBlocks[1].replace("\r", "").split("\n").forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("a=bundle-only")) {
-                    cleanAppBlock.append(trimmed).append("\r\n")
-                }
-            }
-            // Fallback an toàn: nếu block application rỗng sau khi làm sạch
-            // (hoặc thiếu ICE attrs) thì trả null để caller bỏ qua ADC, tránh crash createAnswer().
-            if (cleanAppBlock.isBlank() || !cleanAppBlock.contains("a=ice-ufrag:")) {
-                Log.w(TAG, "SplitAdcAnswer: ADC app block invalid/empty (len=${cleanAppBlock.length}), skipping ADC")
-                return Pair(bdcAnswer, null)
-            }
-            lastRemoteAdcOfferMid = extractMidFromSdp(cleanAppBlock.toString())
-            Log.i(TAG, "SplitAdcAnswer extracted remote ADC mid: $lastRemoteAdcOfferMid")
-            val adcSb = StringBuilder()
-            adcSb.append(adcSessionHeader.toString())
-            adcSb.append(cleanAppBlock.toString())
-            adcAnswer = adcSb.toString()
-        }
-        return Pair(bdcAnswer, adcAnswer)
-    }
-
-    fun MergeAdcOffer(bdcSdp: String, adcSdp: String, isAnswer: Boolean = false): String {
-        val bdcBlocks = splitSDPToMediaBlocks(bdcSdp)
-        val adcBlocks = splitSDPToMediaBlocks(adcSdp)
-        val sb = StringBuilder()
-        sb.append(bdcBlocks.sessionHeader)
-        bdcBlocks.audioBlock?.let { sb.append(it) }
-        bdcBlocks.videoBlock?.let { sb.append(it) }
-        if (bdcBlocks.appBlocks.isNotEmpty()) {
-            sb.append(bdcBlocks.appBlocks[0])
-        }
-        if (adcBlocks.appBlocks.isNotEmpty()) {
-            val appBlock = adcBlocks.appBlocks[0]
-            if (isAnswer) {
-                val targetMid = lastRemoteAdcOfferMid ?: "3"
-                val normalizedAppBlock = replaceMidInSdp(appBlock, targetMid)
-                Log.i(TAG, "MergeAdcOffer (Answer): Preserved ADC mid=$targetMid in cumulative SDP answer")
-                sb.append(normalizedAppBlock)
-            } else {
-                val mid = getNextAdcMid()
-                val normalizedAppBlock = replaceMidInSdp(appBlock, mid)
-                Log.i(TAG, "MergeAdcOffer (Offer): Generated ADC mid=$mid in cumulative SDP offer")
-                sb.append(normalizedAppBlock)
-            }
-        }
-        return sb.toString()
+        ensureBdcChannel()
+        return AdcSdp.merge(answerFor(bdcPC) ?: "", answerFor(homeAdcPC), answerFor(appAdcPC), isAnswer = true, remoteMids = remoteHomeMid to remoteAppMid)
     }
 
     // ─── Data Channel Creation ───────────────────────────────────────────────
@@ -745,18 +609,33 @@ class WebRtcManager(private val context: Context) {
         return bdcChannel
     }
 
-
-
     /**
-     * Tạo ADC (Application Data Channel) — Stream ID 1000
-     * Dùng để gửi/nhận sự kiện "thả tim" giữa A và B qua MF.
+     * Returns the BDC, creating it only when needed. A Re-INVITE must not replace it: the channel's observer
+     * (DataChannelManager.setupBDC) is registered once per call, and a replacement channel would have none.
      */
-    fun getNextAdcMid(): String {
-        return currentAdcMid.toString()
+    fun ensureBdcChannel(): DataChannel? {
+        val existing = bdcChannel
+        val isClosed = existing?.state() == DataChannel.State.CLOSED
+        if (!needsNewBdcChannel(existing?.id(), isClosed)) return existing
+        if (existing != null) Log.w(TAG, "Replacing BDC (id=${existing.id()}, closed=$isClosed)")
+        return createBDC(BDC_STREAM_ID)
     }
 
+    companion object {
+        /** BDC stream id, announced as a=dcmap:10 in every offer/answer. */
+        const val BDC_STREAM_ID = 10
+
+        /** A new BDC is needed only when there is no usable stream-10 channel; an open one is never replaced. */
+        fun needsNewBdcChannel(existingId: Int?, isClosed: Boolean): Boolean =
+            existingId != BDC_STREAM_ID || isClosed
+    }
+
+    /**
+     * Tạo ADC (Application Data Channel) — Stream ID 1000 on the Home PeerConnection (mid 3).
+     * Dùng để gửi/nhận sự kiện "thả tim" giữa A và B qua MF.
+     */
     fun createADC(): DataChannel? {
-        if (adcPC == null) {
+        if (homeAdcPC == null) {
             createAdcPeerConnection { state ->
                 Log.d(TAG, "Dynamic ADC PeerConnection ICE state: $state")
             }
@@ -772,7 +651,7 @@ class WebRtcManager(private val context: Context) {
                 negotiated = true
                 ordered = true
             }
-            adcChannel = adcPC?.createDataChannel("app-dc", init)
+            adcChannel = homeAdcPC?.createDataChannel("app-dc", init)
             Log.i(TAG, "ADC created: id=1000, label=app-dc, negotiated=true, channel=${adcChannel}")
         }
         
@@ -782,7 +661,7 @@ class WebRtcManager(private val context: Context) {
     var adc2Channel: DataChannel? = null
 
     fun createADC2(): DataChannel? {
-        if (adcPC == null) return null
+        if (homeAdcPC == null) return null
         adc2Channel?.let {
             if (it.state() == DataChannel.State.CLOSED) {
                 adc2Channel = null
@@ -794,10 +673,48 @@ class WebRtcManager(private val context: Context) {
                 negotiated = true
                 ordered = true
             }
-            adc2Channel = adcPC?.createDataChannel("app-dc-2", init)
+            adc2Channel = homeAdcPC?.createDataChannel("app-dc-2", init)
             Log.i(TAG, "ADC2 created: id=1001, label=app-dc-2, negotiated=true")
         }
         return adc2Channel
+    }
+
+    /** App slot (mid 4): its own PeerConnection with a negotiated channel id=1000, label "app-dc-app". */
+    fun createAppADC(): DataChannel? {
+        if (appAdcPC == null) {
+            createAdcPeerConnection(AdcKind.APP) { state -> Log.d(TAG, "App ADC PeerConnection state: $state") }
+        }
+        appAdcChannel?.let { if (it.state() == DataChannel.State.CLOSED) appAdcChannel = null }
+        if (appAdcChannel == null) {
+            val init = DataChannel.Init().apply { id = 1000; negotiated = true; ordered = true }
+            appAdcChannel = appAdcPC?.createDataChannel("app-dc-app", init)
+            Log.i(TAG, "App ADC created: id=1000, label=app-dc-app, negotiated=true")
+        }
+        return appAdcChannel
+    }
+
+    /** Closes only the App slot (mid 4). The Home ADC and the BDC are not touched. */
+    fun closeAppADC() {
+        Log.i(TAG, "Closing App ADC and destroying its PeerConnection...")
+        try {
+            appAdcChannel?.close()
+            appAdcChannel = null
+            val old = appAdcPC
+            appAdcPC?.close()
+            appAdcPC = null
+            if (old != null) {
+                Thread {
+                    try {
+                        Thread.sleep(500)
+                        old.dispose()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error disposing App ADC PC: ${e.message}")
+                    }
+                }.start()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing App ADC: ${e.message}")
+        }
     }
 
     /**
@@ -819,11 +736,8 @@ class WebRtcManager(private val context: Context) {
      * @return SDP string chứa toàn bộ content (Erlang cần full SDP để parse)
      */
     fun getLocalSdp(): String? {
-        val bdcSdp = bdcPC?.localDescription?.description
-        val adcSdp = adcPC?.localDescription?.description
-        if (bdcSdp == null) return null
-        if (adcSdp == null) return bdcSdp
-        return MergeAdcOffer(bdcSdp, adcSdp)
+        val bdcSdp = bdcPC?.localDescription?.description ?: return null
+        return AdcSdp.merge(bdcSdp, homeAdcPC?.localDescription?.description, appAdcPC?.localDescription?.description, isAnswer = false)
     }
 
     // ─── Local Media Capture ──────────────────────────────────────────────────
@@ -940,8 +854,10 @@ class WebRtcManager(private val context: Context) {
 
     // ─── Cleanup ─────────────────────────────────────────────────────────────
 
+    /** Hang-up only: closes the App slot, then the Home ADC. The BDC is not touched. */
     fun closeADC() {
-        Log.i(TAG, "Closing Application Data Channel (ADC) and destroying PeerConnection...")
+        closeAppADC()
+        Log.i(TAG, "Closing Home Application Data Channel (ADC) and destroying PeerConnection...")
         try {
             adcChannel?.close()
             adcChannel = null
@@ -949,9 +865,9 @@ class WebRtcManager(private val context: Context) {
             adc2Channel?.close()
             adc2Channel = null
             
-            val oldAdcPC = adcPC
-            adcPC?.close()
-            adcPC = null
+            val oldAdcPC = homeAdcPC
+            homeAdcPC?.close()
+            homeAdcPC = null
             
             // Dispose in a background thread after a delay to prevent native WebRTC SIGABRT
             if (oldAdcPC != null) {
@@ -965,8 +881,6 @@ class WebRtcManager(private val context: Context) {
                     }
                 }.start()
             }
-            
-            currentAdcMid++ // Increment mid to prevent reuse
         } catch (e: Exception) {
             Log.w(TAG, "Error closing ADC: ${e.message}")
         }
@@ -992,6 +906,7 @@ class WebRtcManager(private val context: Context) {
             } catch (e: Exception) {
                 Log.w(TAG, "Error disposing surfaceTextureHelper: ${e.message}")
             }
+            closeAppADC()
             try {
                 bdcChannel?.close()
                 bdcChannel = null
@@ -1001,11 +916,11 @@ class WebRtcManager(private val context: Context) {
                 adc2Channel = null
                 
                 val oldBdc = bdcPC
-                val oldAdc = adcPC
+                val oldAdc = homeAdcPC
                 bdcPC?.close()
-                adcPC?.close()
+                homeAdcPC?.close()
                 bdcPC = null
-                adcPC = null
+                homeAdcPC = null
                 
                 // Delay disposal to prevent native WebRTC SIGABRT
                 Thread.sleep(500)

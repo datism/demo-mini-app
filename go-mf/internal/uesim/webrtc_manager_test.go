@@ -51,3 +51,41 @@ func TestReorderSDPMedia(t *testing.T) {
 	}
 }
 
+
+func threeAppSDP(appPort string) string {
+	return "v=0\r\nm=audio 4000 RTP/AVP 0\r\nm=video 4002 RTP/AVP 96\r\n" +
+		"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:2\r\n" +
+		"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:3\r\n" +
+		"m=application " + appPort + " UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:4\r\n"
+}
+
+func TestSetAppSlotReqApp_Open(t *testing.T) {
+	out := setAppSlotReqApp(threeAppSDP("0"), "caro", true)
+	i := strings.LastIndex(out, "m=application ")
+	tail := out[i:]
+	if !strings.HasPrefix(tail, "m=application 9 ") || !strings.Contains(tail, `a=3gpp-req-app:"caro";1000-UE`) || !strings.Contains(tail, `a=dcmap:1000 subprotocol="caro"`) {
+		t.Fatalf("app section wrong:\n%s", tail)
+	}
+	if strings.Count(out, "3gpp-req-app") != 1 {
+		t.Fatalf("only the 3rd section may carry req-app:\n%s", out)
+	}
+}
+
+func TestSetAppSlotReqApp_Close(t *testing.T) {
+	open := setAppSlotReqApp(threeAppSDP("0"), "caro", true)
+	out := setAppSlotReqApp(open, "caro", false)
+	i := strings.LastIndex(out, "m=application ")
+	if !strings.HasPrefix(out[i:], "m=application 0 ") || strings.Contains(out[i:], "3gpp-req-app") {
+		t.Fatalf("not closed:\n%s", out[i:])
+	}
+	if !strings.Contains(out, "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:2") {
+		t.Fatal("BDC section must be untouched")
+	}
+}
+
+func TestSetAppSlotReqApp_TwoSectionsUnchanged(t *testing.T) {
+	two := "v=0\r\nm=application 9 X\r\nm=application 9 X\r\n"
+	if got := setAppSlotReqApp(two, "caro", true); got != two {
+		t.Fatalf("changed: %q", got)
+	}
+}

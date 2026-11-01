@@ -34,6 +34,10 @@ import (
 // CallSession represents an active end-to-end B2BUA call session in IMS-AS.
 // It maintains dual-leg dialog mappings, media endpoints on Media Function, and SBA DC1/DC2 contexts.
 type CallSession struct {
+	// mu guards the App-slot fields (AppSlot, AppMfA, AppMfB, AppAnswerPending, SlottedAnswerPending)
+	// and the Home snapshot taken from MfInfoA/MfInfoB. Never hold it across SBA calls.
+	mu sync.Mutex
+
 	CallID    string
 	Caller    string
 	Callee    string
@@ -76,6 +80,11 @@ type CallSession struct {
 	IsInterworking         bool
 	PsDataOff              string
 	ActiveAppID            string
+	AppSlot          slotState // App ADC slot; the Home slot is ActiveAppID + IsAnchorCtxCreated
+	AppMfA, AppMfB   *SlotMF   // MF endpoints for the App slot, toward caller / callee
+	AppAnswerPending bool      // a Re-INVITE that changed the App slot awaits its 200 OK
+	// SlottedAnswerPending: a Re-INVITE handled by handleSlottedReInvite awaits its 200 OK.
+	SlottedAnswerPending bool
 	LastCallerReInviteMsg  *SIPMessage
 	LastCalleeReInviteMsg  *SIPMessage
 
@@ -115,6 +124,11 @@ type SerializableCallSession struct {
 	IsInterworking        bool             `json:"isInterworking"`
 	PsDataOff             string           `json:"psDataOff"`
 	ActiveAppID           string           `json:"activeAppId"`
+	AppSlotAppID          string           `json:"appSlotAppId"`
+	AppSlotCtx            bool             `json:"appSlotCtx"`
+	AppSlotAdcType        string           `json:"appSlotAdcType,omitempty"`
+	AppMfA                *SlotMF          `json:"appMfA"`
+	AppMfB                *SlotMF          `json:"appMfB"`
 	OrigMsgRaw            string           `json:"origMsgRaw"`
 	IsPlayingAnnouncement bool             `json:"isPlayingAnnouncement"`
 	AnnouncementCallID    string           `json:"announcementCallId"`
@@ -150,6 +164,11 @@ func (s *CallSession) ToSerializable() SerializableCallSession {
 		IsInterworking:        s.IsInterworking,
 		PsDataOff:             s.PsDataOff,
 		ActiveAppID:           s.ActiveAppID,
+		AppSlotAppID:          s.AppSlot.AppID,
+		AppSlotCtx:            s.AppSlot.CtxCreated,
+		AppSlotAdcType:        s.AppSlot.AdcType,
+		AppMfA:                s.AppMfA,
+		AppMfB:                s.AppMfB,
 		IsPlayingAnnouncement: s.IsPlayingAnnouncement,
 		AnnouncementCallID:    s.AnnouncementCallID,
 	}
@@ -193,6 +212,9 @@ func (scs *SerializableCallSession) ToCallSession() *CallSession {
 		IsInterworking:        scs.IsInterworking,
 		PsDataOff:             scs.PsDataOff,
 		ActiveAppID:           scs.ActiveAppID,
+		AppSlot:               slotState{AppID: scs.AppSlotAppID, CtxCreated: scs.AppSlotCtx, AdcType: scs.AppSlotAdcType},
+		AppMfA:                scs.AppMfA,
+		AppMfB:                scs.AppMfB,
 		IsPlayingAnnouncement: scs.IsPlayingAnnouncement,
 		AnnouncementCallID:    scs.AnnouncementCallID,
 		InstructionChan:       make(chan *sba.MediaInstructionData),
@@ -497,68 +519,80 @@ func (b *B2BUA) handleSIP(data string, remoteAddr *net.UDPAddr) {
 				b.forwardToSCSCF(data)
 			}
 		} else {
-			if msg.StatusCode >= 300 {
-				log.Printf("[IMS-AS] Call %s ended with status %d, cleaning up sessions", callID, msg.StatusCode)
-
-				// ★ Intercept 480/404 for Unregistered/Unavailable Subscriber Announcement
-				if msg.StatusCode == 480 || msg.StatusCode == 404 {
-					b.mu.Lock()
-					session, ok := b.sessions[callID]
-					b.mu.Unlock()
-					if ok && session != nil && !session.IsPlayingAnnouncement && !session.TermAnswered && session.OrigMsg != nil && !config.IsHotline(session.Callee) {
-						log.Printf("[IMS-AS] Intercepted %d for call %s: triggering unreachable announcement", msg.StatusCode, callID)
-						session.IsPlayingAnnouncement = true
-						session.AnnouncementCallID = callID
-						b.saveSession(session)
-
-						go b.handleUnreachableAnnouncement(session)
-						return // DO NOT forward 480 now, DO NOT delete session now
-					}
-				}
-
-				b.mu.Lock()
-				session, ok := b.sessions[callID]
-				delete(b.sessions, callID)
-				b.mu.Unlock()
-
-				if ok && session != nil && session.ContextID != "" {
-					mfHost := session.MfHost
-					if mfHost == "" {
-						mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-					}
-					mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
-					log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
-					_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-					if session.IsAnchorCtxCreated {
-						log.Printf("[IMS-AS] Releasing ADC MF Context %s-adc", session.CallID)
-						_ = b.CallNmfDeleteMediaContext(mfURL, session.CallID+"-adc")
-					}
-				}
-
-				if ok && session != nil {
-					dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
-					dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
-					log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s", callID)
-					_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
-				}
-
-				// Release dc2 sessions
-				if ok && session != nil {
-					mfHost := session.MfHost
-					if mfHost == "" {
-						mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-					}
-					if session.SessionIDA != "" {
-						go b.callDc2Release(mfHost, session.SessionIDA)
-					}
-					if session.SessionIDB != "" {
-						go b.callDc2Release(mfHost, session.SessionIDB)
-					}
-				}
-			}
-			b.forwardToSCSCF(data)
+			b.handleErrorResponse(msg, callID, data)
 		}
 	}
+}
+
+// handleErrorResponse relays a non-200 response. A final failure of the initial
+// INVITE tears the call down; a failed re-INVITE keeps it.
+func (b *B2BUA) handleErrorResponse(msg *SIPMessage, callID, data string) {
+	if msg.StatusCode >= 300 {
+		// A failed in-dialog re-INVITE (491 glare, 4xx/5xx) does not end the call:
+		// only a pending App-slot change is rolled back [spec §5].
+		if session, ok := b.getSession(callID); ok && isReInviteFailure(session, msg) {
+			log.Printf("[IMS-AS] Re-INVITE for call %s failed with %d; keeping the call", callID, msg.StatusCode)
+			b.rollbackAppSlotChange(session)
+			b.forwardToSCSCF(data)
+			return
+		}
+
+		log.Printf("[IMS-AS] Call %s ended with status %d, cleaning up sessions", callID, msg.StatusCode)
+
+		// ★ Intercept 480/404 for Unregistered/Unavailable Subscriber Announcement
+		if msg.StatusCode == 480 || msg.StatusCode == 404 {
+			b.mu.Lock()
+			session, ok := b.sessions[callID]
+			b.mu.Unlock()
+			if ok && session != nil && !session.IsPlayingAnnouncement && !session.TermAnswered && session.OrigMsg != nil && !config.IsHotline(session.Callee) {
+				log.Printf("[IMS-AS] Intercepted %d for call %s: triggering unreachable announcement", msg.StatusCode, callID)
+				session.IsPlayingAnnouncement = true
+				session.AnnouncementCallID = callID
+				b.saveSession(session)
+
+				go b.handleUnreachableAnnouncement(session)
+				return // DO NOT forward 480 now, DO NOT delete session now
+			}
+		}
+
+		b.mu.Lock()
+		session, ok := b.sessions[callID]
+		delete(b.sessions, callID)
+		b.mu.Unlock()
+
+		if ok && session != nil && session.ContextID != "" {
+			mfHost := session.MfHost
+			if mfHost == "" {
+				mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
+			}
+			mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+			b.closeAppSlot(session)
+			log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
+			_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
+		}
+
+		if ok && session != nil {
+			dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
+			dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
+			log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s", callID)
+			_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
+		}
+
+		// Release dc2 sessions
+		if ok && session != nil {
+			mfHost := session.MfHost
+			if mfHost == "" {
+				mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
+			}
+			if session.SessionIDA != "" {
+				go b.callDc2Release(mfHost, session.SessionIDA)
+			}
+			if session.SessionIDB != "" {
+				go b.callDc2Release(mfHost, session.SessionIDB)
+			}
+		}
+	}
+	b.forwardToSCSCF(data)
 }
 
 func (b *B2BUA) HandleAnnouncementDone(w http.ResponseWriter, r *http.Request) {
@@ -633,11 +667,9 @@ func (b *B2BUA) handleUnreachableAnnouncement(session *CallSession) {
 			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 		}
 		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+		b.closeAppSlot(session)
 		log.Printf("[IMS-AS] Releasing initial unused MF Context %s before announcement", session.ContextID)
 		_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-		if session.IsAnchorCtxCreated {
-			_ = b.CallNmfDeleteMediaContext(mfURL, callID+"-adc")
-		}
 	}
 
 	// Release DCSF Event Subscription

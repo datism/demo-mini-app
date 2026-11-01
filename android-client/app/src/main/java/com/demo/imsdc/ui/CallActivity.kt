@@ -1011,52 +1011,66 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
+        sipManager.onReInviteFailed = { code, cseq ->
+            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteFailed(code, cseq) }
+        }
+
         sipManager.onReInviteReceived = { sdp, rawMsg ->
             Log.i(TAG, "Handling incoming Re-INVITE automatically...")
-            lifecycleScope.launch(Dispatchers.IO) {
+            lifecycleScope.launch(Dispatchers.Main) {
+                var toLaunch: String? = null
+                // Serialised with this side's Re-INVITEs: while one of ours is in progress, answer 491 (RFC 3261 14.2).
+                val handled = miniAppManager.handleIncomingReInvite { withContext(Dispatchers.IO) {
                 try {
+                    // A PC still holding our unanswered offer (491/timeout, retry pending) cannot take the
+                    // far end's offer: drop it, this offer decides the slot; our retry re-plans from there.
+                    if (webRtcManager.homeAdcPC?.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+                        Log.w(TAG, "Incoming Re-INVITE while the Home offer is unanswered: dropping the local Home offer")
+                        webRtcManager.closeADC()
+                        sipManager.homeReqApp = null
+                        sipManager.appReqApp = null
+                    } else if (webRtcManager.appAdcPC?.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
+                        Log.w(TAG, "Incoming Re-INVITE while the App offer is unanswered: dropping the local App offer")
+                        webRtcManager.closeAppADC()
+                        sipManager.appReqApp = null
+                    }
                     val rawSdp = com.demo.imsdc.sip.SdpHelper.extractSdpBody(rawMsg) ?: ""
                     if (rawSdp.trim().isNotEmpty()) {
                         val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
                         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
                     }
 
-                    var reqApp = com.demo.imsdc.sip.SdpHelper.parseReqApp(rawMsg)
+                    val appLines = com.demo.imsdc.webrtc.parseAppLines(rawSdp)
+                    // Home = mid 3, App = mid 4, chosen by a=mid (the BDC is the first application line).
+                    val (homeLine, appLine) = com.demo.imsdc.webrtc.pickSlots(appLines.drop(1)) { it.mid }
+                    if (appLine != null) sipManager.appSlotUsed = true
 
-                    // Phân tích các m=application lines trong SDP offer
-                    val appLines = rawSdp.replace("\r", "").split("\n")
-                        .map { it.trim() }
-                        .filter { it.startsWith("m=application ") }
-                    // ADC bị disable chỉ khi có block application port 0
-                    val hasAdcPort0 = appLines.any { it.startsWith("m=application 0") }
-                    // isSingleAppLine: chỉ có 1 block application (không có ADC riêng)
-                    val isSingleAppLine = appLines.size <= 1
-
-                    Log.i(TAG, "Re-INVITE: reqApp(raw)=$reqApp appLines=${appLines.size} hasAdcPort0=$hasAdcPort0 isSingleAppLine=$isSingleAppLine")
-
-                    // Chỉ fallback operator-menu khi KHÔNG có appId thật từ a=3gpp-req-app.
-                    // KHÔNG ép reqApp về operator-menu chỉ vì SDP có 1 block hay ADC port 0,
-                    // vì điều đó làm mất app (ví dụ "fun-calling-app") trên máy đối phương.
-                    val isCloseOrEmpty = (reqApp == null || reqApp == "close")
-                    if (isCloseOrEmpty || (reqApp == "operator-menu" && isSingleAppLine)) {
-                        reqApp = "operator-menu"
-                    } else if (hasAdcPort0) {
-                        Log.i(TAG, "Re-INVITE: ADC port=0 detected but reqApp=$reqApp present, keeping app")
+                    // Home ADC: opened by the first offer that carries it, never closed by a Re-INVITE.
+                    val homeJustOpened = homeLine != null && homeLine.isOpen && webRtcManager.homeAdcPC == null
+                    if (homeJustOpened) {
+                        val homeId = homeLine!!.reqApp ?: MiniAppManager.HOME_APP
+                        sipManager.homeReqApp = homeId
+                        webRtcManager.createADC(); dcManager.setupADC()
+                        if (homeId == MiniAppManager.HOME_APP) { webRtcManager.createADC2(); dcManager.setupADC2() }
                     }
-                    sipManager.activeReqAppId = reqApp
 
-                    // Always close existing ADC connection first to isolate sessions
-                    webRtcManager.closeADC()
-                    if (reqApp != "operator-menu") {
-                        Log.i(TAG, "Re-creating ADC for requested app: $reqApp")
-                        webRtcManager.createADC()
-                        dcManager.setupADC()
-                        if (reqApp == "fun-calling-app") {
-                            webRtcManager.createADC2()
-                            dcManager.setupADC2()
+                    // App ADC: rebuild only the PeerConnection of mid 4, and only when mid 4 changed.
+                    val change = com.demo.imsdc.webrtc.diffAppSlot(sipManager.appReqApp, appLine)
+                    Log.i(TAG, "Re-INVITE: home=${homeLine?.reqApp}/${homeLine?.port} app=${appLine?.reqApp}/${appLine?.port} change=$change")
+                    when (change) {
+                        is com.demo.imsdc.webrtc.AppSlotChange.Open, is com.demo.imsdc.webrtc.AppSlotChange.Replace -> {
+                            val id = if (change is com.demo.imsdc.webrtc.AppSlotChange.Open) change.appId
+                                     else (change as com.demo.imsdc.webrtc.AppSlotChange.Replace).appId
+                            webRtcManager.closeAppADC()
+                            sipManager.appReqApp = id
+                            webRtcManager.createAppADC(); dcManager.setupAppADC()
                         }
+                        com.demo.imsdc.webrtc.AppSlotChange.Close -> {
+                            webRtcManager.closeAppADC()
+                            sipManager.appReqApp = null
+                        }
+                        com.demo.imsdc.webrtc.AppSlotChange.None -> Unit
                     }
-
                     if (sdp.trim().isNotEmpty()) {
                         Log.i(TAG, "B (Re-INVITE): Setting remote offer...")
                         webRtcManager.setRemoteOffer(sdp)
@@ -1065,33 +1079,32 @@ class CallActivity : AppCompatActivity() {
                     val sdpAnswer = webRtcManager.createAnswer()
                     sipManager.sendOkAnswer(rawMsg, sdpAnswer)
 
-                    withContext(Dispatchers.Main) {
-                        Log.i(TAG, "? Re-INVITE auto-answered successfully")
-                        Log.i(TAG, "Re-INVITE requested app: $reqApp")
-                        miniAppManager.launchMiniApp(reqApp, sendRemoteTrigger = false)
+                    Log.i(TAG, "? Re-INVITE auto-answered successfully")
+                    toLaunch = when (change) {
+                        is com.demo.imsdc.webrtc.AppSlotChange.Open -> change.appId
+                        is com.demo.imsdc.webrtc.AppSlotChange.Replace -> change.appId
+                        com.demo.imsdc.webrtc.AppSlotChange.Close -> MiniAppManager.HOME_APP
+                        com.demo.imsdc.webrtc.AppSlotChange.None -> if (homeJustOpened) (sipManager.homeReqApp ?: MiniAppManager.HOME_APP) else null
                     }
+                    true
                 } catch (e: Exception) {
                     Log.e(TAG, "Error auto-answering Re-INVITE: ${e.message}", e)
+                    false
                 }
+                } }
+                if (!handled) {
+                    Log.w(TAG, "Incoming Re-INVITE during our own: answering 491")
+                    sipManager.sendRequestPending(rawMsg)
+                }
+                // Outside the lock: launching the page may queue a Re-INVITE of its own.
+                toLaunch?.let { miniAppManager.launchMiniApp(it, sendRemoteTrigger = false) }
             }
         }
 
-        sipManager.onReInviteResponse = { sdpAnswer, rawSdp ->
-            Log.i(TAG, "? Re-INVITE 200 OK received (SDP answer)")
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    if (!sdpAnswer.isNullOrEmpty()) {
-                        webRtcManager.setRemoteAnswer(sdpAnswer)
-                        Log.i(TAG, "? Re-INVITE Remote answer set � ICE starting for ADC")
-                        withContext(Dispatchers.Main) {
-                            imsDcSdk.handleRemoteSdp(sdpAnswer, callId = callId)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error setting Re-INVITE answer: ${e.message}", e)
-                }
-                withContext(Dispatchers.Main) { miniAppManager.onReInviteAnswered() }
-            }
+        // The answer is applied by MiniAppManager, under the negotiation lock, only if its CSeq is the one awaited.
+        sipManager.onReInviteResponse = { cseq, sdpAnswer, _ ->
+            Log.i(TAG, "? Re-INVITE 200 OK received (CSeq $cseq)")
+            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteAnswered(cseq, sdpAnswer) }
         }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -1176,28 +1189,36 @@ class CallActivity : AppCompatActivity() {
 
         // Kh?i t?o v� dang k� GSMA SDK controller
         imsDcSdk = com.demo.imsdc.webrtc.ImsDcSdk(applicationContext, binding.webviewMiniapp, webRtcManager, dcManager)
+        // Called on the JS bridge thread: hop to Main before reading WebRTC/SIP slot state or queueing a Re-INVITE.
         imsDcSdk.onJsRequestedAdc = { appId ->
-            if (isMiniAppInitiator) {
-                val targetId = when {
-                    appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
-                    appId.contains("operator-menu") -> "operator-menu"
-                    else -> appId
-                }
-                val currentReqApp = when {
-                    sipManager.activeReqAppId?.contains("0003210000000038") == true ||
-                            sipManager.activeReqAppId?.contains("tuyaapp") == true ||
-                            sipManager.activeReqAppId?.contains("sketch-sync-app") == true -> "sketch-sync-app"
-                    sipManager.activeReqAppId?.contains("operator-menu") == true -> "operator-menu"
-                    else -> sipManager.activeReqAppId
-                }
-                if (currentReqApp != targetId || webRtcManager.adcPC == null) {
-                    android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
-                    miniAppManager.triggerAppNegotiationReInvite(targetId)
+            lifecycleScope.launch(Dispatchers.Main) {
+                if (isMiniAppInitiator) {
+                    val targetId = when {
+                        appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
+                        appId.contains("operator-menu") -> "operator-menu"
+                        else -> appId
+                    }
+                    // A hotline app lives on the Home slot (mid 3); mid 4 is never used on a hotline call.
+                    val isHome = targetId == MiniAppManager.HOME_APP || hotlineApp(remoteUser) != null
+                    val alreadyOpen = if (isHome) webRtcManager.homeAdcPC != null
+                                      else sipManager.appReqApp == targetId && webRtcManager.appAdcPC != null
+                    if (!alreadyOpen) {
+                        android.util.Log.i(TAG, "JS called createDataChannel() for app $appId ($targetId), natively triggering SIP Re-INVITE")
+                        miniAppManager.triggerAppNegotiationReInvite(targetId)
+                    } else if (isHome) {
+                        // The Home ADC has been open since the first emote Re-INVITE: bind the page to it.
+                        val adc = webRtcManager.adcChannel
+                        if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
+                            imsDcSdk.notifyDataChannelState(imsDcSdk.getPrimaryDcLabel(), 1)
+                            imsDcSdk.flushPendingAdc()
+                        }
+                        android.util.Log.i(TAG, "Home ADC already open, page bound without a Re-INVITE")
+                    } else {
+                        android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
+                    }
                 } else {
-                    android.util.Log.d(TAG, "ADC negotiation already in progress for $appId ($targetId), ignoring duplicate JS request")
+                    android.util.Log.i(TAG, "Not initiator for app $appId. Waiting for incoming Re-INVITE.")
                 }
-            } else {
-                android.util.Log.i(TAG, "Not initiator for app $appId. Waiting for incoming Re-INVITE.")
             }
         }
         androidBridge.onJsRequestedAdc = imsDcSdk.onJsRequestedAdc
@@ -1274,7 +1295,7 @@ class CallActivity : AppCompatActivity() {
                 webRtcManager.createPlaceholderChannel()
 
                 // 3. T?o BDC (pre-negotiated, chua m?  ch? ICE connected)
-                webRtcManager.createBDC(0)
+                webRtcManager.ensureBdcChannel()
 
                 // 4. T?o WebRTC offer d? c SDP km INVITE (early offer)
                 val localOffer = webRtcManager.createOffer()
@@ -1390,7 +1411,7 @@ class CallActivity : AppCompatActivity() {
                 }
 
                 // 2. T?o BDC (pre-negotiated, ID c? d?nh)
-                webRtcManager.createBDC(100)
+                webRtcManager.ensureBdcChannel()
 
                 if (remoteSdp.trim().isEmpty()) {
                     Log.i(TAG, "B (Delayed Offer): Creating local SDP Offer...")
@@ -1669,6 +1690,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onIpChangedDuringCall = null
         sipManager.onAckWithSdp = null
         sipManager.onReInviteReceived = null
+        sipManager.onReInviteFailed = null
+        if (::miniAppManager.isInitialized) miniAppManager.resetRequests()
         sipManager.onReInviteResponse = null
         try {
             (binding.webviewMiniapp.parent as? android.view.ViewGroup)?.removeView(binding.webviewMiniapp)
@@ -1770,10 +1793,8 @@ class CallActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.Main) {
             try {
                 binding.tvCallStatus.text = if (nextHoldState) "\u23f8\ufe0f \u0110ang gi\u1eef" else "\u2705 \u0110\u00e3 k\u1ebft n\u1ed1i"
-                val localOffer = webRtcManager.createOffer()
-                withContext(Dispatchers.IO) {
-                    sipManager.sendReInviteWithSdp(localOffer)
-                }
+                // Serialised with app changes; its answer/failure is matched by CSeq, never taken for an app request.
+                miniAppManager.sendHoldReInvite()
             } catch (e: Exception) {
                 Log.e(TAG, "L?i thay d?i tr?ng th�i Hold/Resume: ${e.message}")
             }

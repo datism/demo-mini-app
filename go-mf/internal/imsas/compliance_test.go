@@ -127,12 +127,12 @@ func TestParseReqAppBDCDiscard(t *testing.T) {
 	}
 }
 
-// DEF-13: Test that getTLSId produces non-deterministic values
-func TestGetTLSIdRandom(t *testing.T) {
+// getTLSId is deterministic so unchanged m-lines keep their tls-id across Re-INVITEs.
+func TestGetTLSIdDeterministic(t *testing.T) {
 	id1 := getTLSId("session-1")
 	id2 := getTLSId("session-1")
-	if id1 == id2 {
-		t.Errorf("getTLSId should produce random values, but got same result for same input: %s", id1)
+	if id1 != id2 {
+		t.Errorf("getTLSId should be deterministic, got %s vs %s", id1, id2)
 	}
 }
 

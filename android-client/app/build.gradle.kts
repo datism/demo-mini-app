@@ -41,6 +41,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    testOptions {
+        // SdpHelper logs through android.util.Log; return defaults instead of throwing under JVM tests.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -75,4 +80,7 @@ dependencies {
 
     // Desugaring dependency
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.2.2")
+
+    // ─── Unit tests (JVM) ────────────────────────────────────────
+    testImplementation("junit:junit:4.13.2")
 }
