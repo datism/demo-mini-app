@@ -436,6 +436,13 @@ class MiniAppManager(val activity: CallActivity) {
                 appId.contains("operator-menu") -> "operator-menu"
                 else -> appId
             }
+            // A remote trigger (LAUNCH_APP, Re-INVITE) for the page already on screen must not reload it:
+            // a reload resets the page and re-sends its startup messages (e.g. caro's sync_state).
+            if (!sendRemoteTrigger && targetId == activity.currentAppId &&
+                activity.binding.webviewMiniapp.visibility == View.VISIBLE) {
+                Log.i(TAG, "launchMiniApp targetId=$targetId already shown, not reloading")
+                return@launch
+            }
             activity.currentAppId = targetId
             // A hotline app lives on the Home slot (mid 3), so its traffic is on the Home channel.
             activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu" || hotlineApp != null)

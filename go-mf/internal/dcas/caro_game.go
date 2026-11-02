@@ -70,6 +70,8 @@ func (s *DCASServer) handleCaroMessage(sessionID string, data []byte, conn *webs
 	s.caroMu.Lock()
 	defer s.caroMu.Unlock()
 
+	markCaroPlayer(callID, sessionID)
+
 	switch msg.Action {
 	case "new_game":
 		s.caroNewGame(callID, sessionID)
@@ -99,8 +101,56 @@ func (s *DCASServer) getAllCallSessions(callID string) []string {
 	return sessions
 }
 
+// caroPlayers returns the sessions of the call that are connected and run the caro page.
+func (s *DCASServer) caroPlayers(callID string) []string {
+	return filterCaroPlayers(s.getAllCallSessions(callID), getCaroPlayersFromRedis(callID))
+}
+
+func filterCaroPlayers(active, caro []string) []string {
+	out := []string{}
+	for _, sid := range active {
+		if containsString(caro, sid) {
+			out = append(out, sid)
+		}
+	}
+	return out
+}
+
+// seatCaroPlayer frees every seat whose session is not in players (gone, or not a
+// caro page), then gives sid a free seat if it has none. It returns sid's symbol
+// ("" when both seats belong to other players) and whether the seats changed.
+func seatCaroPlayer(game *CaroGame, players []string, sid string) (string, bool) {
+	changed := false
+	if game.PlayerX != "" && !containsString(players, game.PlayerX) {
+		game.PlayerX = ""
+		changed = true
+	}
+	if game.PlayerO != "" && !containsString(players, game.PlayerO) {
+		game.PlayerO = ""
+		changed = true
+	}
+	switch sid {
+	case game.PlayerX:
+		return "X", changed
+	case game.PlayerO:
+		return "O", changed
+	}
+	if !containsString(players, sid) {
+		return "", changed
+	}
+	if game.PlayerX == "" {
+		game.PlayerX = sid
+		return "X", true
+	}
+	if game.PlayerO == "" {
+		game.PlayerO = sid
+		return "O", true
+	}
+	return "", changed
+}
+
 func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
-	sessions := s.getAllCallSessions(callID)
+	sessions := s.caroPlayers(callID)
 
 	// Preserve scores and players from previous game
 	var prevScoreX, prevScoreO int
@@ -129,28 +179,11 @@ func (s *DCASServer) caroNewGame(callID, triggerSessionID string) {
 	game.PlayerO = prevPlayerO
 	game.TurnSeq = prevTurnSeq
 
-	// Clean up stale players
-	if game.PlayerX != "" && !containsString(sessions, game.PlayerX) {
-		game.PlayerX = ""
-	}
-	if game.PlayerO != "" && !containsString(sessions, game.PlayerO) {
-		game.PlayerO = ""
-	}
-
-	// Always ensure triggerSessionID is in the game
-	if game.PlayerX == "" && game.PlayerO != triggerSessionID {
-		game.PlayerX = triggerSessionID
-	} else if game.PlayerO == "" && game.PlayerX != triggerSessionID {
-		game.PlayerO = triggerSessionID
-	}
-
-	// Assign any remaining empty slots to other active sessions
+	// Seat the trigger first, then any other caro page of the call. Sessions of
+	// other apps in the same call (e.g. the Home/emote ADC) never get a seat.
+	seatCaroPlayer(game, sessions, triggerSessionID)
 	for _, sid := range sessions {
-		if game.PlayerX == "" && sid != game.PlayerO {
-			game.PlayerX = sid
-		} else if game.PlayerO == "" && sid != game.PlayerX {
-			game.PlayerO = sid
-		}
+		seatCaroPlayer(game, sessions, sid)
 	}
 
 	startCaroTurn(game, time.Now())
@@ -201,25 +234,10 @@ func (s *DCASServer) checkLateJoinCaro(callID, sessionID string) {
 		return
 	}
 
-	activeSessions := s.getAllCallSessions(callID)
-	changed := false
-
-	if game.PlayerX != "" && !containsString(activeSessions, game.PlayerX) {
-		game.PlayerX = ""
-		changed = true
-	}
-	if game.PlayerO != "" && !containsString(activeSessions, game.PlayerO) {
-		game.PlayerO = ""
-		changed = true
-	}
-
-	if game.PlayerX == "" && game.PlayerO != sessionID {
-		game.PlayerX = sessionID
-		changed = true
-	} else if game.PlayerO == "" && game.PlayerX != sessionID {
-		game.PlayerO = sessionID
-		changed = true
-	}
+	// Only a reconnecting caro page is rebound here; a new one takes its seat with
+	// its own sync_state (any other app's ADC on stream 1000 is not a player).
+	activeSessions := s.caroPlayers(callID)
+	_, changed := seatCaroPlayer(&game, activeSessions, sessionID)
 
 	if changed {
 		gameBytes, _ := json.Marshal(&game)
@@ -270,24 +288,11 @@ func (s *DCASServer) caroMakeMove(callID, sessionID string, row, col int) {
 		return
 	}
 
-	// Determine player symbol
-	playerSymbol := ""
-	if sessionID == game.PlayerX {
-		playerSymbol = "X"
-	} else if sessionID == game.PlayerO {
-		playerSymbol = "O"
-	} else {
-		// Assign unassigned slot
-		if game.PlayerX == "" {
-			game.PlayerX = sessionID
-			playerSymbol = "X"
-		} else if game.PlayerO == "" {
-			game.PlayerO = sessionID
-			playerSymbol = "O"
-		} else {
-			s.sendCaroError(sessionID, caroErrBoardFull)
-			return
-		}
+	// Determine player symbol; a seat held by a gone or non-caro session is freed first.
+	playerSymbol, _ := seatCaroPlayer(&game, s.caroPlayers(callID), sessionID)
+	if playerSymbol == "" {
+		s.sendCaroError(sessionID, caroErrBoardFull)
+		return
 	}
 
 	// Validate turn
@@ -590,36 +595,17 @@ func (s *DCASServer) caroSyncState(callID, sessionID string) {
 		return
 	}
 
-	activeSessions := s.getAllCallSessions(callID)
-
-	changed := false
-	if game.PlayerX != "" && !containsString(activeSessions, game.PlayerX) {
-		game.PlayerX = ""
-		changed = true
-	}
-	if game.PlayerO != "" && !containsString(activeSessions, game.PlayerO) {
-		game.PlayerO = ""
-		changed = true
-	}
-
-	if game.PlayerX == "" && sessionID != game.PlayerO {
-		game.PlayerX = sessionID
-		changed = true
-	} else if game.PlayerO == "" && sessionID != game.PlayerX {
-		game.PlayerO = sessionID
-		changed = true
-	}
-
+	playerSymbol, changed := seatCaroPlayer(&game, s.caroPlayers(callID), sessionID)
 	if changed {
 		gameBytes, _ := json.Marshal(&game)
 		setToRedis("caro:game:"+callID, string(gameBytes))
 	}
-	s.caroEnsureTimer(callID, &game, time.Now())
-
-	playerSymbol := "X"
-	if sessionID == game.PlayerO {
-		playerSymbol = "O"
+	if playerSymbol == "" {
+		// Both seats belong to other players: do not pretend this page is X.
+		s.sendCaroError(sessionID, caroErrBoardFull)
+		return
 	}
+	s.caroEnsureTimer(callID, &game, time.Now())
 
 	resp := map[string]interface{}{
 		"service":      "caro",

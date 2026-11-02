@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - 2026-10-25
 
+### Fixed
+- **Caro "Bàn cờ đã đủ 2 người chơi" and both phones showing X:** since the background-emote ADC, a call keeps the Home (emote) sessions connected to DCAS next to the caro App sessions, and DCAS gave a caro seat to any session of the call. A seat could go to a session that never opened caro, which locked the real second player out; a player without a seat was still told it was X. DCAS now seats only sessions that sent a caro message (Redis set `caro:players:<call id>`), frees a seat held by a gone or non-caro session before a move, and answers a third page with the "full" error instead of a fake X (`go-mf/internal/dcas/caro_game.go`).
+- **Mini-app page reloaded several times on open (1900 flight booking, caro callee):** every BDC `304 Not Modified` reloaded the WebView although `launchMiniApp` had already loaded that cache, and `setupBDC` sent up to three GETs for the same app. A 304 no longer reloads the page, only one GET per app is in flight, and a remote `LAUNCH_APP`/Re-INVITE for the page already on screen no longer reloads it.
+
 ### Added & Enhanced
 - **Hotline 1900 home menu, booking history, membership and support:** dialling 1900 now opens a menu (Đặt vé, Lịch sử đặt vé, Hội viên, Gọi hỗ trợ) instead of going straight to flight search. The caller's phone number is the account, so there is no login: DCAS reads it from the IMS-AS session in Redis (`imsas:session:<call id>`, with the `-app`/`-adc` suffix removed; `guest` when it can't be found).
   - Confirmed bookings are kept per caller and shown under Lịch sử đặt vé; tapping one opens its ticket with the QR code. New callers start with two sample bookings (one flown, one upcoming) and 4.800 points.
