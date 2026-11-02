@@ -192,7 +192,7 @@ func TestFlightConfirmBooksEverySeat(t *testing.T) {
 	if r.Status != "confirmed" {
 		t.Fatalf("two-seat booking should succeed, got %+v", r)
 	}
-	if want := 1479000*2 + 2*flightExtraSeatFee; r.Total != want {
+	if want := dayPrice(1479000, req.Date)*2 + 2*flightExtraSeatFee; r.Total != want {
 		t.Errorf("extra legroom fee applies per seat: total %d, want %d", r.Total, want)
 	}
 	taken := seats.taken(flightKey("SL 201", "2026-11-12"))

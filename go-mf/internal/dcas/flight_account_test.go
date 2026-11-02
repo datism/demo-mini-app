@@ -57,14 +57,17 @@ func TestFlightConfirmRecordsBookingAndPoints(t *testing.T) {
 	seats, accts := newFlightSeatStore(), newFlightAccountStore()
 	before := reply(FlightBookingRequest{Action: "profile"}, "1001", seats, accts)
 
-	r := reply(confirmReq("4A"), "1001", seats, accts)
-	if r.Status != "confirmed" || r.Total != 2370000 {
-		t.Fatalf("unexpected confirm %+v", r)
+	req := confirmReq("4A")
+	total := dayPrice(1770000, req.Date) + flightFlexSurcharge // SL 213 Flex, one adult, on that weekday
+	r := reply(req, "1001", seats, accts)
+	if r.Status != "confirmed" || r.Total != total {
+		t.Fatalf("unexpected confirm %+v, want total %d", r, total)
 	}
-	if r.PointsEarned != 237 {
-		t.Errorf("points earned = %d, want 237 (1 per 10.000₫)", r.PointsEarned)
+	earned := total / flightPointsPerVND
+	if r.PointsEarned != earned {
+		t.Errorf("points earned = %d, want %d (1 per 10.000₫)", r.PointsEarned, earned)
 	}
-	if r.Member == nil || r.Member.Points != before.Member.Points+237 {
+	if r.Member == nil || r.Member.Points != before.Member.Points+earned {
 		t.Errorf("member after confirm = %+v, before = %+v", r.Member, before.Member)
 	}
 
@@ -73,7 +76,7 @@ func TestFlightConfirmRecordsBookingAndPoints(t *testing.T) {
 		t.Fatalf("expected one more booking, got %d -> %d", len(before.Bookings), len(after.Bookings))
 	}
 	top := after.Bookings[0]
-	if top.PNR != "SL7K2Q" || top.Flight != "SL 213" || top.Status != "upcoming" || top.Total != 2370000 ||
+	if top.PNR != "SL7K2Q" || top.Flight != "SL 213" || top.Status != "upcoming" || top.Total != total ||
 		top.From != "HAN" || top.To != "SGN" || top.Date != "2026-11-12" || top.Dep != "08:30" || top.Arr != "10:40" ||
 		len(top.Seats) != 1 || top.Seats[0] != "4A" || top.Pax != 1 {
 		t.Errorf("newest booking should lead the history with the confirmed details, got %+v", top)
