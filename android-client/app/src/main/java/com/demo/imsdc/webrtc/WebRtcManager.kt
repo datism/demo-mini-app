@@ -699,6 +699,8 @@ class WebRtcManager(private val context: Context) {
      * Opens the negotiated content-share channel (id 1002) on the App PeerConnection. The MF opens the same
      * stream on its side for every ADC context, so no SDP change is needed; the Re-INVITE only carries the
      * agreement. Returns the channel, or null when the App PeerConnection is gone.
+     * The channel is reused by later share sessions and only closed with the App PeerConnection: a close
+     * resets the stream and the MF does not reopen its side.
      */
     fun openShareChannel(): DataChannel? {
         val pc = appAdcPC ?: return null

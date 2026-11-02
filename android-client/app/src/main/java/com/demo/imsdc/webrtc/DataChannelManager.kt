@@ -465,8 +465,12 @@ class DataChannelManager(
     fun setupAppADC() = attachAdcObserver(webRtcManager.appAdcChannel, isHome = false)
 
     /** Receives photo frames on the content-share channel (stream 1002) and hands them to the transport. */
+    private var observedShareChannel: DataChannel? = null
+
     fun setupShareChannel(ch: DataChannel?) {
         ch ?: return
+        if (ch === observedShareChannel) return // reused across share sessions; observer already attached
+        observedShareChannel = ch
         Log.i(TAG, "Share channel observer attached, state=${ch.state()}")
         ch.registerObserver(object : DataChannel.Observer {
             override fun onStateChange() { Log.i(TAG, "Share channel state: ${ch.state()}") }
