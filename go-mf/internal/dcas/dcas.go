@@ -778,12 +778,29 @@ func getSessionsFromRedis(callID string) []string {
 func removeSessionFromRedis(callID, sessionID string) {
 	key := "caro:sessions:" + callID
 	redisClient.SRem(ctx, key, sessionID)
+	redisClient.SRem(ctx, "caro:players:"+callID, sessionID)
 
 	count, _ := redisClient.SCard(ctx, key).Result()
 	if count == 0 {
 		redisClient.Del(ctx, key)
+		redisClient.Del(ctx, "caro:players:"+callID)
 		redisClient.Del(ctx, "caro:game:"+callID)
 	}
+}
+
+// markCaroPlayer records that sessionID runs the caro page: it sent a caro message.
+// Only such sessions may take a seat; a call also has sessions of other apps
+// (the Home/emote ADC stays connected next to the App ADC).
+func markCaroPlayer(callID, sessionID string) {
+	redisClient.SAdd(ctx, "caro:players:"+callID, sessionID)
+}
+
+func getCaroPlayersFromRedis(callID string) []string {
+	players, err := redisClient.SMembers(ctx, "caro:players:"+callID).Result()
+	if err != nil {
+		return []string{}
+	}
+	return players
 }
 
 func (s *DCASServer) StartRedisPubSubListener() {

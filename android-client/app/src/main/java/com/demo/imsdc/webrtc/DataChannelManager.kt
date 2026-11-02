@@ -178,6 +178,12 @@ class DataChannelManager(
      */
     private fun sendHttpGetRequest(bdc: DataChannel) {
         val rawAppId = downloadAppId ?: targetAppId
+        // setupBDC has three senders (OPEN observer, already-open check, poll) and launchMiniApp a fourth:
+        // one GET per app until its reply arrives. A BDC close clears inFlightRequests, so a re-send still works.
+        if (synchronized(inFlightRequests) { inFlightRequests.contains(rawAppId) }) {
+            Log.i(TAG, "BDC (id=${bdc.id()}): GET for $rawAppId already in flight, not sending again")
+            return
+        }
         val appId = when {
             rawAppId.contains("0003210000000038") || rawAppId.contains("tuyaapp") || rawAppId.contains("sketch-sync-app") -> "sketch-sync-app"
             rawAppId.contains("sketch-sync-app") || rawAppId.contains("tuyaapp") || rawAppId.contains("sketch-sync-app") -> "sketch-sync-app"
@@ -280,9 +286,10 @@ class DataChannelManager(
                 if (bdcResponseFailed) Log.w(TAG, "BDC response for $respAppId failed: ${headers.lineSequence().first()}")
 
                 if (headers.startsWith("HTTP/1.1 304")) {
-                    Log.i(TAG, "Received 304 Not Modified. Using local cache.")
+                    // The ETag is only sent when the cached package exists, and launchMiniApp has
+                    // already loaded that cache: nothing changed, so do not reload the page.
+                    Log.i(TAG, "Received 304 Not Modified for $respAppId. Cached page is current, not reloading.")
                     resetBdcBuffer()
-                    loadCachedMiniApp(respAppId)
                     completeDownload(respAppId, true)
                     return
                 }
