@@ -93,8 +93,10 @@
   .round svg { width: 22px; height: 22px; }
   .stop { font: inherit; font-size: 13.5px; font-weight: 600; color: #fff; background: rgba(255,69,58,.9); border: 0; border-radius: 999px; padding: 10px 18px; }
 
-  /* Full screen (native hides the call UI): keep the page's bar clear of the native call pill at the top-left. */
-  html.full .bar { padding-top: 52px; }
+  /* Full screen (native hides the call UI): my camera is at the top-left, the call pill at the bottom centre. */
+  html.full .bar { padding-left: 116px; }
+  html.full #dots { bottom: 62px; }
+  html.full .controls { padding-bottom: 60px; }
   #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(21,24,29,.92); color: #fff; font-size: 12.5px;
            padding: 9px 14px; border-radius: 999px; z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
   #toast.show { opacity: 1; }
@@ -180,7 +182,7 @@
  * Báo hiệu SIP do native đảm nhiệm (re-INVITE / 180 / 200 / 603 / CANCEL).
  * Trang gọi:  AndroidBridge.requestShare(kind) · cancelShare() · answerShare(bool)
  *             stopShare() · pickVideo() · pauseVideo(bool) · muteShareAudio(bool)
- *             savePhotoB64(json) · setFullScreen(bool) · showCallControls()
+ *             savePhotoB64(json) · setFullScreen(bool)
  * Native gọi: window.shareEvent(name, argJson)
  *   ringing | accepted | declined | cancelled | closed | failed{code} | invite{kind,peer}
  *   videoReady{name,dur} | videoTime{t} | videoEnded | videoError{msg}
@@ -483,7 +485,7 @@ function wakeBar() { const bar = $('photoBar'); bar.classList.remove('fade'); cl
     if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); st.classList.remove('dragging');
     if (pinch) { if (pts.size < 2) pinch = null; start = null; return; }
     if (start && state.zoom.k === 1) { const dx = e.clientX - start.x; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }
-    if (!moved) { const now = Date.now(); if (now - lastTap < 280) setZoom(state.zoom.k > 1 ? 1 : 2.5, 0, 0); else { wakeBar(); call('showCallControls'); } lastTap = now; }
+    if (!moved) { const now = Date.now(); if (now - lastTap < 280) setZoom(state.zoom.k > 1 ? 1 : 2.5, 0, 0); else wakeBar(); lastTap = now; }
     start = null;
   };
   st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
@@ -524,8 +526,6 @@ $('btnPlayPause').onclick = () => {
   call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused });
 };
 $('btnStop').onclick = () => { call('stopShare'); toast('Đã dừng chia sẻ'); endSession(); };
-// Full-screen video: a tap outside the page's own buttons shows the call buttons.
-$('videoView').addEventListener('click', e => { if (!e.target.closest('button')) call('showCallControls'); });
 $('btnMute').onclick = () => { state.muted = !state.muted; renderMute(); call('muteShareAudio', state.muted); toast(state.muted ? 'Đã tắt tiếng' : 'Đã bật tiếng'); };
 
 /* ─────────────── Điểm vào duy nhất: nhận message từ ADC ─────────────── */
