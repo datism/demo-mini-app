@@ -39,6 +39,7 @@ type FlightBookingRequest struct {
 	Seats    []string `json:"seats,omitempty"` // one seat per passenger
 	Name     string   `json:"name,omitempty"`
 	Payment  string   `json:"payment,omitempty"`
+	Topic    string   `json:"topic,omitempty"` // support: "agent" or "callback"
 }
 
 type FlightOption struct {
@@ -66,6 +67,10 @@ type FlightBookingResponse struct {
 	PNR        string         `json:"pnr,omitempty"`
 	Total      int            `json:"total,omitempty"`
 	Tax        int            `json:"tax,omitempty"`
+
+	Member       *FlightMember         `json:"member,omitempty"`        // profile and confirm
+	Bookings     []FlightBookingRecord `json:"bookings,omitempty"`      // profile: newest first
+	PointsEarned int                   `json:"points_earned,omitempty"` // confirm
 }
 
 var flightSchedule = []FlightOption{
@@ -240,9 +245,13 @@ func (s *DCASServer) handleFlightBookingMessage(sessionID string, data []byte) {
 		log.Printf("[DCAS] Failed to parse Flight Booking JSON: %v", err)
 	}
 
-	resp := buildFlightBookingReply(req, newFlightPNR, flightSeats)
+	caller := s.flightCaller(sessionID)
+	resp := buildFlightReplyForCaller(req, caller, newFlightPNR, flightSeats, flightAccounts)
 	if resp.Status == "confirmed" {
-		log.Printf("[DCAS] Session %s booked %s (%s, seats %s) PNR=%s total=%d", sessionID, req.Flight, req.Fare, strings.Join(requestedSeats(req), ","), resp.PNR, resp.Total)
+		log.Printf("[DCAS] Caller %s (session %s) booked %s (%s, seats %s) PNR=%s total=%d", caller, sessionID, req.Flight, req.Fare, strings.Join(requestedSeats(req), ","), resp.PNR, resp.Total)
+	}
+	if req.Action == "support" && resp.Status == "success" {
+		log.Printf("[DCAS] Caller %s (session %s) asked for support: %s", caller, sessionID, req.Topic)
 	}
 	s.sendToSession(sessionID, "1000", resp)
 }

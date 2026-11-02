@@ -1152,6 +1152,141 @@
         stroke-dashoffset: 0;
       }
     }
+
+    /* ---------- home / history / membership / support ---------- */
+    .mcard {
+      border-radius: 16px;
+      padding: 16px 18px;
+      color: #FFFFFF;
+      background: linear-gradient(135deg, #0369A1, #0EA5E9);
+    }
+
+    .mcard.gold {
+      background: linear-gradient(135deg, #B45309, #F59E0B);
+    }
+
+    .mcard.platinum {
+      background: linear-gradient(135deg, #334155, #64748B);
+    }
+
+    .mcard .k {
+      font-size: 12px;
+      opacity: .85;
+    }
+
+    .mcard .big {
+      font-size: 26px;
+      font-weight: 600;
+    }
+
+    .meter {
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, .3);
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .meter i {
+      display: block;
+      height: 100%;
+      background: #FFFFFF;
+      border-radius: 3px;
+    }
+
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .tile {
+      min-height: 108px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: flex-start;
+      text-align: left;
+      color: var(--accent-ink);
+    }
+
+    .tile .t {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .tile .s {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .bk {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      text-align: left;
+    }
+
+    .bk .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bk .route-t {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .chip {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #E0F2FE;
+      color: var(--accent-ink);
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .chip.flown {
+      background: var(--surface);
+      color: var(--muted);
+    }
+
+    .benefits {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .benefits li::before {
+      content: "\2713  ";
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .earn {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
   </style>
 </head>
 
@@ -1205,6 +1340,10 @@
       qr: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>', 20),
       info: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>', 15),
       plane: svg('<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>', 18, 1.75, 'transform:rotate(45deg)'),
+      history: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>', 26),
+      star: svg('<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3-6.2 3.3L7 14.2 2 9.3l6.9-1z"/>', 26),
+      headset: svg('<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>', 26),
+      phone: svg('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>', 22),
       check: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
     };
 
@@ -1238,7 +1377,29 @@
       { k: 'wallet', vn: 'Ví điện tử', en: 'E-wallet · ví demo' },
       { k: 'qr', vn: 'QR chuyển khoản', en: 'QR bank transfer' }
     ];
+    const TIERS = {
+      silver: { vn: 'Bạc', en: 'Silver', perks: ['Tích 1 điểm cho mỗi 10.000₫', 'Làm thủ tục online'] },
+      gold: { vn: 'Vàng', en: 'Gold', perks: ['Tích 1 điểm cho mỗi 10.000₫', 'Ưu tiên làm thủ tục', 'Thêm 10kg hành lý'] },
+      platinum: { vn: 'Bạch Kim', en: 'Platinum', perks: ['Tích 1 điểm cho mỗi 10.000₫', 'Ưu tiên làm thủ tục', 'Thêm 10kg hành lý', 'Phòng chờ thương gia'] }
+    };
+    const GOLD_PTS = 5000, PLAT_PTS = 15000, PTS_PER_VND = 10000;
+    // Browser-preview copy of the DCAS account (flight_account.go); DCAS replies replace it.
+    function memberFor(points) {
+      if (points >= PLAT_PTS) return { tier: 'platinum', points };
+      if (points >= GOLD_PTS) return { tier: 'gold', points, next_tier: 'platinum', to_next: PLAT_PTS - points };
+      return { tier: 'silver', points, next_tier: 'gold', to_next: GOLD_PTS - points };
+    }
+    const LOCAL_BOOKINGS = [
+      { pnr: 'SL9X3C', flight: 'SL 225', from: 'SGN', to: 'HAN', date: '2026-11-20', dep: '11:15', arr: '13:20', fare: 'saver', seats: ['12A'], pax: 1, total: 1670000, status: 'upcoming' },
+      { pnr: 'SL4M8P', flight: 'SL 201', from: 'HAN', to: 'SGN', date: '2026-10-12', dep: '06:00', arr: '08:10', fare: 'saver', seats: ['9C'], pax: 1, total: 1479000, status: 'flown' }
+    ];
+    const MENU_SCREENS = ['home', 'history', 'ticket', 'member', 'support'];
     const STEPS = {
+      home: { n: 0, menu: true, pill: 'SkyLotus Air', pillEn: 'Menu' },
+      history: { n: 0, menu: true, pill: 'Vé của tôi', pillEn: 'My bookings' },
+      ticket: { n: 0, menu: true, pill: 'Vé của tôi', pillEn: 'Ticket' },
+      member: { n: 0, menu: true, pill: 'Hội viên', pillEn: 'Membership' },
+      support: { n: 0, menu: true, pill: 'Hỗ trợ', pillEn: 'Support' },
       search: { n: 1, vn: 'Tìm chuyến', en: 'Search', pill: 'Đang tìm chuyến', pillEn: 'Searching' },
       results: { n: 2, vn: 'Chọn chuyến', en: 'Choose flight', pill: 'Đang chọn chuyến', pillEn: 'Choosing flight' },
       seat: { n: 3, vn: 'Chọn ghế', en: 'Seat', pill: 'Đang chọn ghế', pillEn: 'Choosing seat' },
@@ -1252,7 +1413,8 @@
 
     function initialState() {
       return {
-        screen: 'search', minimized: false,
+        screen: 'home', minimized: false,
+        member: memberFor(4800), bookings: LOCAL_BOOKINGS, viewing: 0, supportBanner: null, pointsEarned: 0,
         flip: false, rot: 0, dateIdx: 3, pax: { a: 1, c: 0 },
         flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
         taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
@@ -1343,7 +1505,13 @@
       render();
     }
 
+    // Menu screens read the caller's account from DCAS (flight_account.go).
+    function requestProfile() {
+      sendAdcMessage({ action: 'profile' });
+    }
+
     function go(screen) {
+      if (screen === 'home' || screen === 'history' || screen === 'member') requestProfile();
       setState({ screen });
       document.getElementById('main').scrollTop = 0;
     }
@@ -1375,7 +1543,7 @@
       }).join('');
       return {
         main:
-          '<div><h1>Tìm chuyến bay</h1><div class="muted" style="font-size:13px;margin-top:2px">Search flights</div></div>' +
+          titleRow('home', 'Tìm chuyến bay', 'Search flights') +
           '<div class="route">' +
           '<button class="route-field tap"><span class="k">Từ · From</span><span class="v">' + AIRPORTS[from] + ' <span>' + from + '</span></span></button>' +
           '<div class="route-sep"></div>' +
@@ -1497,7 +1665,7 @@
       };
     }
 
-    function qrCells() {
+    function qrCells(pnr) {
       const finder = (x, y) => {
         for (const [ox, oy] of [[0, 0], [14, 0], [0, 14]]) {
           const dx = x - ox, dy = y - oy;
@@ -1507,7 +1675,7 @@
         return null;
       };
       let seed = 0;
-      for (const ch of state.pnr || '') seed = (seed * 31 + ch.charCodeAt(0)) % 997;
+      for (const ch of pnr || '') seed = (seed * 31 + ch.charCodeAt(0)) % 997;
       let html = '';
       for (let y = 0; y < 21; y++) {
         for (let x = 0; x < 21; x++) {
@@ -1520,37 +1688,133 @@
       return html;
     }
 
+    const dmy = iso => { const p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : '--'; };
+    const seatText = seats => seats.length === 1
+      ? seats[0] + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + SEAT_NAME[seats[0].slice(-1)] + '</span>'
+      : seats.length ? esc(seatList(seats)) : 'Xếp khi làm thủ tục';
+
+    // t: { pnr, flight, from, to, dep, arr, date (iso), fare, seats }
+    function ticketHtml(t) {
+      return '<article class="ticket"><div class="ticket-top">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+        '<div><div class="k">Mã đặt chỗ · PNR</div><div class="pnr tnum" id="pnr">' + esc(t.pnr) + '</div></div>' +
+        '<div style="text-align:right"><div class="k">Chuyến bay</div><div style="font-size:15px;font-weight:600">' + esc(t.flight) + '</div></div></div>' +
+        '<div class="legs"><div><div class="code">' + esc(t.from) + '</div><div class="k tnum" style="font-size:13px">' + esc(t.dep) + '</div></div>' +
+        '<div class="path"><span></span>' + ICONS.plane + '<span></span></div>' +
+        '<div style="text-align:right"><div class="code">' + esc(t.to) + '</div><div class="k tnum" style="font-size:13px">' + esc(t.arr) + '</div></div></div>' +
+        '<div class="ticket-grid">' +
+        '<div><div class="k">Hành khách</div><div class="v">' + esc(state.name.toUpperCase()) + '</div></div>' +
+        '<div><div class="k">Ngày · Date</div><div class="v tnum">' + dmy(t.date) + '</div></div>' +
+        '<div><div class="k">Ghế · Seat</div><div class="v">' + seatText(t.seats) + '</div></div>' +
+        '<div><div class="k">Hạng · Fare</div><div class="v">Economy ' + (t.fare === 'flex' ? 'Flex' : 'Saver') + '</div></div>' +
+        '</div></div><div class="ticket-cut"></div>' +
+        '<div class="ticket-bottom"><div class="qr" role="img" aria-label="Mã QR vé · Ticket QR code"><div class="qr-grid">' + qrCells(t.pnr) + '</div></div>' +
+        '<div>Xuất trình mã khi làm thủ tục.<br>Cửa ra tàu cập nhật trước giờ bay. <span style="color:#94A3B8">Gate TBD</span></div></div></article>';
+    }
+
     function screenConfirm() {
       const f = state.flight;
       const [from, to] = route();
-      const seat = state.seats.length === 1
-        ? state.seats[0] + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + SEAT_NAME[state.seats[0].slice(-1)] + '</span>'
-        : state.seats.length ? seatList(state.seats) : 'Xếp khi làm thủ tục';
+      const earned = state.pointsEarned
+        ? '<div class="banner" role="status">' + ICONS.star.replace('width="26" height="26"', 'width="18" height="18"') + '<div>+' + state.pointsEarned + ' điểm SkyLotus Club<div class="caption">Points earned</div></div></div>' : '';
       return {
         main:
           '<div class="check">' + ICONS.check + '</div>' +
           '<div role="status" style="text-align:center"><h1>Đặt vé thành công</h1><div class="muted" style="font-size:13px;margin-top:2px">Booking confirmed · vé đã gửi qua SMS</div></div>' +
-          '<article class="ticket"><div class="ticket-top">' +
-          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
-          '<div><div class="k">Mã đặt chỗ · PNR</div><div class="pnr tnum" id="pnr">' + esc(state.pnr) + '</div></div>' +
-          '<div style="text-align:right"><div class="k">Chuyến bay</div><div style="font-size:15px;font-weight:600">' + f.no + '</div></div></div>' +
-          '<div class="legs"><div><div class="code">' + from + '</div><div class="k tnum" style="font-size:13px">' + f.dep + '</div></div>' +
-          '<div class="path"><span></span>' + ICONS.plane + '<span></span></div>' +
-          '<div style="text-align:right"><div class="code">' + to + '</div><div class="k tnum" style="font-size:13px">' + f.arr + '</div></div></div>' +
-          '<div class="ticket-grid">' +
-          '<div><div class="k">Hành khách</div><div class="v">' + esc(state.name.toUpperCase()) + '</div></div>' +
-          '<div><div class="k">Ngày · Date</div><div class="v tnum">' + pad(DATES[state.dateIdx].d) + '/11/2026</div></div>' +
-          '<div><div class="k">Ghế · Seat</div><div class="v">' + seat + '</div></div>' +
-          '<div><div class="k">Hạng · Fare</div><div class="v">Economy ' + (state.fare === 'flex' ? 'Flex' : 'Saver') + '</div></div>' +
-          '</div></div><div class="ticket-cut"></div>' +
-          '<div class="ticket-bottom"><div class="qr" role="img" aria-label="Mã QR vé · Ticket QR code"><div class="qr-grid">' + qrCells() + '</div></div>' +
-          '<div>Xuất trình mã khi làm thủ tục.<br>Cửa ra tàu cập nhật trước giờ bay. <span style="color:#94A3B8">Gate TBD</span></div></div></article>',
+          earned +
+          ticketHtml({ pnr: state.pnr, flight: f.no, from, to, dep: f.dep, arr: f.arr, date: dateIso(), fare: state.fare, seats: state.seats }),
         mainClass: 'done',
         footer: '<button class="btn" data-act="done">Xong<span class="sub">· Done</span></button>'
       };
     }
 
-    const SCREENS = { search: screenSearch, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
+    // ---- menu screens
+    const chip = st => st === 'flown' ? '<span class="chip flown">Đã bay · Flown</span>' : '<span class="chip">Sắp bay · Upcoming</span>';
+    const tileBtn = (to, icon, t, sub) =>
+      '<button class="tile tap" data-act="go" data-to="' + to + '">' + ICONS[icon] + '<span><div class="t">' + t + '</div><div class="s">' + sub + '</div></span></button>';
+
+    function memberCard(m, withMeter) {
+      const tier = TIERS[m.tier] || TIERS.silver;
+      let meter = '';
+      if (withMeter && m.next_tier) {
+        const base = m.tier === 'gold' ? GOLD_PTS : 0, span = (m.tier === 'gold' ? PLAT_PTS : GOLD_PTS) - base;
+        const pct = Math.max(4, Math.min(100, Math.round((m.points - base) * 100 / span)));
+        meter = '<div class="meter" role="img" aria-label="' + pct + '%"><i style="width:' + pct + '%"></i></div>' +
+          '<div class="k" style="margin-top:6px">Còn ' + String(m.to_next).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' điểm để lên ' + TIERS[m.next_tier].vn + '</div>';
+      }
+      return '<div class="mcard ' + esc(m.tier) + '"><div class="k">SkyLotus Club · Hạng ' + tier.vn + ' · ' + tier.en + '</div>' +
+        '<div class="big tnum">' + String(m.points).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' <span style="font-size:14px;font-weight:400">điểm</span></div>' + meter + '</div>';
+    }
+
+    function screenHome() {
+      return {
+        main:
+          '<div><h1>Xin chào quý khách</h1><div class="muted" style="font-size:13px;margin-top:2px">Welcome to SkyLotus Air · bạn muốn làm gì?</div></div>' +
+          memberCard(state.member, false) +
+          '<div class="tiles">' +
+          tileBtn('search', 'plane', 'Đặt vé', 'Book a flight') +
+          tileBtn('history', 'history', 'Lịch sử đặt vé', 'My bookings') +
+          tileBtn('member', 'star', 'Hội viên', 'Membership') +
+          tileBtn('support', 'headset', 'Gọi hỗ trợ', 'Support') +
+          '</div>',
+        footer: ''
+      };
+    }
+
+    function screenHistory() {
+      const list = state.bookings.map((b, i) =>
+        '<button class="bk tap" data-act="ticket" data-i="' + i + '" aria-label="Vé ' + esc(b.pnr) + '">' +
+        '<div class="row"><span class="route-t">' + esc(b.from) + ' → ' + esc(b.to) + '</span>' + chip(b.status) + '</div>' +
+        '<div class="row muted" style="font-size:13px"><span>' + esc(b.flight) + ' · ' + dmy(b.date) + ' · ' + esc(b.dep) + '</span><span class="tnum">' + esc(b.pnr) + '</span></div>' +
+        '<div class="row" style="font-size:13px"><span class="muted">Ghế ' + esc(b.seats.join(', ') || '—') + ' · ' + b.pax + ' khách</span><b class="tnum">' + money(b.total) + '</b></div></button>').join('');
+      return {
+        main:
+          titleRow('home', 'Lịch sử đặt vé', 'My bookings') +
+          (list || '<div class="muted" style="text-align:center;padding:24px 0">Chưa có vé nào · No bookings yet</div>'),
+        footer: ''
+      };
+    }
+
+    function screenTicket() {
+      const b = state.bookings[state.viewing] || state.bookings[0];
+      if (!b) return screenHistory();
+      return {
+        main:
+          titleRow('history', 'Vé của tôi', 'Your ticket · ' + chip(b.status).replace(/<[^>]+>/g, '')) +
+          ticketHtml(b),
+        footer: ''
+      };
+    }
+
+    function screenMember() {
+      const m = state.member, tier = TIERS[m.tier] || TIERS.silver;
+      const earn = state.bookings.slice(0, 5).map(b =>
+        '<div class="earn"><span>' + esc(b.flight) + ' · ' + esc(b.from) + '→' + esc(b.to) + ' · ' + dmy(b.date) + '</span><b class="tnum">+' + Math.floor(b.total / PTS_PER_VND) + '</b></div>').join('');
+      return {
+        main:
+          titleRow('home', 'Hội viên SkyLotus Club', 'Membership') +
+          memberCard(m, true) +
+          '<div><div class="section-label" style="margin-bottom:10px">Quyền lợi hạng ' + tier.vn + ' <small>· ' + tier.en + ' benefits</small></div>' +
+          '<ul class="benefits">' + tier.perks.map(x => '<li>' + x + '</li>').join('') + '</ul></div>' +
+          '<div><div class="section-label" style="margin-bottom:4px">Điểm gần đây <small>· Recent points</small></div>' + earn + '</div>',
+        footer: ''
+      };
+    }
+
+    function screenSupport() {
+      return {
+        main:
+          titleRow('home', 'Hỗ trợ', 'Support') +
+          (state.supportBanner ? banner(state.supportBanner.vn, state.supportBanner.en) : '') +
+          '<div class="tiles" style="grid-template-columns:1fr">' +
+          '<button class="tile tap" data-act="support" data-topic="agent" style="min-height:84px">' + ICONS.headset + '<span><div class="t">Gặp tổng đài viên</div><div class="s">Talk to an agent · ngay trong cuộc gọi này</div></span></button>' +
+          '<button class="tile tap" data-act="support" data-topic="callback" style="min-height:84px">' + ICONS.phone + '<span><div class="t">Gọi lại cho tôi</div><div class="s">Call me back · trong 15 phút</div></span></button>' +
+          '</div>',
+        footer: ''
+      };
+    }
+
+    const SCREENS = { home: screenHome, history: screenHistory, ticket: screenTicket, member: screenMember, support: screenSupport, search: screenSearch, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
 
     // ------------------------------------------------------------ render
     function render() {
@@ -1558,15 +1822,15 @@
       document.getElementById('sheet').classList.toggle('hidden', state.minimized);
       document.getElementById('pill').classList.toggle('hidden', !state.minimized);
 
-      document.getElementById('progress').style.display = state.screen === 'confirm' ? 'none' : '';
+      document.getElementById('progress').style.display = (step.menu || state.screen === 'confirm') ? 'none' : '';
       document.getElementById('step-vn').textContent = 'Bước ' + step.n + '/4 · ' + step.vn;
       document.getElementById('step-en').textContent = step.en;
       document.querySelectorAll('#bars span').forEach((b, i) => b.classList.toggle('on', i < step.n));
 
-      document.getElementById('pill-title').textContent = step.pill + (state.screen === 'confirm' ? ' · ' + state.pnr : ' · ' + step.n + '/4');
+      document.getElementById('pill-title').textContent = step.pill + (step.menu ? '' : state.screen === 'confirm' ? ' · ' + state.pnr : ' · ' + step.n + '/4');
       document.getElementById('pill-sub').textContent = step.pillEn + ' · chạm để mở';
       document.querySelectorAll('#pill-bars i').forEach((b, i) => b.classList.toggle('on', i < step.n));
-      document.getElementById('pill').setAttribute('aria-label', 'Mở lại SkyLotus Air · ' + step.pill + ', bước ' + step.n + ' trên 4');
+      document.getElementById('pill').setAttribute('aria-label', 'Mở lại SkyLotus Air · ' + step.pill + (step.menu ? '' : ', bước ' + step.n + ' trên 4'));
 
       const view = SCREENS[state.screen]();
       const main = document.getElementById('main');
@@ -1649,9 +1913,25 @@
           }, LOCAL_CONFIRM_MS);
         }
       },
+      ticket: el => setState({ viewing: +el.dataset.i, screen: 'ticket' }),
+      support: el => {
+        const topic = el.dataset.topic;
+        sendAdcMessage({ action: 'support', topic });
+        if (topic === 'agent' && window.AndroidBridge && typeof window.AndroidBridge.playAgentAudio === 'function') window.AndroidBridge.playAgentAudio();
+        // Without DCAS (browser preview) acknowledge locally.
+        if (!hasBridge()) {
+          setState({
+            supportBanner: topic === 'agent'
+              ? { vn: 'Tổng đài viên sẽ hỗ trợ bạn ngay', en: 'An agent will assist you shortly' }
+              : { vn: 'Chúng tôi sẽ gọi lại cho bạn trong 15 phút', en: 'We will call you back within 15 minutes' }
+          });
+        }
+      },
       done: () => {
         clearTimeout(confirmTimer);
-        state = initialState();
+        // Keep what we know about the account; DCAS refreshes it when home opens.
+        state = Object.assign(initialState(), { member: state.member, bookings: state.bookings });
+        requestProfile();
         render();
       }
     };
@@ -1669,12 +1949,20 @@
       return p;
     }
 
-    function confirmBooking(pnr, total, tax) {
+    function confirmBooking(pnr, total, tax, member, earned) {
       clearTimeout(confirmTimer);
       state.booking = false;
       state.pnr = pnr;
       state.total = total;
       state.tax = tax;
+      // Show the new booking in the history right away; DCAS's profile reply replaces the list.
+      const [from, to] = route(), f = state.flight;
+      state.pointsEarned = typeof earned === 'number' ? earned : Math.floor(total / PTS_PER_VND);
+      state.member = member || memberFor(state.member.points + state.pointsEarned);
+      state.bookings = [{
+        pnr, flight: f.no, from, to, date: dateIso(), dep: f.dep, arr: f.arr, fare: state.fare,
+        seats: state.seats.slice(), pax: paxCount(), total, status: 'upcoming'
+      }].concat(state.bookings);
       go('confirm');
     }
 
@@ -1730,7 +2018,14 @@
         state.seatBanner = msg.message && state.agentSeats.length ? { vn: msg.message, en: msg.message_en || '' } : null;
         if (state.screen === 'seat') render();
       } else if (msg.action === 'confirm' && msg.status === 'confirmed' && state.booking) {
-        confirmBooking(msg.pnr || localPnr(), msg.total, msg.tax);
+        confirmBooking(msg.pnr || localPnr(), msg.total, msg.tax, msg.member, msg.points_earned);
+      } else if (msg.action === 'profile' && msg.member) {
+        state.member = msg.member;
+        state.bookings = Array.isArray(msg.bookings) ? msg.bookings : [];
+        if (state.screen === 'home' || state.screen === 'history' || state.screen === 'member') render();
+      } else if (msg.action === 'support' && msg.message) {
+        state.supportBanner = { vn: msg.message, en: msg.message_en || '' };
+        if (state.screen === 'support') render();
       }
     }
 
@@ -1746,6 +2041,7 @@
     }, 1000);
 
     render();
+    requestProfile();
   </script>
 </body>
 
