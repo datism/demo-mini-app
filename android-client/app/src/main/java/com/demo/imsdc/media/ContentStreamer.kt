@@ -115,7 +115,7 @@ class ContentStreamer(
     }
 
     private fun bind(port: Int): DatagramSocket = try {
-        DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(port)) }
+        DatagramSocket(null).apply { reuseAddress = true; sendBufferSize = 1024 * 1024; bind(InetSocketAddress(port)) }
     } catch (e: Exception) {
         Log.w(TAG, "Cannot bind $port (${e.message}), using any free port")
         DatagramSocket()

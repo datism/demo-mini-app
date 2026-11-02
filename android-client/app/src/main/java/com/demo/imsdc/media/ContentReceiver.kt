@@ -45,6 +45,7 @@ class ContentReceiver(
         audioSocket = bind(localAudioPort)
         threads += Thread({ guarded("keepalive", ::keepaliveLoop) }, "content-keepalive").also { it.start() }
         threads += Thread({ guarded("video", ::videoLoop) }, "content-rx-video").also { it.start() }
+        threads += Thread({ guarded("decode", ::decodeLoop) }, "content-rx-decode").also { it.start() }
         threads += Thread({ guarded("audio", ::audioLoop) }, "content-rx-audio").also { it.start() }
         Log.i(TAG, "Receiving shared content from MF $mfIp (video $mfVideoPort, audio $mfAudioPort)")
     }
@@ -69,7 +70,8 @@ class ContentReceiver(
     }
 
     private fun bind(port: Int): DatagramSocket = try {
-        DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(port)) }
+        // A large receive buffer: a keyframe of a phone video is hundreds of packets in one burst.
+        DatagramSocket(null).apply { reuseAddress = true; receiveBufferSize = 4 * 1024 * 1024; bind(InetSocketAddress(port)) }
     } catch (e: Exception) {
         Log.w(TAG, "Cannot bind $port (${e.message}), using any free port")
         DatagramSocket()
@@ -97,12 +99,20 @@ class ContentReceiver(
 
     private val startCode = byteArrayOf(0, 0, 0, 1)
 
+    /**
+     * Whole pictures from [videoLoop] to [decodeLoop]. Receiving never waits on the decoder, so the socket
+     * is always drained and a busy decoder no longer turns into packet loss (and a freeze until the next
+     * keyframe). If the decoder falls this far behind, the backlog is dropped and decoding restarts at
+     * the next keyframe, so the picture stays live instead of lagging further.
+     */
+    private val pictures = java.util.concurrent.LinkedBlockingQueue<ByteArray>(PICTURE_QUEUE)
+    @Volatile private var sps: ByteArray? = null
+    @Volatile private var pps: ByteArray? = null
+
     private fun videoLoop() {
         val socket = videoSocket ?: return
         val buf = ByteArray(2048)
         val frame = ByteArrayOutputStream()
-        var sps: ByteArray? = null
-        var pps: ByteArray? = null
         var lastSeq = -1
         var broken = false
         var sawKey = false
@@ -123,7 +133,10 @@ class ContentReceiver(
             val n = pkt.length
             if (n < 13 || (buf[1].toInt() and 0x7F) != 97) continue
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
-            if (lastSeq >= 0 && seq != ((lastSeq + 1) and 0xFFFF)) broken = true // lost packet: drop this picture
+            if (lastSeq >= 0 && seq != ((lastSeq + 1) and 0xFFFF)) { // lost packet: drop this picture
+                if (sawKey) Log.w(TAG, "Lost ${(seq - lastSeq - 1) and 0xFFFF} video packet(s) before seq $seq: waiting for a keyframe")
+                broken = true
+            }
             lastSeq = seq
             val marker = (buf[1].toInt() and 0x80) != 0
             val type = buf[12].toInt() and 0x1F
@@ -158,8 +171,38 @@ class ContentReceiver(
             if (broken) { broken = false; sawKey = false; continue } // lost packet: wait for the next keyframe
             if (keyframe) sawKey = true
             if (!sawKey) continue // decoding can only start at a keyframe
-            val d = codec ?: startDecoder(sps, pps) ?: continue
-            feed(d, picture)
+            if (!pictures.offer(picture)) {
+                Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
+                pictures.clear()
+                sawKey = keyframe
+                if (keyframe) pictures.offer(picture)
+            }
+        }
+    }
+
+    private fun decodeLoop() {
+        val info = MediaCodec.BufferInfo()
+        while (running) {
+            val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
+            val c = codec ?: (if (picture != null) startDecoder(sps, pps) else null)
+            if (c == null) continue
+            try {
+                if (picture != null) {
+                    val ii = c.dequeueInputBuffer(20_000)
+                    if (ii >= 0) {
+                        val ib = c.getInputBuffer(ii)!!
+                        ib.clear(); ib.put(picture)
+                        c.queueInputBuffer(ii, 0, picture.size, System.nanoTime() / 1000, 0)
+                    }
+                }
+                // Show every decoded picture as soon as it is ready, not when the next one arrives.
+                while (true) {
+                    val oi = c.dequeueOutputBuffer(info, 0)
+                    if (oi >= 0) c.releaseOutputBuffer(oi, true) else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                }
+            } catch (e: Exception) {
+                if (running) Log.w(TAG, "Decode error: ${e.message}")
+            }
         }
     }
 
@@ -178,24 +221,6 @@ class ContentReceiver(
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start video decoder: ${e.message}", e)
             null
-        }
-    }
-
-    private fun feed(c: MediaCodec, picture: ByteArray) {
-        try {
-            val ii = c.dequeueInputBuffer(10_000)
-            if (ii >= 0) {
-                val ib = c.getInputBuffer(ii)!!
-                ib.clear(); ib.put(picture)
-                c.queueInputBuffer(ii, 0, picture.size, System.nanoTime() / 1000, 0)
-            }
-            val info = MediaCodec.BufferInfo()
-            while (true) {
-                val oi = c.dequeueOutputBuffer(info, 0)
-                if (oi >= 0) c.releaseOutputBuffer(oi, true) else break
-            }
-        } catch (e: Exception) {
-            if (running) Log.w(TAG, "Decode error: ${e.message}")
         }
     }
 
@@ -222,5 +247,10 @@ class ContentReceiver(
             val pcm = ShortArray(n - 12) { RtpMediaManager.alawToLinear(buf[12 + it]) }
             t.write(pcm, 0, pcm.size)
         }
+    }
+
+    companion object {
+        /** About a second of video at 30 fps. */
+        private const val PICTURE_QUEUE = 30
     }
 }
