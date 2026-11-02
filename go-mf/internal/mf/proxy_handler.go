@@ -181,37 +181,32 @@ func (m *MediaFunction) initSessionAdcPC(session *SessionInfo, isAnswerer bool) 
 
 	session.AdcPC = adcPC
 
-	adcID := uint16(1000)
+	// Same streams as every other ADC context: 1000 app, 1001 emoji, 1002 content-share (photo bytes).
 	adcNegotiated := true
-	protoWhiteboard := "whiteboard"
-	adcChannel, err := adcPC.CreateDataChannel("app-dc", &webrtc.DataChannelInit{
-		ID:         &adcID,
-		Negotiated: &adcNegotiated,
-		Protocol:   &protoWhiteboard,
-	})
-	if err != nil {
-		adcPC.Close()
-		return err
+	var channels []*webrtc.DataChannel
+	for _, id := range adcStreamIDs {
+		sid := id
+		label, protocol := adcStreamSpec(sid)
+		dc, err := adcPC.CreateDataChannel(label, &webrtc.DataChannelInit{
+			ID:         &sid,
+			Negotiated: &adcNegotiated,
+			Protocol:   &protocol,
+		})
+		if err != nil {
+			adcPC.Close()
+			return err
+		}
+		channels = append(channels, dc)
 	}
 
-	adcID2 := uint16(1001)
-	protoEmoji := "emoji"
-	adcChannel2, err := adcPC.CreateDataChannel("app-dc-2", &webrtc.DataChannelInit{
-		ID:         &adcID2,
-		Negotiated: &adcNegotiated,
-		Protocol:   &protoEmoji,
-	})
-	if err != nil {
-		adcPC.Close()
-		return err
-	}
-
-	session.ADC = adcChannel
-	session.ADC2 = adcChannel2
+	session.ADC = channels[0]
+	session.ADC2 = channels[1]
+	session.ADC3 = channels[2]
 
 	m.registerAdcHandlers(session)
-	m.handleADC(session, adcChannel)
-	m.handleADC(session, adcChannel2)
+	for _, dc := range channels {
+		m.handleADC(session, dc)
+	}
 
 	adcPC.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Printf("[MF] Session %s AdcPC ICE state: %s", session.ID, state.String())
@@ -272,6 +267,11 @@ func (m *MediaFunction) registerAdcHandlers(session *SessionInfo) {
 		} else if id == 1001 || label == "app-dc-2" {
 			session.mu.Lock()
 			session.ADC2 = dc
+			session.mu.Unlock()
+			m.handleADC(session, dc)
+		} else if id == 1002 || label == "app-dc-3" {
+			session.mu.Lock()
+			session.ADC3 = dc
 			session.mu.Unlock()
 			m.handleADC(session, dc)
 		}
