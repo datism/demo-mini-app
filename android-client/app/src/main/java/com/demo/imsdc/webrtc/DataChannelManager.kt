@@ -467,14 +467,18 @@ class DataChannelManager(
     /** Receives photo frames on the content-share channel (stream 1002) and hands them to the transport. */
     fun setupShareChannel(ch: DataChannel?) {
         ch ?: return
+        Log.i(TAG, "Share channel observer attached, state=${ch.state()}")
         ch.registerObserver(object : DataChannel.Observer {
             override fun onStateChange() { Log.i(TAG, "Share channel state: ${ch.state()}") }
+            private var rx = 0
             override fun onMessage(buffer: DataChannel.Buffer?) {
                 try {
                     buffer ?: return
                     val bb = buffer.data
                     val bytes = ByteArray(bb.remaining())
                     bb.get(bytes)
+                    rx++
+                    if (rx == 1 || rx % 10 == 0) Log.i(TAG, "Share channel received frame #$rx (${bytes.size} bytes)")
                     if (photoShare?.onIncomingBytes(bytes) != true) {
                         // Control text on the share channel is not expected; ignore it rather than guess.
                         Log.w(TAG, "Share channel: ignoring ${bytes.size} bytes that are not a photo frame")
