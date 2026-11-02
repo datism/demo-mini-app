@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -83,12 +84,11 @@ func main() {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			
-			// Calculate ETag (mock simple ETag using file size or static string, but since this is mock server, we can use a hash)
-			// For simplicity and speed in this demo, let's just use the length and a hardcoded version string, 
-			// or an MD5 of the first few bytes. Wait, let's just use `fmt.Sprintf("W/\"%d\"", len(zipBytes))`
-			etag := fmt.Sprintf(`W/"%d"`, len(zipBytes))
-			
+
+			// ETag from the package content: an edit that keeps the ZIP the same size must still reach the phones.
+			sum := sha256.Sum256(zipBytes)
+			etag := fmt.Sprintf(`"%x"`, sum[:12])
+
 			ifNoneMatch := r.Header.Get("If-None-Match")
 			if ifNoneMatch == etag {
 				log.Printf("[DCAR] ETag matched (%s), returning 304 Not Modified for AppID: %s", etag, appId)
@@ -125,7 +125,7 @@ func main() {
 				meta := map[string]interface{}{
 					"appId": appId, "appName": "TuYaApp", "version": "1.0.9",
 					"connectionPolicy": "P2P",
-					"qosHint": "latency=100;loss=0.01",
+					"qosHint":          "latency=100;loss=0.01",
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(meta)
@@ -134,7 +134,7 @@ func main() {
 				meta := map[string]interface{}{
 					"appId": appId, "appName": "Operator Menu", "version": "1.0.0",
 					"connectionPolicy": "P2A",
-					"qosHint": "latency=200;loss=0.05",
+					"qosHint":          "latency=200;loss=0.05",
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(meta)
@@ -145,7 +145,7 @@ func main() {
 					"appId": appId, "appName": "IMS DC Mini-App Demo", "version": "1.0.0",
 					"provider": "GSMA", "spec": "GSMA TS.66 Release 26",
 					"connectionPolicy": "P2A",
-					"qosHint": "latency=50;loss=0.005",
+					"qosHint":          "latency=50;loss=0.005",
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(meta)
@@ -165,8 +165,6 @@ func main() {
 		http.Error(w, "Not Found", http.StatusNotFound)
 	})
 
-
-
 	// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Route: /static/ Ã¢â‚¬â€ Generic static file server Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 	// Cho phÃƒÂ©p serve bÃ¡ÂºÂ¥t kÃ¡Â»Â³ file nÃƒÂ o trong thÃ†Â° mÃ¡Â»Â¥c ./static/ vÃ¡Â»â€ºi CORS headers
 	staticFs := http.FileServer(http.Dir("./static/"))
@@ -181,12 +179,8 @@ func main() {
 		staticFs.ServeHTTP(w, r)
 	})))
 
-
-
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Services.Dcar.Port)
 	log.Printf("[DCAR] Serving static assets on HTTP/2 http://%s", addr)
-	
-
 
 	h2s := &http2.Server{}
 	if err := http.ListenAndServe(addr, h2c.NewHandler(imsas.HEPMiddleware(mux), h2s)); err != nil {
