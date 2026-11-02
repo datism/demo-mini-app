@@ -249,6 +249,41 @@
             android:orientation="horizontal"
             app:layout_constraintGuide_percent="0.82" />
 
+        <!-- Full-screen mode: the only call UI left on screen. A tap shows the call buttons for a few seconds. -->
+        <LinearLayout
+            android:id="@+id/layout_call_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="12dp"
+            android:background="@drawable/bg_call_pill_fullscreen"
+            android:elevation="8dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Hiện nút cuộc gọi"
+            android:visibility="gone"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
+
+            <View
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/dot_call_live" />
+
+            <TextView
+                android:id="@+id/tv_pill_timer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:text="00:00"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12.5sp"
+                android:fontFamily="sans-serif-medium" />
+        </LinearLayout>
+
         <!-- Exit Mini-App / Return to Menu: small frosted pill on the top bar -->
         <Button
             android:id="@+id/btn_exit_miniapp"

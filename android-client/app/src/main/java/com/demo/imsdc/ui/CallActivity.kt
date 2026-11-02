@@ -778,6 +778,11 @@ class CallActivity : AppCompatActivity() {
         val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
         var isDragging = false
 
+        // A tap (not a drag) on my camera tile shrinks it or brings it back to full size.
+        binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
+        // Full screen: the call pill shows (or hides) the call buttons.
+        binding.layoutCallPill.setOnClickListener { miniAppManager.toggleCallControls() }
+
         binding.localVideoView.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
@@ -1300,6 +1305,8 @@ class CallActivity : AppCompatActivity() {
             override fun pauseVideo(paused: Boolean) = miniAppManager.pauseVideo(paused)
             override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
+            override fun setFullScreen(on: Boolean) = miniAppManager.setFullScreen(on)
+            override fun showCallControls() = miniAppManager.showCallControls()
         }
 
         // Callback: PeerConnection connected ? m? DataChannels v� kh?i d?ng Mini-app
@@ -1323,6 +1330,7 @@ class CallActivity : AppCompatActivity() {
                 val minutes = elapsedSeconds / 60
                 val seconds = elapsedSeconds % 60
                 binding.tvCallTimer.text = String.format(" · %02d:%02d", minutes, seconds)
+                binding.tvPillTimer.text = String.format("%02d:%02d", minutes, seconds)
                 kotlinx.coroutines.delay(1000)
                 elapsedSeconds++
             }

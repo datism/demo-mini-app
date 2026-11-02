@@ -288,6 +288,7 @@ class MiniAppManager(val activity: CallActivity) {
                 if (activity.binding.btnExitMiniapp.visibility == View.VISIBLE) {
                     activity.binding.btnExitMiniapp.bringToFront()
                 }
+                raiseFullScreenOverlays()
                 activity.binding.webviewMiniapp.requestFocus()
 
                 // Fix race condition: dataChannelNotify may have fired before JS was loaded.
@@ -341,22 +342,38 @@ class MiniAppManager(val activity: CallActivity) {
     private fun applyWebViewBounds(appId: String) {
         val b = activity.binding
         val full = appId == "flight-booking"
+        val fullScreen = isFullScreen(appId)
         val lp = b.webviewMiniapp.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+        val parent = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
         val videoTiles = appId == "caro"
-        applyVideoTiles(videoTiles)
+        applyVideoTiles(videoTiles, fullScreen)
+        lp.bottomToBottom = unset
+        lp.bottomMargin = 0
         if (videoTiles) {
-            // Caro: both faces side by side at the top, the game in the rest of the screen above the controls.
+            // Caro: both faces side by side at the top, the game in the rest of the screen.
             lp.topToTop = unset
             lp.topToBottom = b.localVideoView.id
             lp.topMargin = dp(TILE_TO_GAME_GAP_DP)
-            lp.bottomToTop = b.layoutBottomControls.id
-            lp.bottomToBottom = unset
+            if (fullScreen) {
+                // Full screen: the game runs to the bottom, above the call pill.
+                lp.bottomToTop = unset
+                lp.bottomToBottom = parent
+                lp.bottomMargin = dp(CARO_PILL_SPACE_DP)
+            } else {
+                lp.bottomToTop = b.layoutBottomControls.id
+            }
+        } else if (fullScreen) {
+            lp.topToBottom = unset
+            lp.topToTop = parent
+            lp.topMargin = 0
+            lp.bottomToTop = unset
+            lp.bottomToBottom = parent
         } else if (full) {
             // Leave room for the status bar, and for the exit button when it is shown.
             val topDp = if (CallActivity.hotlineApp(activity.remoteUser) != null) 40 else 72
             lp.topToBottom = unset
-            lp.topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp.topToTop = parent
             lp.topMargin = (topDp * activity.resources.displayMetrics.density).toInt()
             lp.bottomToTop = b.layoutBottomControls.id
         } else {
@@ -366,56 +383,79 @@ class MiniAppManager(val activity: CallActivity) {
             lp.bottomToTop = b.guidelineWebviewBottom.id
         }
         b.webviewMiniapp.layoutParams = lp
-        b.layoutTopBar.visibility = if (full) View.INVISIBLE else View.VISIBLE
+        b.layoutTopBar.visibility = if (full || fullScreen) View.INVISIBLE else View.VISIBLE
+        applyFullScreenChrome(appId, fullScreen)
     }
 
     private val TILE_GAP_DP = 6
     private val TILE_TO_GAME_GAP_DP = 12
     // Each tile's share of the screen width; the pair is centred. Keeps the board large on S24-class phones.
     private val TILE_WIDTH_FRACTION = 0.34f
+    /** Full-screen Caro: tiles start this far from the top of the screen. */
+    private val FULLSCREEN_TILE_TOP_DP = 12
+    /** Full-screen Caro: room under the board for the call pill. */
+    private val CARO_PILL_SPACE_DP = 52
+    /** Full screen: my camera sits bottom-right, above the call buttons and the page's own bottom controls. */
+    private val FULLSCREEN_TILE_BOTTOM_DP = 132
+    /** How long the call buttons stay up after a tap in full screen. */
+    private val CALL_CONTROLS_SHOW_MS = 3500L
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
     // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
     // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
-    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left.
-    private fun applyVideoTiles(enabled: Boolean) {
+    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left (bottom-right
+    // in full screen), or 48x64dp when the user shrank it.
+    private fun applyVideoTiles(enabled: Boolean, fullScreen: Boolean = false) {
         val b = activity.binding
         val local = b.localVideoView
         val remote = b.remoteVideoView
         val localLp = local.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val remoteLp = remote.layoutParams as android.widget.FrameLayout.LayoutParams
+        val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+        val parent = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
 
         // Undo any drag of my camera box (the drag handler moves it with translation).
         local.translationX = 0f
         local.translationY = 0f
+
+        // Anchor: below the top bar on the left (default), top of the screen (full-screen Caro),
+        // or bottom-right (full screen, other apps).
+        val bottomRight = fullScreen && !enabled
+        localLp.topToBottom = if (fullScreen) unset else b.layoutTopBar.id
+        localLp.topToTop = if (fullScreen && enabled) parent else unset
+        localLp.startToStart = if (bottomRight) unset else parent
+        localLp.endToEnd = if (bottomRight) parent else unset
+        localLp.bottomToBottom = if (bottomRight) parent else unset
 
         if (enabled) {
             val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
             val tileW = (screenW * TILE_WIDTH_FRACTION).toInt()
             val tileH = tileW * 4 / 3
             val sideMargin = (screenW - 2 * tileW - dp(TILE_GAP_DP)) / 2
+            val topMargin = if (fullScreen) dp(FULLSCREEN_TILE_TOP_DP) else dp(TILE_GAP_DP)
             localLp.width = tileW
             localLp.height = tileH
-            localLp.setMargins(sideMargin, dp(TILE_GAP_DP), 0, 0)
+            localLp.setMargins(sideMargin, topMargin, 0, 0)
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
 
-            // The remote view lives in a full-screen FrameLayout, so place it by margins: below the
-            // top bar, level with my tile, to its right.
+            // The remote view lives in a full-screen FrameLayout, so place it by margins: level with my
+            // tile, to its right (below the top bar, or at the top of the screen in full screen).
             fun placeRemote() {
                 remoteLp.width = tileW
                 remoteLp.height = tileH
                 remoteLp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
                 remoteLp.leftMargin = sideMargin + tileW + dp(TILE_GAP_DP)
-                remoteLp.topMargin = b.layoutTopBar.bottom + dp(TILE_GAP_DP)
+                remoteLp.topMargin = if (fullScreen) topMargin else b.layoutTopBar.bottom + dp(TILE_GAP_DP)
                 remote.layoutParams = remoteLp
             }
-            if (b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
+            if (fullScreen || b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
         } else {
-            localLp.width = dp(90)
-            localLp.height = dp(125)
-            localLp.setMargins(dp(16), dp(16), dp(16), dp(16))
+            localLp.width = dp(if (cameraTileSmall) 48 else 90)
+            localLp.height = dp(if (cameraTileSmall) 64 else 125)
+            if (bottomRight) localLp.setMargins(dp(16), dp(16), dp(16), dp(FULLSCREEN_TILE_BOTTOM_DP))
+            else localLp.setMargins(dp(16), dp(16), dp(16), dp(16))
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
 
@@ -426,6 +466,114 @@ class MiniAppManager(val activity: CallActivity) {
             remoteLp.topMargin = 0
             remote.layoutParams = remoteLp
         }
+    }
+
+    // ───────────────────────── Full screen ─────────────────────────
+    // Caro is always full screen; Content Sharing asks for it while its photo viewer or video is showing.
+    // Full screen hides the call bar, the call buttons, the exit button and Android's status and navigation
+    // bars, and leaves a small call pill (green dot + timer). A tap on the pill, or the page calling
+    // showCallControls(), brings the call buttons back for a few seconds. My camera stays on screen.
+
+    /** The page currently on screen asked for full screen (reset whenever another page is launched). */
+    @Volatile private var fullScreenRequested = false
+    /** The user shrank the camera tile; kept for the rest of the call. */
+    private var cameraTileSmall = false
+    private var callControlsShown = false
+    private val hideCallControls = Runnable { setCallControlsShown(false) }
+
+    private fun isFullScreen(appId: String): Boolean =
+        CallActivity.hotlineApp(activity.remoteUser) == null &&
+            (appId == "caro" || (appId == SHARE_APP && fullScreenRequested))
+
+    private fun exitButtonWanted(appId: String): Boolean =
+        !(appId == "smart-menu" || appId == CallActivity.HOME_APP || appId == "operator-menu" ||
+            CallActivity.hotlineApp(activity.remoteUser) != null)
+
+    /** Page: enter (true) or leave (false) full screen. Only the Content Sharing page asks. */
+    fun setFullScreen(on: Boolean) {
+        activity.runOnUiThread {
+            if (activity.currentAppId != SHARE_APP || fullScreenRequested == on) return@runOnUiThread
+            fullScreenRequested = on
+            applyWebViewBounds(activity.currentAppId)
+        }
+    }
+
+    /** Page or call pill: show the call buttons for a few seconds (full screen only). */
+    fun showCallControls() {
+        activity.runOnUiThread { if (isFullScreen(activity.currentAppId)) setCallControlsShown(true) }
+    }
+
+    /** Call pill: show the call buttons, or hide them if they are up. */
+    fun toggleCallControls() {
+        if (!isFullScreen(activity.currentAppId)) return
+        setCallControlsShown(!callControlsShown)
+    }
+
+    /** Tap on my camera tile (not dragged): switch between the normal and the small size. Caro keeps its tiles. */
+    fun onCameraTileTapped() {
+        if (activity.currentAppId == "caro") return
+        cameraTileSmall = !cameraTileSmall
+        val local = activity.binding.localVideoView
+        val lp = local.layoutParams
+        lp.width = dp(if (cameraTileSmall) 48 else 90)
+        lp.height = dp(if (cameraTileSmall) 64 else 125)
+        local.layoutParams = lp
+    }
+
+    private fun applyFullScreenChrome(appId: String, on: Boolean) {
+        val b = activity.binding
+        val insets = androidx.core.view.WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        if (on) {
+            insets.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insets.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            // Caro has its tiles at the top: the pill goes under the board instead.
+            val pillLp = b.layoutCallPill.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+            val parent = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            if (appId == "caro") {
+                pillLp.topToTop = unset; pillLp.bottomToBottom = parent; pillLp.endToEnd = parent
+                pillLp.setMargins(0, 0, 0, dp(12))
+            } else {
+                pillLp.topToTop = parent; pillLp.bottomToBottom = unset; pillLp.endToEnd = unset
+                pillLp.setMargins(dp(16), dp(12), 0, 0)
+            }
+            b.layoutCallPill.layoutParams = pillLp
+            setCallControlsShown(false)
+        } else {
+            insets.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            b.layoutBottomControls.removeCallbacks(hideCallControls)
+            callControlsShown = false
+            b.layoutCallPill.visibility = View.GONE
+            b.layoutBottomControls.visibility = View.VISIBLE
+            b.btnExitMiniapp.visibility = if (exitButtonWanted(appId)) View.VISIBLE else View.GONE
+        }
+    }
+
+    /**
+     * Re-applies the full-screen state after code that raises the WebView, the top bar or the exit button
+     * (page launch, page loaded): those would otherwise cover the pill or show the windowed chrome again.
+     */
+    private fun raiseFullScreenOverlays() {
+        if (!isFullScreen(activity.currentAppId)) return
+        setCallControlsShown(callControlsShown)
+    }
+
+    private fun setCallControlsShown(shown: Boolean) {
+        val b = activity.binding
+        b.layoutBottomControls.removeCallbacks(hideCallControls)
+        if (!isFullScreen(activity.currentAppId)) return
+        callControlsShown = shown
+        b.layoutBottomControls.visibility = if (shown) View.VISIBLE else View.GONE
+        b.btnExitMiniapp.visibility = if (shown && exitButtonWanted(activity.currentAppId)) View.VISIBLE else View.GONE
+        b.layoutCallPill.visibility = if (shown) View.GONE else View.VISIBLE
+        if (shown) {
+            b.layoutBottomControls.bringToFront()
+            b.btnExitMiniapp.bringToFront()
+            b.layoutBottomControls.postDelayed(hideCallControls, CALL_CONTROLS_SHOW_MS)
+        } else {
+            b.layoutCallPill.bringToFront()
+        }
+        b.localVideoView.bringToFront()
     }
 
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {
@@ -453,6 +601,7 @@ class MiniAppManager(val activity: CallActivity) {
             // A hotline app lives on the Home slot (mid 3), so its traffic is on the Home channel.
             activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu" || hotlineApp != null)
             Log.i(TAG, "launchMiniApp targetId=$targetId")
+            fullScreenRequested = false // a new page starts windowed; Content Sharing asks again
             applyWebViewBounds(targetId)
 
             if (targetId == "operator-menu") {
@@ -520,6 +669,7 @@ class MiniAppManager(val activity: CallActivity) {
             }
             activity.binding.layoutTopBar.bringToFront()
             activity.binding.btnExitMiniapp.bringToFront()
+            raiseFullScreenOverlays()
 
             // 1. Gửi tin nhắn điều khiển P2P qua ADC (Stream 1000) để bảo đầu kia mở ứng dụng
             if (sendRemoteTrigger) {
