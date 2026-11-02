@@ -364,9 +364,12 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 	callID := msgCallID
+	reInviteCancel := ok && isReInviteCancel(session, msg)
 	if ok && session != nil {
 		callID = session.OrigCallID
-		delete(b.sessions, callID)
+		if !reInviteCancel {
+			delete(b.sessions, callID)
+		}
 	}
 	b.mu.Unlock()
 
@@ -450,9 +453,12 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 	callID := msgCallID
+	reInviteCancel := ok && isReInviteCancel(session, msg)
 	if ok && session != nil {
 		callID = session.OrigCallID
-		delete(b.sessions, callID)
+		if !reInviteCancel {
+			delete(b.sessions, callID)
+		}
 	}
 	b.mu.Unlock()
 
@@ -465,6 +471,21 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	}
 	resp := b.BuildSIPResponse(msg, 200, "OK", headers, "")
 	b.sendUDP(resp, remoteAddr)
+
+	// CANCEL of a pending re-INVITE (e.g. a content-share request withdrawn by
+	// its sender): forward it and keep the call, its MF/DCSF state and the App
+	// slot as they were. The peer's 487 for the re-INVITE comes back through
+	// handleErrorResponse, which rolls back any half-open App slot.
+	if reInviteCancel {
+		log.Printf("[IMS-AS] CANCEL targets a pending re-INVITE of call %s; keeping the call", callID)
+		targetCallID := session.TermCallID
+		if !isCaller {
+			targetCallID = session.OrigCallID
+		}
+		cancelReq := b.BuildSIPRequest("CANCEL", msg.RURI, msg, map[string]string{"Call-ID": targetCallID}, "")
+		b.forwardToSCSCF(cancelReq)
+		return
+	}
 
 	if ok && session != nil && session.IsPlayingAnnouncement {
 		log.Printf("[IMS-AS] User cancelled call %s during announcement playback", callID)

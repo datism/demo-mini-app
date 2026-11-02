@@ -49,3 +49,20 @@ func adcParentID(id string) string {
 	}
 	return strings.TrimSuffix(id, "-adc")
 }
+
+// adcStreamIDs are the SCTP streams the MF opens (negotiated) on every ADC
+// context: 1000 the app channel, 1001 the second app channel (emoji), 1002 the
+// content-share channel the phones open on demand for photo transfer.
+var adcStreamIDs = []uint16{1000, 1001, 1002}
+
+// adcStreamSpec returns the data-channel label and sub-protocol of an ADC stream.
+func adcStreamSpec(sid uint16) (label, protocol string) {
+	switch sid {
+	case 1000:
+		return "app-dc", "whiteboard"
+	case 1001:
+		return "app-dc-2", "emoji"
+	default:
+		return "app-dc-3", "content-share"
+	}
+}

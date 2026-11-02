@@ -50,6 +50,7 @@ type SessionInfo struct {
 	BDC  *webrtc.DataChannel // Bootstrap DC - Stream ID 10
 	ADC  *webrtc.DataChannel // Application DC - Stream ID 1000
 	ADC2 *webrtc.DataChannel // Application DC - Stream ID 1001
+	ADC3 *webrtc.DataChannel // Content-share DC - Stream ID 1002 (photos, relayed P2P)
 
 	// TCP connections to DCAS (MDC2 interface via plain TCP per TS 29.176) mapped by stream ID
 	tcpConns map[uint16]net.Conn
@@ -468,7 +469,7 @@ func (m *MediaFunction) AllocateSession(userID, callID string, isCore bool, forc
 	isADC := isAdcContext(callID)
 	var bdcStreams []uint16
 	if isADC {
-		bdcStreams = []uint16{1000, 1001}
+		bdcStreams = adcStreamIDs
 	} else {
 		bdcStreams = []uint16{0, 10, 100, 110}
 	}
@@ -479,13 +480,7 @@ func (m *MediaFunction) AllocateSession(userID, callID string, isCore bool, forc
 		var protocol string
 		var label string
 		if isADC {
-			if sid == 1000 {
-				protocol = "whiteboard"
-				label = "app-dc"
-			} else {
-				protocol = "emoji"
-				label = "app-dc-2"
-			}
+			label, protocol = adcStreamSpec(sid)
 		} else {
 			protocol = "http"
 			label = fmt.Sprintf("bdc-%d", sid)
@@ -511,6 +506,9 @@ func (m *MediaFunction) AllocateSession(userID, callID string, isCore bool, forc
 		}
 		if len(bdcChannels) > 1 {
 			session.ADC2 = bdcChannels[1]
+		}
+		if len(bdcChannels) > 2 {
+			session.ADC3 = bdcChannels[2]
 		}
 	} else {
 		if len(bdcChannels) > 0 {
@@ -733,7 +731,7 @@ func (m *MediaFunction) AllocateAnswererSession(userID, callID, sdpOffer string,
 	isADC := isAdcContext(callID)
 	var bdcStreams []uint16
 	if isADC {
-		bdcStreams = []uint16{1000, 1001}
+		bdcStreams = adcStreamIDs
 	} else {
 		bdcStreams = []uint16{0, 10, 100, 110}
 	}
@@ -744,13 +742,7 @@ func (m *MediaFunction) AllocateAnswererSession(userID, callID, sdpOffer string,
 		var protocol string
 		var label string
 		if isADC {
-			if sid == 1000 {
-				protocol = "whiteboard"
-				label = "app-dc"
-			} else {
-				protocol = "emoji"
-				label = "app-dc-2"
-			}
+			label, protocol = adcStreamSpec(sid)
 		} else {
 			protocol = "http"
 			label = fmt.Sprintf("bdc-%d", sid)
@@ -776,6 +768,9 @@ func (m *MediaFunction) AllocateAnswererSession(userID, callID, sdpOffer string,
 		}
 		if len(bdcChannels) > 1 {
 			session.ADC2 = bdcChannels[1]
+		}
+		if len(bdcChannels) > 2 {
+			session.ADC3 = bdcChannels[2]
 		}
 	} else {
 		if len(bdcChannels) > 0 {
@@ -1524,7 +1519,9 @@ func (m *MediaFunction) handleADC(session *SessionInfo, dc *webrtc.DataChannel) 
 			if peerSession != nil {
 				var peerADC *webrtc.DataChannel
 				peerSession.mu.Lock()
-				if chanID == 1001 && peerSession.ADC2 != nil {
+				if chanID == 1002 && peerSession.ADC3 != nil {
+					peerADC = peerSession.ADC3
+				} else if chanID == 1001 && peerSession.ADC2 != nil {
 					peerADC = peerSession.ADC2
 				} else if peerSession.ADC != nil {
 					peerADC = peerSession.ADC
@@ -1625,6 +1622,8 @@ func (m *MediaFunction) handleADC(session *SessionInfo, dc *webrtc.DataChannel) 
 			session.ADC = nil
 		} else if chanID == 1001 {
 			session.ADC2 = nil
+		} else if chanID == 1002 {
+			session.ADC3 = nil
 		}
 		session.mu.Unlock()
 	})

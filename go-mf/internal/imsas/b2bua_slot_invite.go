@@ -354,11 +354,31 @@ func setAppLinePort(sdp string, port int) string {
 // in-dialog re-INVITE of an answered call rather than the initial INVITE.
 // Re-INVITE detection mirrors handle200OKInvite.
 func isReInviteFailure(session *CallSession, msg *SIPMessage) bool {
-	if session == nil || !msg.IsResponse || msg.StatusCode < 300 || !session.TermAnswered {
+	if session == nil || !msg.IsResponse || msg.StatusCode < 300 {
 		return false
 	}
-	cseq, method := msg.GetCSeq()
-	if method != "INVITE" {
+	return isReInviteTransaction(session, msg, "INVITE")
+}
+
+// isReInviteCancel reports whether a CANCEL targets a pending in-dialog
+// re-INVITE of an answered call. Such a CANCEL withdraws only the re-INVITE
+// (the peer answers it with 487); the call itself stays up.
+func isReInviteCancel(session *CallSession, msg *SIPMessage) bool {
+	if session == nil || msg.IsResponse {
+		return false
+	}
+	return isReInviteTransaction(session, msg, "CANCEL")
+}
+
+// isReInviteTransaction tells an in-dialog re-INVITE transaction (or its CANCEL)
+// from the initial INVITE by its CSeq number, for both caller- and
+// callee-initiated re-INVITEs.
+func isReInviteTransaction(session *CallSession, msg *SIPMessage, method string) bool {
+	if !session.TermAnswered {
+		return false
+	}
+	cseq, m := msg.GetCSeq()
+	if m != method {
 		return false
 	}
 	calleeInitiated := !strings.HasPrefix(msg.GetHeader("Call-ID"), "b2b_") &&

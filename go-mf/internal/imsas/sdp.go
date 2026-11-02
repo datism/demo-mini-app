@@ -73,6 +73,27 @@ func shouldDiscardLine(line string) bool {
 	return false
 }
 
+// contentShareBlocks reports which m=application blocks (1-based, in order) of
+// an SDP carry the content-share stream (a=dcmap:1002). RewriteSDP drops every
+// a=dcmap line and re-emits only stream 1000, so the share stream is detected
+// on the original SDP and written back for the App block.
+func contentShareBlocks(sdp string) map[int]bool {
+	blocks := map[int]bool{}
+	n := 0
+	for _, line := range strings.Split(sdp, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "m=application "):
+			n++
+		case n > 0 && strings.HasPrefix(t, "a=dcmap:1002"):
+			blocks[n] = true
+		}
+	}
+	return blocks
+}
+
+const contentShareDcmap = `a=dcmap:1002 subprotocol="content-share"`
+
 func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) string {
 	// MF runs inside Kind cluster (e.g. 172.19.0.2) which is unreachable from
 	// physical S24 phones on the WiFi LAN. The ims-udp-relay container on the
@@ -89,6 +110,7 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 	setupRole := mfInfo.SetupRole
 	adcSetupRole := mfInfo.AdcSetupRole
 
+	shareBlocks := contentShareBlocks(origSDP)
 	appCount := 0
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -243,6 +265,9 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 					}
 					newLines = append(newLines, fmt.Sprintf("a=dcmap:1000 subprotocol=\"%s\"", appId))
 					newLines = append(newLines, fmt.Sprintf("a=3gpp-req-app:\"%s\";1000-%s", appId, endpointType))
+					if slot == SlotApp && shareBlocks[appCount] {
+						newLines = append(newLines, contentShareDcmap)
+					}
 				}
 			}
 			continue
