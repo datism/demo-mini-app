@@ -1047,9 +1047,9 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sender: the user picked Ảnh/Video. Sends the Re-INVITE and tells the page how it ended. */
     fun requestShare(kind: String) {
-        if (kind != "photo" && kind != "video") { emitShareEvent("failed", """{"code":501}"""); return }
+        if (kind != "photo" && kind != "video" && kind != "screen") { emitShareEvent("failed", """{"code":501}"""); return }
         if (shareState != ShareState.NONE) { emitShareEvent("failed", """{"code":486}"""); return }
-        val video = kind == "video"
+        val video = kind != "photo" // a screen goes over the same shared-content video line as a video file
         shareState = ShareState.INVITING
         shareCancelRequested = false
         activity.lifecycleScope.launch(Dispatchers.Main) {
@@ -1211,6 +1211,7 @@ class MiniAppManager(val activity: CallActivity) {
     @Volatile var lastAnswerRawSdp: String? = null
     private var sharedEndpoint: SdpHelper.SlidesEndpoint? = null
     private var streamer: ContentStreamer? = null
+    private var screen: com.demo.imsdc.media.ScreenStreamer? = null
     private var receiver: ContentReceiver? = null
     private var preview: android.media.MediaPlayer? = null
     private var contentSurface: android.view.SurfaceView? = null
@@ -1309,6 +1310,59 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
+    /**
+     * Sender: share this phone's screen once the other person accepted. Asks the system for consent, switches
+     * the call service to media projection (Android 14 needs that first), then streams the screen.
+     */
+    fun startScreen() {
+        activity.launchScreenCapture { data ->
+            if (data == null) { emitShareEvent("videoEnded"); return@launchScreenCapture }
+            activity.lifecycleScope.launch(Dispatchers.Main) {
+                val ep = sharedEndpoint
+                if (ep == null) { emitShareEvent("videoEnded"); return@launch }
+                if (!com.demo.imsdc.call.CallService.startSharing(activity)) {
+                    emitShareEvent("videoError", JSONObject().put("msg", "Không thể chia sẻ màn hình trên máy này").toString())
+                    return@launch
+                }
+                try {
+                    val pm = activity.getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    val projection = pm.getMediaProjection(android.app.Activity.RESULT_OK, data)
+                        ?: throw IllegalStateException("no MediaProjection")
+                    val s = com.demo.imsdc.media.ScreenStreamer(projection, screenMetrics(), RtpPorts.slidesVideo, ep.ip, ep.videoPort) {
+                        activity.runOnUiThread { emitShareEvent("videoEnded") }
+                    }
+                    screen = s
+                    s.start()
+                    emitShareEvent("videoReady", JSONObject().put("name", "Màn hình").put("dur", 0).toString())
+                } catch (e: Exception) {
+                    Log.e(TAG, "Screen share failed: ${e.message}", e)
+                    screen?.stop(); screen = null
+                    com.demo.imsdc.call.CallService.stopSharing(activity)
+                    emitShareEvent("videoError", JSONObject().put("msg", "Không thể chia sẻ màn hình").toString())
+                }
+            }
+        }
+    }
+
+    /** The real screen size (not just this window), so the whole screen is captured. */
+    private fun screenMetrics(): android.util.DisplayMetrics {
+        val m = android.util.DisplayMetrics().apply { setTo(activity.resources.displayMetrics) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val b = activity.windowManager.maximumWindowMetrics.bounds
+            m.widthPixels = b.width(); m.heightPixels = b.height()
+        } else {
+            @Suppress("DEPRECATION") activity.windowManager.defaultDisplay.getRealMetrics(m)
+        }
+        return m
+    }
+
+    /** "Dừng chia sẻ" on the ongoing-call notification: leave the share, and tell the page. */
+    fun stopScreenFromNotification() {
+        if (shareState == ShareState.NONE) return
+        stopShare()
+        emitShareEvent("stopped")
+    }
+
     /** Sender: pause or resume the stream and the local preview together. */
     fun pauseVideo(paused: Boolean) {
         streamer?.let { if (paused) it.pause() else it.resume() }
@@ -1321,6 +1375,8 @@ class MiniAppManager(val activity: CallActivity) {
     private fun releaseVideo() {
         videoTicker?.cancel(); videoTicker = null
         streamer?.stop(); streamer = null
+        screen?.let { it.stop(); com.demo.imsdc.call.CallService.stopSharing(activity) }
+        screen = null
         receiver?.stop(); receiver = null
         try { preview?.release() } catch (_: Exception) {}
         preview = null

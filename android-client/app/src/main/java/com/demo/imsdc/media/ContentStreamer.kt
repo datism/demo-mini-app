@@ -155,33 +155,8 @@ class ContentStreamer(
             val sps = parameterSet(fmt, "csd-0")
             val pps = parameterSet(fmt, "csd-1")
             val buf = ByteBuffer.allocate(4 * 1024 * 1024)
-            var seq = Random.nextInt(0xFFFF)
-            val ssrc = Random.nextInt()
-
-            fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) {
-                val ts = tsUs * 9 / 100 // 90 kHz
-                if (nal.size <= MAX_SINGLE) {
-                    send(socket, target, mfVideoPort, rtp(97, seq, ts, ssrc, marker), nal)
-                    seq = (seq + 1) and 0xFFFF
-                    return
-                }
-                // FU-A (RFC 6184): the NAL header is rebuilt in every fragment's two prefix bytes
-                val indicator = ((nal[0].toInt() and 0xE0) or 28).toByte()
-                var pos = 1
-                while (pos < nal.size) {
-                    val len = minOf(MAX_FRAGMENT, nal.size - pos)
-                    val first = pos == 1
-                    val last = pos + len >= nal.size
-                    val header = ((if (first) 0x80 else 0) or (if (last) 0x40 else 0) or (nal[0].toInt() and 0x1F)).toByte()
-                    val payload = ByteArray(2 + len)
-                    payload[0] = indicator; payload[1] = header
-                    System.arraycopy(nal, pos, payload, 2, len)
-                    send(socket, target, mfVideoPort, rtp(97, seq, ts, ssrc, marker && last), payload)
-                    seq = (seq + 1) and 0xFFFF
-                    pos += len
-                    if (!last && (seq % 4) == 0) Thread.sleep(1) // spread a keyframe, as the camera path does
-                }
-            }
+            val rtp = H264RtpSender(socket, target, mfVideoPort, TAG)
+            fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) { if (running) rtp.sendNal(nal, tsUs, marker) }
 
             while (running) {
                 buf.clear()
@@ -304,9 +279,6 @@ class ContentStreamer(
     }
 
     companion object {
-        private const val MAX_SINGLE = 1200
-        private const val MAX_FRAGMENT = 1180
-
         /**
          * The NAL units of one stored sample: MP4 keeps them length-prefixed (4 bytes); a file that stores
          * start codes instead is split on them.
@@ -324,19 +296,7 @@ class ContentStreamer(
             }
             if (ok && p == sample.size && lengthPrefixed.isNotEmpty()) return lengthPrefixed
 
-            val starts = ArrayList<Pair<Int, Int>>() // (index of start code, its length)
-            var i = 0
-            while (i + 3 <= sample.size) {
-                if (sample[i].toInt() == 0 && sample[i + 1].toInt() == 0) {
-                    if (sample[i + 2].toInt() == 1) { starts.add(i to 3); i += 3; continue }
-                    if (i + 4 <= sample.size && sample[i + 2].toInt() == 0 && sample[i + 3].toInt() == 1) { starts.add(i to 4); i += 4; continue }
-                }
-                i++
-            }
-            return starts.mapIndexed { idx, (at, len) ->
-                val end = if (idx + 1 < starts.size) starts[idx + 1].first else sample.size
-                sample.copyOfRange(at + len, end)
-            }.filter { it.isNotEmpty() }
+            return H264RtpSender.splitAnnexB(sample)
         }
     }
 }
