@@ -1824,20 +1824,27 @@ class CallActivity : AppCompatActivity() {
 
         val lines = sdp.replace("\r", "").split("\n")
         var currentMedia = ""
+        var seenAudio = false
+        var seenVideo = false
         for (line in lines) {
             val trimmed = line.trim()
+            // Only the first audio and video lines are the call's microphone/camera. A later pair is the
+            // shared content (a=content:slides) with its own ports; taking those sent the camera and mic
+            // into the content stream (and to port 0 once the share closed).
             if (trimmed.startsWith("m=audio ")) {
-                currentMedia = "audio"
+                currentMedia = if (seenAudio) "slides" else "audio"
                 val parts = trimmed.split(" ")
-                if (parts.size >= 2) {
+                if (parts.size >= 2 && !seenAudio) {
                     audioPort = parts[1].toIntOrNull() ?: 40002
                 }
+                seenAudio = true
             } else if (trimmed.startsWith("m=video ")) {
-                currentMedia = "video"
+                currentMedia = if (seenVideo) "slides" else "video"
                 val parts = trimmed.split(" ")
-                if (parts.size >= 2) {
+                if (parts.size >= 2 && !seenVideo) {
                     videoPort = parts[1].toIntOrNull() ?: 40004
                 }
+                seenVideo = true
             } else if (trimmed.startsWith("m=application ")) {
                 currentMedia = "application"
             } else if (trimmed.startsWith("c=IN IP4 ")) {
