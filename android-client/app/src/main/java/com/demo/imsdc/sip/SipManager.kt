@@ -87,6 +87,17 @@ class SipManager(
     var homeReqApp: String? = null
     var appReqApp: String? = null     // mid 4; null while no app is open
     var appSlotUsed: Boolean = false  // mid 4 has appeared in this call; it stays in every SDP from then on
+    /** The App line carries the content-share stream (a=dcmap:1002) while a Content Sharing photo session is open. */
+    @Volatile var shareStream: Boolean = false
+    /** The shared-content video/audio pair (a=content:slides) of a Content Sharing video session. */
+    @Volatile var slides: SlidesState = SlidesState.OFF
+
+    /** A provisional (180) response to one of our Re-INVITEs: the far end is asking its user. */
+    var onReInviteProvisional: ((code: Int, cseq: Int) -> Unit)? = null
+    /** The far end withdrew the Re-INVITE we were holding for a decision (CANCEL); the call stays up. */
+    var onHeldReInviteCancelled: (() -> Unit)? = null
+    /** Incoming Re-INVITE whose answer is deferred (user decision pending); only one at a time. */
+    @Volatile private var heldReInviteMsg: String? = null
     var isCallHoldActive: Boolean = false
     var onReInviteReceived: ((String, String) -> Unit)? = null
     var onReInviteFailed: ((code: Int, cseq: Int) -> Unit)? = null
@@ -565,7 +576,8 @@ class SipManager(
                         val toHeaderVal = getHeader(msg, "to") ?: ""
                         onInviteResponse?.invoke(statusCode, sdp, toHeaderVal, sdp)
                     } else {
-                        Log.d(TAG, "Re-INVITE provisional $statusCode — ignoring")
+                        Log.d(TAG, "Re-INVITE provisional $statusCode")
+                        onReInviteProvisional?.invoke(statusCode, getCSeqNumber(msg))
                     }
                 }
                 else -> {
@@ -686,6 +698,20 @@ class SipManager(
 
     private fun handleCancel(msg: String) {
         Log.i(TAG, "← CANCEL received")
+        // CANCEL of a Re-INVITE we hold for the user: 200 to the CANCEL, 487 to the Re-INVITE, the call goes on.
+        val held = heldReInviteMsg
+        if (held != null && getCSeqNumber(held) == getCSeqNumber(msg)) {
+            heldReInviteMsg = null
+            try {
+                sendRaw(buildResponse(msg, 200, "OK", ""))
+                sendRaw(buildResponse(held, 487, "Request Terminated", "Content-Length: 0\r\n"))
+                Log.i(TAG, "→ 200 OK for CANCEL and 487 for the held Re-INVITE; call continues")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to answer CANCEL of a Re-INVITE: ${e.message}")
+            }
+            onHeldReInviteCancelled?.invoke()
+            return
+        }
         // 1. Phản hồi 200 OK cho bản tin CANCEL
         val cancelOk = buildResponse(msg, 200, "OK", "")
         try {
@@ -745,6 +771,9 @@ class SipManager(
         homeReqApp = null
         appReqApp = null
         appSlotUsed = false
+        shareStream = false
+        slides = SlidesState.OFF
+        heldReInviteMsg = null
         isCallHoldActive = false
         initialInviteCSeq = -1
         lastReInviteCSeq = -1
@@ -892,7 +921,7 @@ class SipManager(
             callLocalIp = effectiveIp
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("INVITE sip:$toUser@$sipServerHost SIP/2.0")
@@ -935,6 +964,45 @@ class SipManager(
         sendRaw(buildResponse(originalInvite, 491, "Request Pending", ""))
     }
 
+    /** 180 Ringing for an incoming Re-INVITE the user has to decide on; remembered so a CANCEL can withdraw it. */
+    suspend fun sendReInviteRinging(originalInvite: String) = withContext(Dispatchers.IO) {
+        heldReInviteMsg = originalInvite
+        Log.i(TAG, "→ 180 Ringing (Re-INVITE waiting for the user)")
+        sendRaw(buildResponse(originalInvite, 180, "Ringing", ""))
+    }
+
+    /** Final non-2xx answer to an incoming Re-INVITE (e.g. 603 Decline). Unlike [sendDecline] the call stays up. */
+    suspend fun sendReInviteReject(originalInvite: String, code: Int, reason: String) = withContext(Dispatchers.IO) {
+        heldReInviteMsg = null
+        Log.i(TAG, "→ $code $reason (Re-INVITE rejected, call continues)")
+        sendRaw(buildResponse(originalInvite, code, reason, "Content-Length: 0\r\n"))
+    }
+
+    /** Called once the held Re-INVITE got its final answer (200 OK or reject). */
+    fun clearHeldReInvite() { heldReInviteMsg = null }
+
+    /** CANCEL for our own pending Re-INVITE with [cseq]; the far end answers it 487 and the call goes on. */
+    suspend fun cancelReInvite(cseq: Int) = withContext(Dispatchers.IO) {
+        val callId = pendingCallId ?: return@withContext
+        val fromTag = pendingFromTag ?: ""
+        val toUser = pendingRemoteUser ?: return@withContext
+        val localIp = getLocalIp()
+        val msg = buildString {
+            appendLine("CANCEL sip:$toUser@$sipServerHost SIP/2.0")
+            appendLine("Via: SIP/2.0/TCP $localIp:$localPort;branch=${randomBranch()}")
+            appendLine("Route: <sip:$sipServerHost:$sipServerPort;lr;transport=tcp>")
+            appendLine("Max-Forwards: 70")
+            appendLine("From: <sip:$localUsername@$sipServerHost>;tag=$fromTag")
+            appendLine("To: ${activeToHeader ?: "<sip:$toUser@$sipServerHost>"}")
+            appendLine("Call-ID: $callId")
+            appendLine("CSeq: $cseq CANCEL")
+            appendLine("Content-Length: 0")
+            append("\r\n")
+        }.replace("\r\n", "\n").replace("\n", "\r\n")
+        Log.i(TAG, "→ CANCEL of Re-INVITE (call=$callId, cseq=$cseq)")
+        sendRaw(msg)
+    }
+
     /** [onCSeq] gets the CSeq before the request goes out, so its final response can be matched to it. */
     suspend fun sendReInviteWithSdp(sdpBody: String, onCSeq: (Int) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
@@ -950,7 +1018,7 @@ class SipManager(
 
             lastLocalOfferSdp = sdpBody
 
-            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
+            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
             val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
 
             val msg = buildString {
@@ -986,7 +1054,7 @@ class SipManager(
             val localIp = getLocalIp()
             lastLocalIp = localIp
             callLocalIp = localIp
-            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
+            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(
                 originalInvite, 200, "OK",
@@ -1092,7 +1160,7 @@ class SipManager(
             val localIp = getLocalIp()
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("ACK sip:$remoteUser@$sipServerHost:$sipServerPort SIP/2.0")

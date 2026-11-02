@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -73,6 +74,57 @@ func shouldDiscardLine(line string) bool {
 	return false
 }
 
+// contentShareBlocks reports which m=application blocks (1-based, in order) of
+// an SDP carry the content-share stream (a=dcmap:1002). RewriteSDP drops every
+// a=dcmap line and re-emits only stream 1000, so the share stream is detected
+// on the original SDP and written back for the App block.
+func contentShareBlocks(sdp string) map[int]bool {
+	blocks := map[int]bool{}
+	n := 0
+	for _, line := range strings.Split(sdp, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "m=application "):
+			n++
+		case n > 0 && strings.HasPrefix(t, "a=dcmap:1002"):
+			blocks[n] = true
+		}
+	}
+	return blocks
+}
+
+const contentShareDcmap = `a=dcmap:1002 subprotocol="content-share"`
+
+// slidesPortFor maps the MF port a call leg uses for its camera/microphone RTP to the port of the
+// shared-content (a=content:slides) pair on the same leg. The MF listens on base+1/+3 for the caller
+// leg and base+7/+9 for the callee leg next to its base+2/+4 and base+6/+8 camera ports. 0 = unknown.
+func slidesPortFor(port, base int) int {
+	switch port - base {
+	case 2, 4:
+		return port - 1
+	case 6, 8:
+		return port + 1
+	}
+	return 0
+}
+
+// slidesLinePort is the MF port for the shared-content audio/video line [mLine]: closed stays
+// closed, otherwise the leg's slides port derived from its camera port. An unknown leg closes the line.
+func slidesLinePort(mLine string, cameraPort int, mfInfo *MFAllocResponse) int {
+	if f := strings.Fields(mLine); len(f) >= 2 && f[1] == "0" {
+		return 0
+	}
+	base := mfInfo.Port
+	if base == 0 {
+		base = mfInfo.AdcPort
+	}
+	p := slidesPortFor(cameraPort, base)
+	if p == 0 {
+		log.Printf("[IMS-AS] No content-share port for camera port %d (base %d): closing the line", cameraPort, base)
+	}
+	return p
+}
+
 func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) string {
 	// MF runs inside Kind cluster (e.g. 172.19.0.2) which is unreachable from
 	// physical S24 phones on the WiFi LAN. The ims-udp-relay container on the
@@ -89,7 +141,8 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 	setupRole := mfInfo.SetupRole
 	adcSetupRole := mfInfo.AdcSetupRole
 
-	appCount := 0
+	shareBlocks := contentShareBlocks(origSDP)
+	appCount, audioN, videoN := 0, 0, 0
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -117,6 +170,7 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 		}
 
 		if strings.HasPrefix(trimmed, "m=audio ") {
+			audioN++
 			audioPort := mfInfo.AudioPort
 			if audioPort == 0 {
 				basePort := mfInfo.Port
@@ -125,6 +179,9 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 				}
 				audioPort = basePort + 2
 			}
+			if audioN >= 2 { // shared content: its own MF port, or closed as the phone offered it
+				audioPort = slidesLinePort(trimmed, audioPort, mfInfo)
+			}
 			newLines = append(newLines, fmt.Sprintf("m=audio %d RTP/AVP 8", audioPort))
 			newLines = append(newLines, fmt.Sprintf("c=IN IP4 %s", externalIP))
 			newLines = append(newLines, "a=rtpmap:8 PCMA/8000")
@@ -132,6 +189,7 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 		}
 
 		if strings.HasPrefix(trimmed, "m=video ") {
+			videoN++
 			videoPort := mfInfo.VideoPort
 			if videoPort == 0 {
 				basePort := mfInfo.Port
@@ -139,6 +197,9 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 					basePort = mfInfo.AdcPort
 				}
 				videoPort = basePort + 4
+			}
+			if videoN >= 2 {
+				videoPort = slidesLinePort(trimmed, videoPort, mfInfo)
 			}
 			newLines = append(newLines, fmt.Sprintf("m=video %d RTP/AVP 97", videoPort))
 			newLines = append(newLines, fmt.Sprintf("c=IN IP4 %s", externalIP))
@@ -243,6 +304,9 @@ func RewriteSDP(origSDP string, mfInfo *MFAllocResponse, activeAppId string) str
 					}
 					newLines = append(newLines, fmt.Sprintf("a=dcmap:1000 subprotocol=\"%s\"", appId))
 					newLines = append(newLines, fmt.Sprintf("a=3gpp-req-app:\"%s\";1000-%s", appId, endpointType))
+					if slot == SlotApp && shareBlocks[appCount] {
+						newLines = append(newLines, contentShareDcmap)
+					}
 				}
 			}
 			continue

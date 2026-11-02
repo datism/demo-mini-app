@@ -46,6 +46,8 @@ class WebRtcManager(private val context: Context) {
     internal var homeAdcPC: PeerConnection? = null
     internal var appAdcPC: PeerConnection? = null
     var appAdcChannel: DataChannel? = null
+    /** SCTP stream 1002 on the App PeerConnection: photo bytes of a Content Sharing session. Null while no share is open. */
+    @Volatile var shareChannel: DataChannel? = null
     @Volatile var foregroundIsHome: Boolean = true
     val foregroundAdcChannel: DataChannel? get() = if (foregroundIsHome) adcChannel else appAdcChannel
     private var remoteHomeMid: String? = null
@@ -693,10 +695,34 @@ class WebRtcManager(private val context: Context) {
         return appAdcChannel
     }
 
+    /**
+     * Opens the negotiated content-share channel (id 1002) on the App PeerConnection. The MF opens the same
+     * stream on its side for every ADC context, so no SDP change is needed; the Re-INVITE only carries the
+     * agreement. Returns the channel, or null when the App PeerConnection is gone.
+     */
+    fun openShareChannel(): DataChannel? {
+        val pc = appAdcPC ?: return null
+        shareChannel?.let { if (it.state() != DataChannel.State.CLOSED && it.state() != DataChannel.State.CLOSING) return it }
+        val init = DataChannel.Init().apply { id = 1002; negotiated = true; ordered = true }
+        shareChannel = pc.createDataChannel("app-dc-share", init)
+        Log.i(TAG, "Content-share channel created: id=1002, negotiated=true")
+        return shareChannel
+    }
+
+    fun closeShareChannel() {
+        try {
+            shareChannel?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing share channel: ${e.message}")
+        }
+        shareChannel = null
+    }
+
     /** Closes only the App slot (mid 4). The Home ADC and the BDC are not touched. */
     fun closeAppADC() {
         Log.i(TAG, "Closing App ADC and destroying its PeerConnection...")
         try {
+            closeShareChannel()
             appAdcChannel?.close()
             appAdcChannel = null
             val old = appAdcPC

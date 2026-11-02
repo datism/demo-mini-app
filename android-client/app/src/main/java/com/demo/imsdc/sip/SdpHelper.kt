@@ -25,12 +25,52 @@ object SdpHelper {
      * derive it from the line's certificate fingerprint: the same PeerConnection gives the same id on
      * every Re-INVITE, a new PeerConnection (new certificate) gives a new one.
      */
+    /** SCTP stream 1002 on the App ADC: photo bytes of a Content Sharing session (relayed P2P by the MF). */
+    const val CONTENT_SHARE_DCMAP = "a=dcmap:1002 subprotocol=\"content-share\""
+
+    /** Where the shared-content RTP goes: the MF's address and ports for the video and audio lines of [sdp]. */
+    data class SlidesEndpoint(val ip: String, val audioPort: Int, val videoPort: Int)
+
+    /**
+     * The shared-content (a=content:slides) audio/video lines of [sdp], or null when it has none or both are
+     * closed. The address is the line's own c= (the MF endpoint of this phone's leg), else the session c=.
+     */
+    fun slidesEndpoint(sdp: String?): SlidesEndpoint? {
+        if (sdp == null) return null
+        var sessionIp = ""
+        var ip = ""; var kind = ""; var port = 0
+        var audio = 0; var video = 0; var audioIp = ""; var videoIp = ""
+        fun flush(slides: Boolean) {
+            if (!slides || port == 0) return
+            val useIp = ip.ifEmpty { sessionIp }
+            if (kind == "audio") { audio = port; audioIp = useIp } else if (kind == "video") { video = port; videoIp = useIp }
+        }
+        var slides = false
+        for (raw in sdp.replace("\r", "").split("\n")) {
+            val l = raw.trim()
+            if (l.startsWith("m=")) {
+                flush(slides)
+                val f = l.split(" ")
+                kind = f[0].removePrefix("m="); port = f.getOrNull(1)?.toIntOrNull() ?: 0; ip = ""; slides = false
+            } else if (l.startsWith("c=IN IP4 ")) {
+                val addr = l.removePrefix("c=IN IP4 ").trim()
+                if (kind.isEmpty()) sessionIp = addr else ip = addr
+            } else if (l == "a=content:slides") slides = true
+        }
+        flush(slides)
+        val host = videoIp.ifEmpty { audioIp }
+        return if (host.isEmpty() || (audio == 0 && video == 0)) null else SlidesEndpoint(host, audio, video)
+    }
+
+    /** True when an SDP asks for the content-share stream (a=dcmap:1002), i.e. the far end wants to share. */
+    fun hasContentShare(sdp: String?): Boolean = sdp?.contains("a=dcmap:1002") == true
+
     fun tlsIdFor(label: String, fingerprintLine: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest("$label|$fingerprintLine".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, homeReqApp: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004, appReqApp: String? = null, appSlotUsed: Boolean = false): String {
+    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, homeReqApp: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004, appReqApp: String? = null, appSlotUsed: Boolean = false, shareStream: Boolean = false, slides: SlidesState = SlidesState.OFF): String {
     Log.i("SipManager", "Raw local SDP to translate:\n$sdp")
     val validIp = if (!localIpAddress.isNullOrBlank() && !localIpAddress.contains(":") && localIpAddress != "0.0.0.0" && localIpAddress != "127.0.0.1" && localIpAddress != "::") {
         localIpAddress
@@ -229,7 +269,7 @@ object SdpHelper {
     newLines.add("a=3gpp-bdc-used-by:sender")
     newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
     
-    fun addAdcSection(mid: String, label: String, creds: Credentials, ep: Endpoint, appId: String) {
+    fun addAdcSection(mid: String, label: String, creds: Credentials, ep: Endpoint, appId: String, extraDcmap: String? = null) {
         newLines.add("m=application ${ep.port} UDP/DTLS/SCTP webrtc-datachannel")
         newLines.add("c=IN IP4 $validIp")
         newLines.add("a=mid:$mid")
@@ -241,6 +281,7 @@ object SdpHelper {
         newLines.add("a=tls-id:${tlsIdFor(label, creds.fingerprint)}")
         newLines.add("a=dcmap:1000 subprotocol=\"$appId\"")
         newLines.add("a=3gpp-req-app:\"$appId\";1000-UE")
+        if (extraDcmap != null) newLines.add(extraDcmap)
         newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
     }
     fun addClosedSection(mid: String) {
@@ -265,11 +306,35 @@ object SdpHelper {
         addClosedSection("3")
     }
     if (appOpen) {
-        addAdcSection("4", "app", appCreds, appEp, appReqApp!!)
+        addAdcSection("4", "app", appCreds, appEp, appReqApp!!, if (shareStream) CONTENT_SHARE_DCMAP else null)
     } else if (emitApp) {
         addClosedSection("4")
     }
     
+    // 7. Shared content (a=content:slides): a second video (mid 5) and audio (mid 6) line. Once used it stays
+    // in every SDP, as port 0 while no content is shared, so the m-line order never changes.
+    if (slides.mode != SlidesState.Mode.OFF) {
+        val closed = slides.mode == SlidesState.Mode.CLOSED
+        val dir = when (slides.mode) {
+            SlidesState.Mode.SEND -> "a=sendonly"
+            SlidesState.Mode.RECV -> "a=recvonly"
+            else -> "a=inactive"
+        }
+        newLines.add("m=video ${if (closed) 0 else slides.videoPort} RTP/AVP 97")
+        newLines.add("c=IN IP4 $validIp")
+        newLines.add("a=rtpmap:97 H264/90000")
+        newLines.add("a=fmtp:97 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f")
+        newLines.add("a=mid:5")
+        newLines.add("a=content:slides")
+        newLines.add(dir)
+        newLines.add("m=audio ${if (closed) 0 else slides.audioPort} RTP/AVP 8")
+        newLines.add("c=IN IP4 $validIp")
+        newLines.add("a=rtpmap:8 PCMA/8000")
+        newLines.add("a=mid:6")
+        newLines.add("a=content:slides")
+        newLines.add(dir)
+    }
+
     val result = newLines.joinToString("\r\n") + "\r\n"
     Log.i("SipManager", "translateWebRtcOfferToSipOffer generated SDP:\n$result")
     return result
@@ -433,4 +498,12 @@ object SdpHelper {
         val parts = msg.split("\r\n\r\n", "\n\n")
         return if (parts.size >= 2) parts.drop(1).joinToString("\r\n\r\n") else null
     }
+}
+
+/** The shared-content media pair (a=content:slides) as this phone offers or answers it. */
+data class SlidesState(val mode: Mode = Mode.OFF, val audioPort: Int = 0, val videoPort: Int = 0) {
+    /** OFF: no lines. SEND/RECV: open (sendonly/recvonly). CLOSED: lines kept at port 0. */
+    enum class Mode { OFF, SEND, RECV, CLOSED }
+
+    companion object { val OFF = SlidesState() }
 }

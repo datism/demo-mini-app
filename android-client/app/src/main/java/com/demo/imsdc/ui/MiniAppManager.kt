@@ -14,7 +14,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.demo.imsdc.R
 import com.demo.imsdc.databinding.ActivityCallBinding
+import com.demo.imsdc.sip.SdpHelper
 import com.demo.imsdc.sip.SipManager
+import com.demo.imsdc.sip.SlidesState
+import com.demo.imsdc.media.ContentReceiver
+import com.demo.imsdc.media.ContentStreamer
+import com.demo.imsdc.media.RtpPorts
 import com.demo.imsdc.webrtc.AndroidBridgeInterface
 import com.demo.imsdc.webrtc.DataChannelManager
 import com.demo.imsdc.webrtc.LatestRequestQueue
@@ -555,6 +560,10 @@ class MiniAppManager(val activity: CallActivity) {
     companion object {
         const val HOME_APP = CallActivity.HOME_APP
         private const val ANSWER_TIMEOUT_MS = 5000L
+        /** A share request waits for a person, not for a stack: the far end rings (180) until its user decides. */
+        private const val SHARE_ANSWER_TIMEOUT_MS = 35_000L
+        /** The callee declines on its own after this long without an answer from its user. */
+        private const val SHARE_DECISION_TIMEOUT_MS = 30_000L
     }
 
     /** One slot change. [sync]: re-offer the current local slots after a rejection; a sync is never re-synced. */
@@ -582,8 +591,8 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /** 200 OK for the Re-INVITE with [cseq]. Only the awaited CSeq counts: a late answer to an earlier one is dropped. */
-    fun onReInviteAnswered(cseq: Int, sdpAnswer: String?) {
-        if (pending.finish(cseq)) outcome?.complete(ReInviteOutcome.Answered(sdpAnswer))
+    fun onReInviteAnswered(cseq: Int, sdpAnswer: String?, rawSdp: String? = null) {
+        if (pending.finish(cseq)) { lastAnswerRawSdp = rawSdp; outcome?.complete(ReInviteOutcome.Answered(sdpAnswer)) }
         else Log.w(TAG, "Ignoring 200 OK for Re-INVITE CSeq $cseq: not the one awaited (late or unknown)")
     }
 
@@ -727,7 +736,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /** Sends one Re-INVITE with the current local slots and waits for its final response. Caller holds [negotiation]. */
-    private suspend fun transact(): ReInviteOutcome {
+    private suspend fun transact(timeoutMs: Long = ANSWER_TIMEOUT_MS, cancelOnTimeout: Boolean = false): ReInviteOutcome {
         val localOffer = activity.webRtcManager.createOffer()
         val result = CompletableDeferred<ReInviteOutcome>()
         outcome = result
@@ -735,7 +744,13 @@ class MiniAppManager(val activity: CallActivity) {
             withContext(Dispatchers.IO) {
                 activity.sipManager.sendReInviteWithSdp(localOffer) { cseq -> pending.begin(cseq) }
             }
-            return withTimeoutOrNull(ANSWER_TIMEOUT_MS) { result.await() } ?: ReInviteOutcome.Timeout
+            val answered = withTimeoutOrNull(timeoutMs) { result.await() }
+            if (answered == null && cancelOnTimeout) {
+                // Nobody decided in time: withdraw the request (the far end answers 487 and the call goes on).
+                val cs = pending.peek()
+                if (cs > 0) withContext(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+            }
+            return answered ?: ReInviteOutcome.Timeout
         } finally {
             pending.clear()                           // a final response arriving after this is stale
             outcome = null
@@ -812,5 +827,312 @@ class MiniAppManager(val activity: CallActivity) {
         activity.sipManager.appReqApp = null          // mid 4 -> port 0 locally; appSlotUsed stays true
         android.widget.Toast.makeText(activity, "Không mở được ứng dụng, quay về emote", android.widget.Toast.LENGTH_SHORT).show()
         launchMiniApp(HOME_APP, sendRemoteTrigger = false)
+    }
+
+    // ───────────────────────── Content Sharing ─────────────────────────
+    // A share request is one Re-INVITE (photo: adds the content-share stream 1002 to the App line).
+    // 200 OK = accepted, 603 = declined, CANCEL = withdrawn; closing is another Re-INVITE without the stream.
+
+    private enum class ShareState { NONE, INVITING, ACTIVE }
+    @Volatile private var shareState = ShareState.NONE
+    @Volatile private var shareCancelRequested = false
+    private var heldDecision: CompletableDeferred<Boolean>? = null
+    @Volatile private var heldCancelled = false
+
+    /** Calls window.shareEvent(name, json) of the Content Sharing page. */
+    fun emitShareEvent(name: String, json: String = "{}") {
+        activity.runOnUiThread {
+            val arg = org.json.JSONObject.quote(json)
+            activity.binding.webviewMiniapp.evaluateJavascript("window.shareEvent && window.shareEvent('$name', $arg)", null)
+        }
+    }
+
+    private fun openShareSession() {
+        val web = activity.webRtcManager
+        web.openShareChannel()?.let { activity.dcManager.setupShareChannel(it) }
+        shareState = ShareState.ACTIVE
+    }
+
+    private fun clearShareSession() {
+        activity.sipManager.shareStream = false
+        // Once used, the shared-content lines stay in every SDP as port 0 so the m-line order never changes.
+        if (activity.sipManager.slides.mode != SlidesState.Mode.OFF) activity.sipManager.slides = SlidesState(SlidesState.Mode.CLOSED)
+        activity.webRtcManager.closeShareChannel()
+        releaseVideo()
+        shareState = ShareState.NONE
+    }
+
+    /** Sends the closing Re-INVITE for a share we opened but cannot use (the other phone did not take the lines). */
+    private suspend fun closeShareOnPeer() {
+        negotiation.withLock {
+            val r = transact()
+            if (r is ReInviteOutcome.Answered) applyAnswer(r.sdp)
+        }
+    }
+
+    /** Sender: the user picked Ảnh/Video. Sends the Re-INVITE and tells the page how it ended. */
+    fun requestShare(kind: String) {
+        if (kind != "photo" && kind != "video") { emitShareEvent("failed", """{"code":501}"""); return }
+        if (shareState != ShareState.NONE) { emitShareEvent("failed", """{"code":486}"""); return }
+        val video = kind == "video"
+        shareState = ShareState.INVITING
+        shareCancelRequested = false
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            var attempt = 1
+            try {
+                while (true) {
+                    val result = negotiation.withLock {
+                        if (shareCancelRequested) return@withLock ReInviteOutcome.Failed(487)
+                        if (activity.webRtcManager.appAdcPC == null) return@withLock ReInviteOutcome.Failed(488)
+                        val sip = activity.sipManager
+                        val previousSlides = sip.slides
+                        if (video) {
+                            val (a, v) = RtpPorts.allocateSlides()
+                            sip.slides = SlidesState(SlidesState.Mode.SEND, a, v)
+                        } else {
+                            sip.shareStream = true
+                        }
+                        var r = transact(SHARE_ANSWER_TIMEOUT_MS, cancelOnTimeout = true)
+                        if (r is ReInviteOutcome.Answered) {
+                            applyAnswer(r.sdp)
+                            if (video) {
+                                // The answer's shared-content lines say where the MF wants our RTP; none = not accepted.
+                                if (!openVideoSession(sender = true, rawSdp = lastAnswerRawSdp)) {
+                                    sip.slides = SlidesState(SlidesState.Mode.CLOSED)
+                                    r = ReInviteOutcome.Failed(488)
+                                    activity.lifecycleScope.launch(Dispatchers.Main) { closeShareOnPeer() }
+                                }
+                            } else {
+                                openShareSession()
+                            }
+                        } else {
+                            sip.shareStream = false
+                            sip.slides = previousSlides
+                        }
+                        r
+                    }
+                    when {
+                        result is ReInviteOutcome.Answered -> emitShareEvent("accepted")
+                        result is ReInviteOutcome.Failed && result.code == 603 -> { shareState = ShareState.NONE; emitShareEvent("declined") }
+                        result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> shareState = ShareState.NONE
+                        result is ReInviteOutcome.Failed && result.code == 491 && attempt < MAX_GLARE_ATTEMPTS && !shareCancelRequested -> {
+                            delay(reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner))
+                            attempt++
+                            continue
+                        }
+                        else -> {
+                            shareState = ShareState.NONE
+                            val code = (result as? ReInviteOutcome.Failed)?.code ?: 408
+                            Log.w(TAG, "Share request not accepted: $result")
+                            emitShareEvent("failed", """{"code":$code}""")
+                        }
+                    }
+                    break
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Share request cancelled (call ended)")
+                clearShareSession()
+            } catch (e: Exception) {
+                Log.e(TAG, "Share request failed: ${e.message}", e)
+                clearShareSession()
+                emitShareEvent("failed", """{"code":500}""")
+            }
+        }
+    }
+
+    /** Sender: Hủy while waiting. CANCEL goes out; the far end answers 487 and the request ends quietly. */
+    fun cancelShare() {
+        if (shareState != ShareState.INVITING) return
+        shareCancelRequested = true
+        val cs = pending.peek()
+        if (cs > 0) activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+    }
+
+    /** Either side: leave the session. A Re-INVITE without the content-share stream closes it for both. */
+    fun stopShare() {
+        if (shareState == ShareState.NONE) return
+        if (shareState == ShareState.INVITING) { cancelShare(); return }
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                negotiation.withLock {
+                    clearShareSession()
+                    val r = transact()
+                    if (r is ReInviteOutcome.Answered) applyAnswer(r.sdp) else Log.w(TAG, "Closing share Re-INVITE not accepted: $r")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Share close cancelled (call ended)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Share close failed: ${e.message}", e)
+            }
+        }
+    }
+
+    /** Page, receiver: Chấp nhận / Từ chối. Completes the decision the held Re-INVITE is waiting for. */
+    fun answerShare(accept: Boolean) { heldDecision?.complete(accept) }
+
+    /**
+     * Receiver, called with the negotiation lock held for an incoming Re-INVITE that asks to open a share:
+     * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
+     * CANCEL it has already sent the final response (603 / 487) and returns false.
+     */
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
+        val decision = CompletableDeferred<Boolean>()
+        heldCancelled = false
+        heldDecision = decision
+        try {
+            activity.sipManager.sendReInviteRinging(rawMsg)
+            emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.remoteUser).toString())
+            val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
+            if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
+            if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
+            activity.sipManager.sendReInviteReject(rawMsg, 603, "Decline")
+            if (accepted == null) emitShareEvent("cancelled") // no answer: close the sheet
+            return false
+        } finally {
+            heldDecision = null
+        }
+    }
+
+    /** SipManager saw CANCEL for the held Re-INVITE (487 already sent). Closes the sheet; the call goes on. */
+    fun onHeldReInviteCancelled() {
+        heldCancelled = true
+        heldDecision?.complete(false)
+        emitShareEvent("cancelled")
+    }
+
+    /** Receiver: the Re-INVITE was answered 200 OK with the stream; the session is open. */
+    fun onShareAccepted() = openShareSession()
+
+    /** Receiver: the far end closed the share (its Re-INVITE had no stream). */
+    fun onShareClosedByPeer() {
+        if (shareState == ShareState.NONE) return
+        clearShareSession()
+        emitShareEvent("closed")
+    }
+
+    // ───────────────────────── Content Sharing: video ─────────────────────────
+
+    @Volatile var lastAnswerRawSdp: String? = null
+    private var sharedEndpoint: SdpHelper.SlidesEndpoint? = null
+    private var streamer: ContentStreamer? = null
+    private var receiver: ContentReceiver? = null
+    private var preview: android.media.MediaPlayer? = null
+    private var contentSurface: android.view.SurfaceView? = null
+    private var videoTicker: kotlinx.coroutines.Job? = null
+
+    /** The MF endpoint for the shared-content RTP of this phone's leg, from the SDP the far end answered/offered. */
+    private fun openVideoSession(sender: Boolean, rawSdp: String?): Boolean {
+        val ep = SdpHelper.slidesEndpoint(rawSdp) ?: return false
+        sharedEndpoint = ep
+        shareState = ShareState.ACTIVE
+        if (!sender) startReceiver(ep)
+        return true
+    }
+
+    /** Receiver: the Re-INVITE for a video share was answered 200 OK; start taking the stream. */
+    fun onVideoShareAccepted(rawOfferSdp: String?) {
+        if (!openVideoSession(sender = false, rawSdp = rawOfferSdp)) Log.w(TAG, "Video share accepted but its offer has no shared-content lines")
+    }
+
+    /** Runs [use] with the surface the shared video is drawn on: a SurfaceView between the call video and the page. */
+    private fun withContentSurface(use: (android.view.Surface) -> Unit) {
+        activity.runOnUiThread {
+            val sv = contentSurface ?: android.view.SurfaceView(activity).also { view ->
+                view.setZOrderMediaOverlay(true)
+                (activity.binding.root as android.view.ViewGroup).addView(
+                    view, 1, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                )
+                contentSurface = view
+            }
+            val holder = sv.holder
+            if (holder.surface.isValid) use(holder.surface)
+            else holder.addCallback(object : SurfaceHolder.Callback {
+                override fun surfaceCreated(h: SurfaceHolder) { h.removeCallback(this); use(h.surface) }
+                override fun surfaceChanged(h: SurfaceHolder, format: Int, width: Int, height: Int) {}
+                override fun surfaceDestroyed(h: SurfaceHolder) {}
+            })
+        }
+    }
+
+    private fun startReceiver(ep: SdpHelper.SlidesEndpoint) {
+        withContentSurface { surface ->
+            receiver?.stop()
+            receiver = ContentReceiver(RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort, surface).also { it.start() }
+        }
+    }
+
+    /** Sender: opens the gallery to choose the video once the other person accepted. */
+    fun pickVideo() {
+        activity.launchVideoPicker { uri ->
+            if (uri == null) emitShareEvent("videoEnded") else startStreaming(uri)
+        }
+    }
+
+    private fun startStreaming(uri: android.net.Uri) {
+        val ep = sharedEndpoint ?: return
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            val s = ContentStreamer(activity, uri, RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort) {
+                activity.runOnUiThread { emitShareEvent("videoEnded") }
+            }
+            val info = withContext(Dispatchers.IO) { s.inspect() }
+            if (info.error != null) {
+                emitShareEvent("videoError", JSONObject().put("msg", info.error).toString())
+                return@launch
+            }
+            streamer = s
+            s.start()
+            // The sender watches the same video locally, silent so it does not echo into the call.
+            withContentSurface { surface ->
+                try {
+                    preview = android.media.MediaPlayer().apply {
+                        setDataSource(activity, uri)
+                        setSurface(surface)
+                        setVolume(0f, 0f)
+                        setOnPreparedListener { it.start() }
+                        prepareAsync()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Local preview unavailable: ${e.message}")
+                }
+            }
+            emitShareEvent("videoReady", JSONObject().put("name", info.name).put("dur", info.durationMs / 1000.0).toString())
+            videoTicker?.cancel()
+            videoTicker = activity.lifecycleScope.launch {
+                while (true) {
+                    delay(500)
+                    val pos = streamer?.positionMs() ?: break
+                    emitShareEvent("videoTime", JSONObject().put("t", pos / 1000.0).toString())
+                }
+            }
+        }
+    }
+
+    /** Sender: pause or resume the stream and the local preview together. */
+    fun pauseVideo(paused: Boolean) {
+        streamer?.let { if (paused) it.pause() else it.resume() }
+        try { preview?.let { if (paused) it.pause() else it.start() } } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
+    }
+
+    /** Receiver: mute only this phone's speaker. */
+    fun muteShareAudio(muted: Boolean) { receiver?.setMuted(muted) }
+
+    private fun releaseVideo() {
+        videoTicker?.cancel(); videoTicker = null
+        streamer?.stop(); streamer = null
+        receiver?.stop(); receiver = null
+        try { preview?.release() } catch (_: Exception) {}
+        preview = null
+        sharedEndpoint = null
+        activity.runOnUiThread {
+            contentSurface?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+            contentSurface = null
+        }
+    }
+
+    /** Call ended: drop any share state. */
+    fun resetShare() {
+        heldCancelled = true
+        heldDecision?.complete(false)
+        clearShareSession()
     }
 }

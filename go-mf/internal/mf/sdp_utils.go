@@ -171,20 +171,25 @@ func parseSDPMedia(sdpText string) MediaInfo {
 	// Track which media section we're in to avoid picking up
 	// c=IN IP4 0.0.0.0 from m=application (WebRTC/ICE) blocks.
 	currentMedia := ""
+	seenAudio, seenVideo := false, false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		// The first audio and video lines are the call's camera/microphone. A later pair is the
+		// shared content (a=content:slides) with its own relay ports: it must not replace them.
 		if strings.HasPrefix(trimmed, "m=audio ") {
 			currentMedia = "audio"
 			parts := strings.Split(trimmed, " ")
-			if len(parts) >= 2 {
+			if len(parts) >= 2 && !seenAudio {
 				fmt.Sscanf(parts[1], "%d", &info.AudioPort)
 			}
+			seenAudio = true
 		} else if strings.HasPrefix(trimmed, "m=video ") {
 			currentMedia = "video"
 			parts := strings.Split(trimmed, " ")
-			if len(parts) >= 2 {
+			if len(parts) >= 2 && !seenVideo {
 				fmt.Sscanf(parts[1], "%d", &info.VideoPort)
 			}
+			seenVideo = true
 		} else if strings.HasPrefix(trimmed, "m=") {
 			currentMedia = "other"
 		} else if strings.HasPrefix(trimmed, "c=IN IP4 ") {
@@ -216,9 +221,13 @@ func splitSDPToMediaBlocks(sdp string) (sessionHeader string, audioBlock string,
 		case "":
 			sessionHeader = blockStr
 		case "audio":
-			audioBlock = blockStr
+			if audioBlock == "" { // first pair only: a later one is the shared content
+				audioBlock = blockStr
+			}
 		case "video":
-			videoBlock = blockStr
+			if videoBlock == "" {
+				videoBlock = blockStr
+			}
 		case "application":
 			appBlocks = append(appBlocks, blockStr)
 		}

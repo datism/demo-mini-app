@@ -1,630 +1,531 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Photo Share — 5G New Calling</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d1117;
-                 font-family: 'Segoe UI', Roboto, sans-serif; color: #e6edf3; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Chia sẻ nội dung</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #15181d; --muted: #6a7280; --line: #e2e5ea;
+    --accent: #1d6ae5; --accent-soft: #e8f0fd; --danger: #c9302c;
+    --black: #000; --on-black: #f2f3f5;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  [hidden] { display: none !important; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--ui); }
+  html.dark, html.dark body { background: var(--black); }
+  /* Màn video: nền trong suốt để thấy SurfaceView native phía sau */
+  html.video, html.video body { background: transparent; }
 
-    /* ── Header ── */
-    #header { position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 30;
-              display: flex; align-items: center; justify-content: space-between;
-              padding: 0 14px; background: rgba(13,17,23,0.92); border-bottom: 1px solid #21262d; }
-    #header .title { font-size: 15px; font-weight: 600; }
-    #header .status { font-size: 11px; color: #8b949e; }
-    #btnPick { background: #238636; color: #fff; border: none; border-radius: 16px;
-               padding: 6px 14px; font-size: 13px; font-weight: 600; }
+  .view { position: absolute; inset: 0; display: flex; flex-direction: column; }
 
-    /* ── Viewer ── */
-    #viewer { position: absolute; top: 44px; bottom: 96px; left: 0; right: 0;
-              overflow: hidden; background: #010409; touch-action: none; }
-    #imgCanvasWrap { position: absolute; top: 0; bottom: 0; left: 0; right: 0;
-                     display: flex; align-items: center; justify-content: center; }
-    /* Kích thước do sizeCanvas() tính (fit vào #viewer) — max-width/height % không hoạt động vì #stage co theo ảnh. */
-    #photoImg, #photoVideo { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
-    #photoImg { -webkit-user-drag: none; }
-    #photoVideo { width: 90vw; max-height: calc(100vh - 150px); background: #000; }
-    #strip .video-thumb { flex: 0 0 auto; width: 78px; height: 78px; border-radius: 8px; border: 2px solid #30363d; background: #161b22; display:flex; align-items:center; justify-content:center; font-size:26px; }
-    #strip .video-thumb.active { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.4); }
-    #drawCanvas { position: absolute; inset: 0; display: block; pointer-events: none; touch-action: none; }
+  /* Home */
+  #home { padding: 40px 20px 20px; }
+  #home h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
+  #home .sub { color: var(--muted); font-size: 13px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #2da44e; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+  .choice { border: 1px solid var(--line); background: var(--bg); border-radius: 18px; padding: 18px 14px 16px; text-align: left;
+            font: inherit; color: var(--ink); display: grid; gap: 4px; }
+  .choice:active { background: var(--accent-soft); border-color: var(--accent); }
+  .choice svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 18px; }
+  .choice b { font-size: 15px; font-weight: 600; }
+  .choice span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+  #home .foot { margin-top: auto; font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.5; }
 
-    /* ── Loading spinner ── */
-    #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-              text-align: center; display: none; z-index: 5; }
-    #loader .spin { width: 42px; height: 42px; border: 4px solid #30363d;
-                    border-top-color: #58a6ff; border-radius: 50%; margin: 0 auto 10px;
-                    animation: spin 0.9s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    #loader .pct { font-size: 12px; color: #8b949e; }
+  /* Màn chờ */
+  .center { align-items: center; justify-content: center; text-align: center; padding: 30px 28px; gap: 14px; }
+  .center h3 { font-size: 16px; font-weight: 600; }
+  .center p { color: var(--muted); font-size: 13px; }
+  .spinner { width: 34px; height: 34px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn { font: inherit; font-size: 14px; font-weight: 600; border-radius: 999px; padding: 10px 18px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.ghost { border-color: transparent; color: var(--muted); }
 
-    /* ── Empty state ── */
-    #empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-             text-align: center; color: #484f58; }
-    #empty .icon { font-size: 52px; margin-bottom: 10px; }
-    #empty .txt { font-size: 14px; }
+  /* Sheet mời */
+  .scrim { position: absolute; inset: 0; background: rgba(15,18,22,.38); z-index: 30; display: flex; align-items: flex-end; }
+  .sheet { width: 100%; background: var(--bg); border-radius: 22px 22px 0 0; padding: 10px 18px 22px; display: grid; gap: 14px; }
+  .grab { width: 36px; height: 4px; border-radius: 4px; background: var(--line); justify-self: center; }
+  .sheet h4 { font-size: 16px; font-weight: 600; }
+  .sheet .note { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .invite-head { display: flex; gap: 12px; align-items: center; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 650; font-size: 13px; }
+  .row { display: flex; gap: 10px; }
+  .row .btn { flex: 1; }
 
-    /* ── Toolbar vẽ ── */
-    #drawBar { position: fixed; right: 8px; top: 50%; transform: translateY(-50%);
-               display: flex; flex-direction: column; gap: 10px; z-index: 50; }
-    #drawBar button { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%; border: 2px solid #30363d;
-                      background: #161b22; font-size: 18px; color: #e6edf3; touch-action: manipulation; }
-    #drawBar button.active { border-color: #58a6ff; background: #1f3a56; }
-    #drawBar .swatch { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; border: 2px solid #30363d; }
-    #drawBar .palette-item { display: none; }
-    #drawBar .swatch.active { border-color: #fff; transform: scale(1.12); }
+  /* Viewer ảnh */
+  #viewer, #videoView { background: var(--black); color: var(--on-black); }
+  #videoView { background: transparent; }
+  .bar { position: absolute; inset: 0 0 auto; padding: 10px 8px 12px; display: flex; align-items: center; gap: 2px; z-index: 5;
+         background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0)); transition: opacity .3s; }
+  .bar.fade { opacity: 0; pointer-events: none; }
+  .bar .title { flex: 1; text-align: center; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar .title.left { text-align: left; padding-left: 6px; display: flex; align-items: center; gap: 8px; }
+  .icon { width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent; color: inherit; display: grid; place-items: center; }
+  .icon svg { width: 21px; height: 21px; }
+  .icon:disabled { opacity: .3; }
+  .icon.hide { visibility: hidden; }
+  #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; display: grid; place-items: center; }
+  #stage img { max-width: 100%; max-height: 100%; user-select: none; -webkit-user-drag: none; transform-origin: center; transition: transform .18s ease-out, filter .3s; }
+  #stage img.loading { filter: blur(14px) saturate(.8); }
+  #stage.dragging img { transition: none; }
+  #progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 35%; background: var(--accent); z-index: 6; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  #dots { position: absolute; bottom: 22px; inset-inline: 0; display: flex; justify-content: center; gap: 6px; z-index: 5; }
+  #dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.35); }
+  #dots i.on { background: #fff; transform: scale(1.2); }
+  #zoomtag { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); font-size: 11.5px; background: rgba(255,255,255,.14); padding: 4px 10px; border-radius: 999px; z-index: 5; }
 
-    /* ── Thumbnail strip ── */
-    #strip { position: fixed; bottom: 0; left: 0; right: 0; height: 96px; z-index: 30;
-             display: flex; gap: 6px; padding: 8px; overflow-x: auto;
-             background: rgba(13,17,23,0.95); border-top: 1px solid #21262d; }
-    #strip .thumb { flex: 0 0 auto; width: 78px; height: 78px; border-radius: 8px;
-                    border: 2px solid #30363d; object-fit: cover; background: #161b22; }
-    #strip .thumb.active { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.4); }
+  /* Video */
+  #paused { position: absolute; inset: 0; display: grid; place-items: center; z-index: 4; pointer-events: none; }
+  #paused span { background: rgba(0,0,0,.6); padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff; }
+  .live { width: 8px; height: 8px; border-radius: 50%; background: #ff453a; animation: pulse 1.4s ease-in-out infinite; }
+  .live.still { animation: none; background: #8a8f98; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .controls { position: absolute; inset: auto 0 0; padding: 14px 18px 24px; display: grid; gap: 14px; background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.65)); z-index: 5; }
+  .track { display: flex; align-items: center; gap: 10px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: rgba(255,255,255,.8); }
+  .rail { flex: 1; height: 3px; border-radius: 3px; background: rgba(255,255,255,.25); position: relative; }
+  #fill { position: absolute; inset: 0 auto 0 0; background: #fff; border-radius: 3px; width: 0; }
+  .ctrl-row { display: flex; justify-content: center; align-items: center; gap: 18px; }
+  .round { width: 54px; height: 54px; border-radius: 50%; border: 0; background: #fff; color: #000; display: grid; place-items: center; }
+  .round svg { width: 22px; height: 22px; }
+  .stop { font: inherit; font-size: 13.5px; font-weight: 600; color: #fff; background: rgba(255,69,58,.9); border: 0; border-radius: 999px; padding: 10px 18px; }
 
-    /* ── Hint toast ── */
-    #toast { position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
-             background: rgba(30,35,42,0.96); color: #e6edf3;
-             padding: 8px 16px; border-radius: 18px; font-size: 12px; z-index: 40;
-             border: 1px solid #30363d; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
-    #toast.show { opacity: 1; }
-  </style>
+  #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(21,24,29,.92); color: #fff; font-size: 12.5px;
+           padding: 9px 14px; border-radius: 999px; z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+</style>
 </head>
 <body>
 
-<div id="header">
-  <div>
-    <div class="title">📷 Chia sẻ ảnh và video</div>
-    <div class="status" id="statusText">Đang kết nối...</div>
+<div class="view" id="home">
+  <h1>Chia sẻ nội dung</h1>
+  <div class="sub"><span class="live-dot"></span><span id="peerLine">Đang trong cuộc gọi</span></div>
+  <div class="choices">
+    <button class="choice" id="btnPhoto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg>
+      <b>Ảnh</b><span>Chia sẻ ảnh</span>
+    </button>
+    <button class="choice" id="btnVideo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 5 2.5-5 2.5z"/></svg>
+      <b>Video</b><span>Phát trực tiếp</span>
+    </button>
   </div>
-  <button id="btnPick">＋ Chọn media</button>
+  <p class="foot">Người kia cần chấp nhận trước khi bạn chọn nội dung.</p>
 </div>
 
-<div id="viewer">
-  <div id="imgCanvasWrap">
-    <div style="position:relative; display:inline-block;" id="stage">
-      <img id="photoImg" alt="" style="display:none">
-      <video id="photoVideo" controls playsinline preload="metadata" style="display:none"></video>
-      <canvas id="drawCanvas"></canvas>
+<div class="view center" id="wait" hidden>
+  <div class="spinner"></div>
+  <h3 id="waitTitle"></h3>
+  <p id="waitSub"></p>
+  <button class="btn ghost" id="btnCancel">Hủy</button>
+</div>
+
+<div class="view center" id="peerPicking" hidden>
+  <div class="spinner"></div>
+  <h3 id="pickTitle"></h3>
+  <p>Nội dung sẽ hiện ở đây.</p>
+  <button class="btn ghost" id="btnPickLeave">Thoát</button>
+</div>
+
+<div class="view" id="viewer" hidden>
+  <div id="stage"><img id="photo" alt="" draggable="false"></div>
+  <div class="bar" id="photoBar">
+    <button class="icon" id="btnLeave" title="Kết thúc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="title" id="counter">1 / 1</div>
+    <button class="icon" id="btnAdd" title="Thêm ảnh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="icon" id="btnDownload" title="Tải về"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 19h14"/></svg></button>
+    <button class="icon" id="btnReset" title="Đặt lại thu phóng"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+  </div>
+  <div id="zoomtag" hidden></div>
+  <div id="dots"></div>
+  <div id="progress" hidden></div>
+</div>
+
+<div class="view" id="videoView" hidden>
+  <div id="paused" hidden><span>Đã tạm dừng</span></div>
+  <div class="bar">
+    <div class="title left"><span class="live" id="liveDot"></span><span id="vtitle"></span></div>
+    <button class="icon" id="btnMute" title="Tắt tiếng"></button>
+  </div>
+  <div class="controls">
+    <div class="track"><span id="cur">0:00</span><div class="rail"><div id="fill"></div></div><span id="dur">0:00</span></div>
+    <div class="ctrl-row" id="senderCtl">
+      <button class="round" id="btnPlayPause" title="Tạm dừng"></button>
+      <button class="stop" id="btnStop">Dừng</button>
     </div>
   </div>
-  <div id="loader"><div class="spin"></div><div class="pct" id="loaderPct">0%</div></div>
-  <div id="empty">
-    <div class="icon">🖼️</div>
-    <div class="txt">Chưa có ảnh — bấm “Chọn ảnh”<br>hoặc chờ đối phương chia sẻ</div>
+</div>
+
+<div class="scrim" id="inviteScrim" hidden>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="invite-head"><div class="avatar" id="inviteAvatar"></div><div><h4 id="inviteTitle"></h4><p class="note">Đang trong cuộc gọi</p></div></div>
+    <div class="row"><button class="btn" id="btnDecline">Từ chối</button><button class="btn primary" id="btnAccept">Chấp nhận</button></div>
   </div>
 </div>
 
-<div id="drawBar">
-  <button id="btnDraw" title="Bút vẽ">✏️</button>
-  <div class="swatch active" style="background:#ff3b30" data-color="#ff3b30"></div>
-  <div class="swatch" style="background:#30d158" data-color="#30d158"></div>
-  <div class="swatch" style="background:#0a84ff" data-color="#0a84ff"></div>
-  <div class="swatch" style="background:#ffd60a" data-color="#ffd60a"></div>
-  <button id="btnClearDraw" title="Xóa nét vẽ">🧹</button>
-</div>
-
-<div id="strip"></div>
 <div id="toast"></div>
-
-<input type="file" id="fileInput" accept="image/*,video/mp4" multiple style="display:none">
+<input type="file" id="fileInput" accept="image/*" multiple style="display:none">
 
 <script>
-  'use strict';
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════
+ * CONTENT SHARING (app id: photo-share)
+ *
+ * Báo hiệu SIP do native đảm nhiệm (re-INVITE / 180 / 200 / 603 / CANCEL).
+ * Trang gọi:  AndroidBridge.requestShare(kind) · cancelShare() · answerShare(bool)
+ *             stopShare() · pickVideo() · pauseVideo(bool) · muteShareAudio(bool)
+ *             savePhotoB64(json) · setCameraTile(bool)
+ * Native gọi: window.shareEvent(name, argJson)
+ *   ringing | accepted | declined | cancelled | closed | failed{code} | invite{kind,peer}
+ *   videoReady{name,dur} | videoTime{t} | videoEnded | videoError{msg}
+ *
+ * Trong phiên (ADC stream 1000, JSON):
+ *   offer{photos:[{id,bytes,thumb}]} · fetch{id} · begin{id,chunks,bytes}
+ *   goto{id,seq} · done{id,ok} · vstart{name,dur} · vpause{paused} · vtime{t}
+ * Byte ảnh: PhotoShareTransport → window.receiveData("PSHARE:<idHash>:<b64>")
+ * ═══════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const B = () => window.AndroidBridge || null;
+const state = {
+  s: null,                 // phiên: {kind, role, peer}
+  photos: {}, order: [], current: null, seq: 0, gotSeqMax: 0,
+  zoom: { k: 1, x: 0, y: 0 },
+  video: null,             // {name, dur, t, paused}
+  muted: false, peer: '',
+};
 
-  /* ═══════════════════════════════════════════════════════════════════
-   * PHOTO-SHARE mini-app
-   *
-   * Wire protocol (2 lớp trên ADC stream 1000, P2P qua MF):
-   *   A. JSON control  —/native→sendOrQueueAdc (text path). Msg types:
-   *      {t:"offer",  photos:[{id,w,h,bytes,thumb}]}
-   *      {t:"fetch",  id, fromSeq?}
-   *      {t:"begin",  id, chunks, bytes, sha256}
-   *      {t:"done",   id, ok}
-   *      {t:"goto",   id, seq}
-   *      {t:"stroke", id, color, w, pts:[[x,y]∈[0,1],...]}
-   *      {t:"clear",  id}
-   *   B. Binary chunk — native PhotoShareTransport tự xử lý (byte đầu 0x01),
-   *      khi đủ chunks đẩy lên JS: window.receiveData("PSHARE:<idHash>:<b64>")
-   *
-   * Nhận từ xa: mọi msg đến qua window.receiveData(dataStr).
-   * ═══════════════════════════════════════════════════════════════════ */
+function sendJson(obj) {
+  const s = JSON.stringify(obj), b = B();
+  if (b && b.send) b.send(1000, s); else if (b && b.sendData) b.sendData(s); else console.warn('[CS] no bridge', s);
+}
+function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); console.warn('[CS] bridge missing', name); }
 
-  const $ = id => document.getElementById(id);
-  const state = {
-    photos: {},            // id → {id,w,h,bytes,thumb,ready(bool),url?,strokes:[]}
-    order: [],             // thứ tự strip
-    current: null,         // photoId đang xem
-    seq: 0,                //counter cho goto LWW
-    drawMode: false,
-    paletteOpen: false,
-    color: '#ff3b30',
-    preloading: {},
-  };
+let toastTimer = null;
+function toast(msg, ms) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200); }
+const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const kindWord = k => k === 'photo' ? 'ảnh' : 'video';
 
-  /* ─────────────── Bridge helpers ─────────────── */
-  function sendJson(obj) {
-    const s = JSON.stringify(obj);
-    if (window.AndroidBridge && window.AndroidBridge.send) {
-      window.AndroidBridge.send(1000, s);
-    } else if (window.AndroidBridge && window.AndroidBridge.sendData) {
-      window.AndroidBridge.sendData(s);
-    } else { console.warn('[PS] no bridge', s); }
+const VIEWS = ['home', 'wait', 'peerPicking', 'viewer', 'videoView'];
+function show(v) {
+  VIEWS.forEach(id => { $(id).hidden = id !== v; });
+  document.documentElement.classList.toggle('dark', v === 'viewer');
+  document.documentElement.classList.toggle('video', v === 'videoView');
+  call('setCameraTile', v === 'viewer' || v === 'videoView');
+}
+function peerLabel() { return state.peer || 'đối phương'; }
+
+/* ─────────────── Mời / chờ / chấp nhận ─────────────── */
+function startShare(kind) {
+  state.s = { kind, role: 'sender' };
+  $('waitTitle').textContent = 'Đang chờ ' + peerLabel() + ' chấp nhận…';
+  $('waitSub').textContent = 'Bạn sẽ chọn ' + kindWord(kind) + ' sau khi được chấp nhận.';
+  show('wait');
+  call('requestShare', kind);
+}
+$('btnPhoto').onclick = () => startShare('photo');
+$('btnVideo').onclick = () => startShare('video');
+$('btnCancel').onclick = () => { call('cancelShare'); endSession(); };
+
+$('btnAccept').onclick = () => {
+  $('inviteScrim').hidden = true;
+  $('pickTitle').textContent = peerLabel() + ' đang chọn ' + kindWord(state.s.kind) + '…';
+  show('peerPicking');
+  call('answerShare', true);
+};
+$('btnDecline').onclick = () => { $('inviteScrim').hidden = true; call('answerShare', false); state.s = null; };
+$('btnPickLeave').onclick = () => { call('stopShare'); endSession(); };
+
+function endSession() {
+  $('inviteScrim').hidden = true;
+  state.s = null; state.video = null;
+  Object.values(state.photos).forEach(p => { if (p.url && !p.local) URL.revokeObjectURL(p.url); });
+  state.photos = {}; state.order = []; state.current = null; state.gotSeqMax = 0; state.seq = 0;
+  setZoom(1, 0, 0);
+  show('home');
+}
+
+/* Sự kiện báo hiệu từ native */
+window.shareEvent = function (name, arg) {
+  let a = {}; try { a = typeof arg === 'string' && arg ? JSON.parse(arg) : (arg || {}); } catch (e) {}
+  const s = state.s;
+  switch (name) {
+    case 'ringing': break;
+    case 'invite':
+      state.peer = a.peer || state.peer;
+      state.s = { kind: a.kind, role: 'receiver' };
+      $('inviteAvatar').textContent = String(state.peer).slice(-2);
+      $('inviteTitle').textContent = peerLabel() + (a.kind === 'photo' ? ' muốn chia sẻ ảnh' : ' muốn phát video');
+      $('inviteScrim').hidden = false;
+      break;
+    case 'accepted': if (s && s.role === 'sender') (s.kind === 'photo' ? pickPhotos() : call('pickVideo')); break;
+    case 'declined': toast(peerLabel() + ' đã từ chối'); endSession(); break;
+    case 'cancelled': if (s) { toast(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
+    case 'closed': if (s) { toast(peerLabel() + (s.kind === 'video' ? ' đã dừng chia sẻ' : ' đã kết thúc chia sẻ')); endSession(); } break;
+    case 'failed': toast(a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : 'Không thể chia sẻ lúc này'); endSession(); break;
+    case 'videoReady': onVideoReady(a); break;
+    case 'videoTime': if (state.video) { renderTime(a.t); sendJson({ t: 'vtime', v: a.t }); } break;
+    case 'videoEnded': if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;
+    case 'videoError': toast(a.msg || 'Video không được hỗ trợ'); if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;
+    case 'peer': state.peer = a.peer || ''; $('peerLine').textContent = state.peer ? 'Đang gọi với ' + state.peer : 'Đang trong cuộc gọi'; break;
   }
+};
 
-  /* ─────────────── Toast + status ─────────────── */
-  let toastTimer = null;
-  function toast(msg, ms) {
-    const t = $('toast'); t.textContent = msg; t.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200);
-  }
-  function setStatus(s) { $('statusText').textContent = s; }
-
-  /* ─────────────── Thumbnail strip ─────────────── */
-  function renderStrip() {
-    const strip = $('strip'); strip.innerHTML = '';
-    state.order.forEach(id => {
-      const p = state.photos[id];
-      const thumb = p.kind === 'video' ? document.createElement('div') : document.createElement('img');
-      thumb.className = (p.kind === 'video' ? 'video-thumb' : 'thumb') + (id === state.current ? ' active' : '');
-      if (p.kind === 'video') thumb.textContent = '▶';
-      else if (p.thumbUrl) thumb.src = p.thumbUrl;
-      thumb.onclick = () => gotoPhoto(id, true);
-      strip.appendChild(thumb);
-    });
-  }
-
-  /* ─────────────── Hiển thị ảnh ─────────────── */
-  function showPhoto(p) {
-    $('empty').style.display = 'none';
-    const img = $('photoImg'), video = $('photoVideo');
-    if (p.kind === 'video') {
-      img.style.display = 'none';
-      $('drawCanvas').style.display = 'none';
-      video.style.display = 'block';
-      if (video.src !== p.url) { video.pause(); video.src = p.url; video.load(); }
-      return;
-    }
-    video.pause(); video.removeAttribute('src'); video.style.display = 'none';
-    $('drawCanvas').style.display = 'block';
-    img.onload = () => { sizeCanvas(); redrawStrokes(); };
-    img.src = p.url; img.style.display = 'block';
-    requestAnimationFrame(() => { sizeCanvas(); redrawStrokes(); });
-  }
-
-  function sizeCanvas() {
-    const img = $('photoImg'); const c = $('drawCanvas');
-    if (!img.naturalWidth || state.photos[state.current]?.kind === 'video') return;
-    // Fit (contain) vào #viewer: cả thumb 256px lẫn ảnh 1920px đều hiện đúng khung, hai bên giống nhau.
-    const viewer = $('viewer');
-    if (!viewer.clientWidth || !viewer.clientHeight) return;
-    const k = Math.min(viewer.clientWidth / img.naturalWidth, viewer.clientHeight / img.naturalHeight);
-    const rect = { width: Math.max(1, Math.floor(img.naturalWidth * k)), height: Math.max(1, Math.floor(img.naturalHeight * k)) };
-    img.style.width = rect.width + 'px';
-    img.style.height = rect.height + 'px';
-    const stage = $('stage');
-    stage.style.width = rect.width + 'px';
-    stage.style.height = rect.height + 'px';
-    const dpr = window.devicePixelRatio || 1;
-    c.width = Math.round(rect.width * dpr); c.height = Math.round(rect.height * dpr);
-    c.style.width = rect.width + 'px'; c.style.height = rect.height + 'px';
-    // Assigning width/height resets the context; set a fresh DPR transform instead
-    // of accumulating scale factors every time the view is resized.
-    c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
-    // canvas phủ NGANG TRÊN ảnh để bắt touch
-    c.style.pointerEvents = state.drawMode ? 'auto' : 'none';
-  }
-
-  function redrawStrokes() {
-    const c = $('drawCanvas'); const ctx = c.getContext('2d');
-    const p = state.photos[state.current];
-    const canvasRect = c.getBoundingClientRect();
-    ctx.clearRect(0, 0, canvasRect.width, canvasRect.height);
-    if (!p) return;
-    const imageRect = $('photoImg').getBoundingClientRect();
-    p.strokes.forEach(st => drawStrokeOn(ctx, st, imageRect.width, imageRect.height));
-  }
-  function drawStrokeOn(ctx, st, w, h) {
-    if (!st.pts || !st.pts.length) return;
-    ctx.strokeStyle = st.color; ctx.lineWidth = st.w || 3;
-    ctx.lineJoin = ctx.lineCap = 'round';
-    ctx.beginPath();
-    st.pts.forEach((pt, i) => {
-      const x = pt[0] * w, y = pt[1] * h;
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    });
-    if (st.pts.length === 1) {
-      const x = st.pts[0][0] * w, y = st.pts[0][1] * h;
-      ctx.beginPath(); ctx.arc(x, y, (st.w || 3) / 2, 0, Math.PI * 2);
-      ctx.fillStyle = st.color; ctx.fill();
-    } else {
-      ctx.stroke();
-    }
-  }
-
-  /* ─────────────── Điều hướng (goto + LWW) ─────────────── */
-  function gotoPhoto(id, userInitiated) {
-    const p = state.photos[id];
-    if (!p) return;
-    state.current = id;
-    renderStrip();
-    if (p.ready && p.url) { showPhoto(p); }
-    else { fetchPhoto(id); }
-
-    // preload lân cận — vuốt tiếp là có ngay
-    const idx = state.order.indexOf(id);
-    [idx + 1, idx - 1].forEach(i => {
-      const nid = state.order[i];
-      if (nid && state.photos[nid] && !state.photos[nid].ready) fetchPhoto(nid);
-    });
-
-    if (userInitiated) {
-      state.seq++;
-      sendJson({ t: 'goto', id: id, seq: state.seq });
-    }
-  }
-
-  function onRemoteGoto(msg) {
-    if (typeof msg.seq === 'number' && msg.seq <= state.gotSeqMax) return; // LWW drop
-    state.gotSeqMax = msg.seq || 0;
-    if (!state.photos[msg.id]) { toast('Đối phương đang xem media chưa tải về'); return; }
-    gotoPhoto(msg.id, false);
-  }
-
-  /* ─────────────── Fetch / nhận ảnh ─────────────── */
-  function fetchPhoto(id) {
-    const p = state.photos[id];
-    if (!p || p.fetching) return;
-    p.fetching = true;
-    if (p.local) {
-      // ảnh của chính máy mình — có sẵn qua /media/
-      p.ready = true; p.url = window.AndroidBridge ? (p.kind === 'video' ? window.AndroidBridge.videoUrl(id) : window.AndroidBridge.mediaUrl(id, false)) : '';
-      if (state.current === id) showPhoto(p);
-      p.fetching = false;
-      return;
-    }
-    showLoader(0, p.kind === 'video' ? 'Đang nhận video...' : 'Đang nhận ảnh...');
-    sendJson({ t: 'fetch', id: id });
-    // Local thumb hiển thị tạm trong lúc chờ full
-    if (p.thumbUrl && state.current === id) showPhoto({ url: p.thumbUrl });
-  }
-
-  function showLoader(pct, label) {
-    const loader = $('loader');
-    if (pct === null) { loader.style.display = 'none'; return; }
-    loader.style.display = 'block';
-    $('loaderPct').textContent = (label || '') + ' ' + pct + '%';
-  }
-
-  function onBegin(msg) {
-    const p = state.photos[msg.id];
-    if (!p) return;
-    p.chunks = msg.chunks; p.chunksGot = 0; p.sha256 = msg.sha256;
-  }
-
-  /** Frame media đã ghép xong phía native: "PSHARE:<idHash>:<base64>" */
-  function onPshare(idHash, b64) {
-    // quy idHash → id qua bảng photos
-    const id = Object.keys(state.photos).find(
-      k => hash16(k) === Number(idHash)
-    );
-    if (!id) { console.warn('[PS] unknown idHash', idHash); return; }
-    const p = state.photos[id];
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    if (p.url) URL.revokeObjectURL(p.url);
-    p.url = URL.createObjectURL(new Blob([bytes], { type: p.mimeType || 'image/jpeg' }));
-    p.ready = true; p.fetching = false;
-    showLoader(null);
-    if (state.current === id) showPhoto(p);
-    sendJson({ t: 'done', id: id, ok: true });
-    toast(p.kind === 'video' ? '🎬 Đã nhận video' : '📸 Đã nhận ảnh');
-  }
-  function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return h & 0xffff; }
-
-  /* ─────────────── Chọn ảnh (máy mình là nguồn) ─────────────── */
-  $('btnPick').onclick = () => $('fileInput').click();
-  const MAX_VIDEO_BYTES = 6 * 1024 * 1024; // Bản đơn giản: giới hạn video 6 MiB vì payload đi qua JS bridge/base64.
-
-  function blobToB64(blob) {
-    return new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result).split(',')[1] || '');
-      r.onerror = () => reject(r.error || new Error('read_failed'));
-      r.readAsDataURL(blob);
-    });
-  }
-
-  /** File ảnh -> base64 JPEG đã thu nhỏ (EXIF đã được áp khi decode). Lỗi decode: chỉ nhận file nhỏ nguyên bản. */
-  async function fileToJpegB64(file) {
+/* ─────────────── Chọn ảnh (bên gửi) ─────────────── */
+function pickPhotos() { $('fileInput').click(); }
+const blobToB64 = blob => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1] || '');
+  r.onerror = () => reject(r.error || new Error('read_failed'));
+  r.readAsDataURL(blob);
+});
+async function fileToJpegB64(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+    if (blob) return await blobToB64(blob);
+  } catch (e) { /* dùng bản gốc */ }
+  if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
+  return await blobToB64(file);
+}
+async function thumbB64Of(id) {
+  try {
+    const resp = await fetch(B().mediaUrl(id, true));
+    if (!resp.ok) return '';
+    const buf = new Uint8Array(await resp.arrayBuffer());
+    let bin = '';
+    for (let j = 0; j < buf.length; j += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(j, j + 0x8000));
+    return btoa(bin);
+  } catch (e) { return ''; }
+}
+$('fileInput').onchange = async () => {
+  const files = Array.from($('fileInput').files || []);
+  $('fileInput').value = '';
+  if (!files.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; } // đóng bộ chọn mà không chọn gì
+  if (!B()) { toast('Không tìm thấy AndroidBridge'); return; }
+  toast('Đang xử lý ' + files.length + ' ảnh…');
+  const offered = [];
+  for (let i = 0; i < files.length; i++) {
+    const id = 'p' + Date.now() + '_' + i;
+    let res;
     try {
-      const bmp = await createImageBitmap(file);
-      const MAX = 1920, k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(bmp.width * k));
-      c.height = Math.max(1, Math.round(bmp.height * k));
-      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      if (bmp.close) bmp.close();
-      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
-      if (blob) return await blobToB64(blob);
-    } catch (e) { /* rơi xuống bản gốc */ }
-    if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
-    return await blobToB64(file);
+      const data = await fileToJpegB64(files[i]);
+      res = JSON.parse(B().importPhotoB64(JSON.stringify({ id, data, type: 'image/jpeg' })) || '{}');
+    } catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); continue; }
+    if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); continue; }
+    state.photos[id] = { id, mimeType: 'image/jpeg', bytes: res.bytes, local: true, ready: true, url: B().mediaUrl(id, false), thumbUrl: B().mediaUrl(id, true) };
+    state.order.push(id);
+    offered.push({ id, bytes: res.bytes, thumb: await thumbB64Of(id) });
   }
+  if (!offered.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
+  sendJson({ t: 'offer', photos: offered.map(o => ({ id: o.id, bytes: o.bytes, thumb: o.thumb })) });
+  const first = state.s && !$('viewer').hidden ? false : true;
+  if (first) enterViewer();
+  gotoPhoto(offered[0].id, true);
+};
+$('btnAdd').onclick = pickPhotos;
 
-  $('fileInput').onchange = async () => {
-    const files = Array.from($('fileInput').files || []);
-    $('fileInput').value = ''; // cho phép chọn lại đúng ảnh đó lần sau
-    if (!files.length) return;
-    if (!window.AndroidBridge) {
-      toast('Không tìm thấy AndroidBridge'); return;
-    }
-    toast('Đã chọn ' + files.length + ' tệp, đang xử lý...');
-    const offered = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const fileName = (file.name || '').toLowerCase();
-      // Some Android document providers return an empty or generic MIME type; use extension as fallback.
-      const isVideo = file.type.startsWith('video/') || fileName.endsWith('.mp4');
-      const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/.test(fileName);
-      if (!isVideo && !isImage) { toast('Không nhận diện được định dạng: ' + (file.name || file.type || 'unknown')); continue; }
-      if (isVideo && fileName && !fileName.endsWith('.mp4')) { toast('Hiện chỉ hỗ trợ video MP4'); continue; }
-      if (isVideo && file.size > MAX_VIDEO_BYTES) { toast('Video vượt quá giới hạn 6 MiB'); continue; }
-      const kind = isVideo ? 'video' : 'image';
-      const mimeType = isVideo ? 'video/mp4' : 'image/jpeg';
-      const id = (isVideo ? 'v' : 'p') + Date.now() + '_' + i;
-      // WebView <input type=file> trả File object. Thu nhỏ ảnh trong trang (canvas, cạnh dài 1920, JPEG):
-      // ảnh 12-50 MP dạng base64 qua JS bridge nặng hàng chục MB và làm treo cả app.
-      let b64;
-      try { b64 = isVideo ? await blobToB64(file) : await fileToJpegB64(file); }
-      catch (e) { toast('Không đọc được media: ' + (e && e.message || e)); continue; }
-      const requiredImportMethod = isVideo ? window.AndroidBridge.importVideoB64 : window.AndroidBridge.importPhotoB64;
-      if (typeof requiredImportMethod !== 'function') {
-        toast('AndroidBridge chưa có hàm import ' + kind);
-        continue;
-      }
-      let res;
-      try {
-        const payload = JSON.stringify({ id: id, data: b64, type: mimeType });
-        // Call directly on the injected object. Detaching a @JavascriptInterface method
-        // into a local variable makes WebView reject it as a non-injected object.
-        const rawResult = isVideo
-          ? window.AndroidBridge.importVideoB64(payload)
-          : window.AndroidBridge.importPhotoB64(payload);
-        res = JSON.parse(rawResult || '{}');
-      } catch (e) {
-        toast('Lỗi khi gửi tệp sang Android: ' + (e && e.message || e));
-        continue;
-      }
-      if (res.ok) {
-        state.photos[id] = {
-          id, kind, mimeType, w: 0, h: 0, bytes: res.bytes, local: true, ready: true,
-          url: isVideo ? window.AndroidBridge.videoUrl(id) : window.AndroidBridge.mediaUrl(id, false),
-          thumbUrl: isVideo ? '' : window.AndroidBridge.mediaUrl(id, true),
-          strokes: [],
-        };
-        state.order.push(id);
-        offered.push({ id, bytes: res.bytes, kind, mimeType, thumb: isVideo ? '' : await thumbB64Of(id) });
-      } else {
-        toast('Không nhập được media: ' + (res.error || '?'));
-      }
-    }
-    renderStrip();
-    if (offered.length) {
-      gotoPhoto(offered[0].id, true);
-      setStatus('Đã chia sẻ ' + offered.length + ' media');
-      toast('Đã chia sẻ ' + offered.length + ' media');
-      // Thumb base64 kèm theo offer — phía nhận hiện strip ngay không cần fetch full.
-      const photosPayload = [];
-      for (const o of offered) {
-        photosPayload.push({ id: o.id, bytes: o.bytes, kind: o.kind, mimeType: o.mimeType, thumb: o.thumb });
-      }
-      sendJson({ t: 'offer', photos: photosPayload });
-    }
-  };
-
-  /** Đọc thumbnail <id>_t.jpg từ photostore qua /media/ rồi trả base64 thuần. */
-  async function thumbB64Of(id) {
-    try {
-      const url = window.AndroidBridge.mediaUrl(id, true);
-      const resp = await fetch(url);
-      if (!resp.ok) return '';
-      const buf = new Uint8Array(await resp.arrayBuffer());
-      let bin = '';
-      for (let j = 0; j < buf.length; j += 0x8000) {
-        bin += String.fromCharCode.apply(null, buf.subarray(j, j + 0x8000));
-      }
-      return btoa(bin);
-    } catch (e) { return ''; }
-  }
-
-  /* ─────────────── Nhận offer từ xa ─────────────── */
-  function onOffer(msg) {
-    (msg.photos || []).forEach(ph => {
-      if (state.photos[ph.id]) return;
-      let thumbUrl = '';
-      if (ph.thumb) { // data URL hoặc base64 thuần
-        thumbUrl = ph.thumb.startsWith('data:') ? ph.thumb : 'data:image/jpeg;base64,' + ph.thumb;
-      }
-      state.photos[ph.id] = {
-        id: ph.id, kind: ph.kind || 'image', mimeType: ph.mimeType || 'image/jpeg',
-        bytes: ph.bytes, ready: false, strokes: [], thumbUrl: thumbUrl,
-      };
-      state.order.push(ph.id);
-    });
-    renderStrip();
-    toast('📨 Đối phương chia sẻ ' + msg.photos.length + ' media');
-    if (!state.current && msg.photos.length) gotoPhoto(msg.photos[0].id, false);
-  }
-
-  /* ─────────────── Xử lý fetch từ xa (máy mình có ảnh local) ─────────────── */
-  function onFetch(msg) {
-    const p = state.photos[msg.id];
-    if (!p || !p.local || !window.AndroidBridge) return;
-    const payload = JSON.stringify({ id: msg.id });
-    const rawResult = p.kind === 'video'
-      ? window.AndroidBridge.sendVideo(payload)
-      : window.AndroidBridge.sendPhoto(payload);
-    const res = JSON.parse(rawResult || '{}');
-    if (res.ok) {
-      sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes, kind: p.kind, mimeType: p.mimeType });
-    }
-  }
-
-  /* ═══════════════ Vẽ trên ảnh ═══════════════ */
-  $('btnDraw').onclick = () => {
-    if (state.photos[state.current]?.kind === 'video') { toast('Không thể vẽ lên video'); return; }
-    state.paletteOpen = !state.paletteOpen;
-    $('btnDraw').classList.toggle('active', state.paletteOpen);
-    document.querySelectorAll('#drawBar .palette-item').forEach(item => {
-      item.style.display = state.paletteOpen ? 'block' : 'none';
-    });
-  };
-  // Drawing stays enabled; the pencil only expands/collapses the palette.
-  state.drawMode = true;
-  $('drawCanvas').style.pointerEvents = 'auto';
-  document.querySelectorAll('#drawBar .swatch').forEach(s => s.classList.add('palette-item'));
-  $('btnClearDraw').classList.add('palette-item');
-
-  document.querySelectorAll('#drawBar .swatch').forEach(sw => {
-    sw.onclick = () => {
-      state.color = sw.dataset.color;
-      document.querySelectorAll('#drawBar .swatch').forEach(x => x.classList.remove('active'));
-      sw.classList.add('active');
-    };
+/* ─────────────── Nhận ảnh (bên nhận) ─────────────── */
+function onOffer(msg) {
+  const s = state.s; if (!s) return;
+  (msg.photos || []).forEach(ph => {
+    if (state.photos[ph.id]) return;
+    const thumb = ph.thumb ? (ph.thumb.startsWith('data:') ? ph.thumb : 'data:image/jpeg;base64,' + ph.thumb) : '';
+    state.photos[ph.id] = { id: ph.id, mimeType: 'image/jpeg', bytes: ph.bytes, ready: false, thumbUrl: thumb };
+    state.order.push(ph.id);
   });
+  if ($('viewer').hidden) { enterViewer(); gotoPhoto(msg.photos[0].id, false); }
+  else { renderViewer(); toast(peerLabel() + ' đã thêm ' + msg.photos.length + ' ảnh'); }
+  fetchNext();
+}
+let fetching = null;
+function fetchNext() {
+  if (fetching) return;
+  // ảnh đang xem trước, rồi các ảnh kế tiếp theo thứ tự
+  const start = Math.max(0, state.order.indexOf(state.current));
+  const ids = state.order.slice(start).concat(state.order.slice(0, start));
+  const id = ids.find(i => { const p = state.photos[i]; return p && !p.ready && !p.local; });
+  if (!id) return;
+  fetching = id;
+  sendJson({ t: 'fetch', id });
+  setTimeout(() => { if (fetching === id) { fetching = null; fetchNext(); } }, 30000); // đề phòng mất gói
+}
+function onFetch(msg) {
+  const p = state.photos[msg.id];
+  if (!p || !p.local || !B()) return;
+  const res = JSON.parse(B().sendPhoto(JSON.stringify({ id: msg.id })) || '{}');
+  if (res.ok) sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes, mimeType: p.mimeType });
+}
+function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h & 0xffff; }
+function onPshare(idHash, b64) {
+  const id = Object.keys(state.photos).find(k => hash16(k) === Number(idHash));
+  if (!id) { console.warn('[CS] unknown idHash', idHash); return; }
+  const p = state.photos[id];
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  if (p.url) URL.revokeObjectURL(p.url);
+  p.url = URL.createObjectURL(new Blob([bytes], { type: p.mimeType }));
+  p.ready = true;
+  if (fetching === id) fetching = null;
+  sendJson({ t: 'done', id, ok: true });
+  if (state.current === id) renderViewer(true);
+  fetchNext();
+}
 
-  $('btnClearDraw').onclick = () => {
-    const p = state.photos[state.current];
-    if (p) { p.strokes = []; redrawStrokes(); sendJson({ t: 'clear', id: state.current }); }
-  };
-
-  /* Pointer events cho canvas vẽ */
-  (function () {
-    const c = $('drawCanvas');
-    let stroking = null;
-    const norm = e => {
-      const r = c.getBoundingClientRect();
-      return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
-    };
-    c.addEventListener('pointerdown', e => {
-      if (!state.drawMode) return;
-      e.preventDefault();
-      stroking = { color: state.color, w: 3, pts: [norm(e)] };
-      c.setPointerCapture(e.pointerId);
-    });
-    c.addEventListener('pointermove', e => {
-      if (!stroking) return;
-      e.preventDefault();
-      stroking.pts.push(norm(e));
-      // preview cục bộ
-      const ctx = c.getContext('2d');
-      const p = state.photos[state.current];
-      if (p) {
-        const rect = c.getBoundingClientRect();
-        ctx.clearRect(0, 0, rect.width, rect.height);
-        redrawStrokes(); drawStrokeOn(ctx, stroking, rect.width, rect.height);
-      }
-    });
-    const finish = () => {
-      if (!stroking) return;
-      const p = state.photos[state.current];
-      if (p && stroking.pts.length > 0) {
-        p.strokes.push(stroking);
-        sendJson({ t: 'stroke', id: p.id, color: stroking.color, w: stroking.w, pts: stroking.pts });
-        redrawStrokes();
-      }
-      stroking = null;
-    };
-    c.addEventListener('pointerup', finish);
-    c.addEventListener('pointercancel', finish);
-    c.addEventListener('lostpointercapture', finish);
-  })();
-
-  function onRemoteStroke(msg) {
-    const p = state.photos[msg.id];
-    if (!p) return;
-    if (state.current === msg.id) {
-      p.strokes.push({ color: msg.color, w: msg.w, pts: msg.pts });
-      redrawStrokes();
-    } else {
-      p.strokes.push({ color: msg.color, w: msg.w, pts: msg.pts });
-      if (!state.hintedOther) { toast('✏️ Đối phương vẽ trên ảnh khác'); state.hintedOther = true; }
-    }
+/* ─────────────── Viewer ảnh ─────────────── */
+function enterViewer() {
+  $('btnAdd').classList.toggle('hide', !(state.s && state.s.role === 'sender'));
+  show('viewer'); wakeBar();
+}
+function gotoPhoto(id, userInitiated) {
+  if (!state.photos[id]) return;
+  state.current = id;
+  renderViewer();
+  if (userInitiated) { state.seq++; sendJson({ t: 'goto', id, seq: state.seq }); }
+  fetchNext();
+}
+function onRemoteGoto(msg) {
+  if (typeof msg.seq === 'number' && msg.seq <= state.gotSeqMax) return;
+  state.gotSeqMax = msg.seq || 0;
+  if (state.photos[msg.id]) gotoPhoto(msg.id, false);
+}
+function renderViewer(progressOnly) {
+  const p = state.photos[state.current]; if (!p) return;
+  const img = $('photo');
+  const src = p.ready ? p.url : p.thumbUrl;
+  if (!progressOnly || img.dataset.id !== p.id || p.ready) {
+    if (src && img.getAttribute('src') !== src) img.src = src;
+    img.dataset.id = p.id;
   }
-  function onRemoteClear(msg) {
-    const p = state.photos[msg.id];
-    if (p) { p.strokes = []; if (state.current === msg.id) redrawStrokes(); }
+  if (!progressOnly) {
+    setZoom(1, 0, 0);
+    const idx = state.order.indexOf(p.id);
+    $('counter').textContent = (idx + 1) + ' / ' + state.order.length;
+    const dots = $('dots'); dots.innerHTML = '';
+    state.order.forEach((_, i) => { const d = document.createElement('i'); if (i === idx) d.className = 'on'; dots.appendChild(d); });
   }
+  img.classList.toggle('loading', !p.ready);
+  $('btnDownload').disabled = !p.ready;
+  $('progress').hidden = p.ready;
+}
+function go(dir) {
+  const idx = state.order.indexOf(state.current), n = idx + dir;
+  if (n >= 0 && n < state.order.length) gotoPhoto(state.order[n], true);
+}
+$('btnLeave').onclick = () => { call('stopShare'); endSession(); };
+$('btnReset').onclick = () => setZoom(1, 0, 0);
+$('btnDownload').onclick = async () => {
+  const p = state.photos[state.current]; if (!p || !p.ready || !B() || !B().savePhotoB64) { toast('Không lưu được ảnh'); return; }
+  try {
+    const blob = await (await fetch(p.url)).blob();
+    const res = JSON.parse(B().savePhotoB64(JSON.stringify({ id: p.id, data: await blobToB64(blob), type: p.mimeType })) || '{}');
+    toast(res.ok ? 'Đã lưu vào thư viện' : 'Không lưu được ảnh');
+  } catch (e) { toast('Không lưu được ảnh'); }
+};
 
-  /* ─────────────── Vuốt trái/phải trên viewer ─────────────── */
-  (function () {
-    const viewer = $('viewer');
-    let sx = null, sy = null, t0 = 0;
-    viewer.addEventListener('pointerdown', e => {
-      if (e.target === $('drawCanvas') && state.drawMode) return; // vẽ ưu tiên
-      sx = e.clientX; sy = e.clientY; t0 = Date.now();
-    });
-    viewer.addEventListener('pointerup', e => {
-      if (sx === null) return;
-      const dx = e.clientX - sx, dy = e.clientY - sy;
-      sx = null;
-      if (Math.abs(dx) < 60 || Math.abs(dy) > 50) return;         // quá ngắn / dọc
-      if (Date.now() - t0 > 700) return;                          // quá chậm
-      const idx = state.order.indexOf(state.current);
-      const next = dx < 0 ? idx + 1 : idx - 1;                    // trái sang phải = ảnh trước
-      if (next >= 0 && next < state.order.length) gotoPhoto(state.order[next], true);
-    });
-  })();
-
-  /* ═══════════════ ĐIỂM VÀO DUY NHẤT: nhận message ═══════════════ */
-  window.receiveData = function (dataStr) {
-    try {
-      // 1) Binary photo frame đã ghép: "PSHARE:<idHash>:<b64>"
-      if (dataStr.startsWith('PSHARE:')) {
-        const parts = dataStr.split(':');
-        onPshare(parts[1], parts.slice(2).join(':'));
-        return;
-      }
-      // 2) JSON control
-      const msg = JSON.parse(dataStr);
-      switch (msg.t) {
-        case 'offer':  onOffer(msg); break;
-        case 'fetch':  onFetch(msg); break;
-        case 'begin':  onBegin(msg); break;
-        case 'done':   if (msg.ok) setStatus('Đã gửi xong'); break;
-        case 'goto':   onRemoteGoto(msg); break;
-        case 'stroke': onRemoteStroke(msg); break;
-        case 'clear':  onRemoteClear(msg); break;
-      }
-    } catch (err) {
-      console.warn('[PS] bad message', err, dataStr && dataStr.slice(0, 80));
-    }
-  };
-
-  /* Bridge qua GSMA _dsbridge nếu app chạy SDK path (dataChannelNotify đã có) */
-  window.addEventListener('load', () => {
-    setStatus('Sẵn sàng');
-    // Yêu cầu ADC nếu chưa có (khi vào app bằng deep-link không qua operator-menu)
-    if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) {
-      window.ImsDcBridge.createDataChannel('photo-share');
-    } else if (window._dsbridge) {
-      try { window._dsbridge.call('createAppDataChannel', 'photo-share'); } catch (e) {}
-    }
+function setZoom(k, x, y) {
+  k = Math.max(1, Math.min(4, k)); if (k === 1) { x = 0; y = 0; }
+  state.zoom = { k, x, y };
+  $('photo').style.transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + k + ')';
+  const tag = $('zoomtag'); tag.hidden = k === 1; tag.textContent = Math.round(k * 100) + '%';
+}
+let barT = null;
+function wakeBar() { const bar = $('photoBar'); bar.classList.remove('fade'); clearTimeout(barT); barT = setTimeout(() => bar.classList.add('fade'), 3000); }
+(function setupStage() {
+  const st = $('stage'), pts = new Map();
+  let start = null, pinch = null, lastTap = 0, moved = false;
+  st.addEventListener('pointerdown', e => {
+    st.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); moved = false;
+    if (pts.size === 1) start = { x: e.clientX, y: e.clientY, zx: state.zoom.x, zy: state.zoom.y };
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), k: state.zoom.k }; }
+    st.classList.add('dragging');
   });
-
-  /* Xử lý window resize (xoay màn hình) */
-  window.addEventListener('resize', () => { sizeCanvas(); redrawStrokes(); });
-
-  /* gọi dọn URL blobs khi app bị đóng */
-  window.cleanUpImsDcObjects = function () {
-    Object.values(state.photos).forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
-    state.photos = {}; state.order = []; state.current = null;
+  st.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; setZoom(pinch.k * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d, state.zoom.x, state.zoom.y); moved = true; return; }
+    if (!start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+    if (state.zoom.k > 1) setZoom(state.zoom.k, start.zx + dx, start.zy + dy);
+  });
+  const up = e => {
+    if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); st.classList.remove('dragging');
+    if (pinch) { if (pts.size < 2) pinch = null; start = null; return; }
+    if (start && state.zoom.k === 1) { const dx = e.clientX - start.x; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }
+    if (!moved) { const now = Date.now(); if (now - lastTap < 280) setZoom(state.zoom.k > 1 ? 1 : 2.5, 0, 0); else wakeBar(); lastTap = now; }
+    start = null;
   };
+  st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
+  document.addEventListener('keydown', e => { if (!$('viewer').hidden) { if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1); } });
+})();
+
+/* ─────────────── Video ─────────────── */
+const ICON = {
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="3.5" height="14" rx="1"/><rect x="14" y="5" width="3.5" height="14" rx="1"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+  sound: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  muted: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="m17 10 4 4m0-4-4 4"/></svg>',
+};
+function onVideoReady(a) { // bên gửi: native đã mở file và bắt đầu phát
+  sendJson({ t: 'vstart', name: a.name || '', dur: a.dur || 0 });
+  enterVideo({ name: a.name, dur: a.dur || 0, t: 0, paused: false });
+}
+function enterVideo(v) {
+  state.video = v;
+  const sender = state.s && state.s.role === 'sender';
+  $('vtitle').textContent = sender ? 'Đang phát cho ' + peerLabel() : peerLabel() + ' đang chia sẻ';
+  $('senderCtl').hidden = !sender;
+  $('btnMute').classList.toggle('hide', sender);
+  $('dur').textContent = fmt(v.dur);
+  renderMute(); renderVideoState(); renderTime(0);
+  show('videoView');
+}
+function renderTime(t) { const v = state.video; if (!v) return; v.t = t; $('cur').textContent = fmt(t); $('fill').style.width = (v.dur ? Math.min(100, t / v.dur * 100) : 0) + '%'; }
+function renderVideoState() {
+  const v = state.video; if (!v) return;
+  $('paused').hidden = !v.paused; $('liveDot').classList.toggle('still', !!v.paused);
+  const b = $('btnPlayPause'); b.innerHTML = v.paused ? ICON.play : ICON.pause; b.title = v.paused ? 'Tiếp tục' : 'Tạm dừng';
+}
+function renderMute() { const b = $('btnMute'); b.innerHTML = state.muted ? ICON.muted : ICON.sound; b.title = state.muted ? 'Bật tiếng' : 'Tắt tiếng'; }
+$('btnPlayPause').onclick = () => {
+  const v = state.video; if (!v) return;
+  v.paused = !v.paused; renderVideoState();
+  call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused });
+};
+$('btnStop').onclick = () => { call('stopShare'); toast('Đã dừng chia sẻ'); endSession(); };
+$('btnMute').onclick = () => { state.muted = !state.muted; renderMute(); call('muteShareAudio', state.muted); toast(state.muted ? 'Đã tắt tiếng' : 'Đã bật tiếng'); };
+
+/* ─────────────── Điểm vào duy nhất: nhận message từ ADC ─────────────── */
+window.receiveData = function (dataStr) {
+  try {
+    if (dataStr.startsWith('PSHARE:')) { const parts = dataStr.split(':'); onPshare(parts[1], parts.slice(2).join(':')); return; }
+    const msg = JSON.parse(dataStr);
+    switch (msg.t) {
+      case 'offer': onOffer(msg); break;
+      case 'fetch': onFetch(msg); break;
+      case 'goto': onRemoteGoto(msg); break;
+      case 'vstart': if (state.s && state.s.kind === 'video') enterVideo({ name: msg.name, dur: msg.dur || 0, t: 0, paused: false }); break;
+      case 'vpause': if (state.video) { state.video.paused = !!msg.paused; renderVideoState(); } break;
+      case 'vtime': if (state.video && state.s && state.s.role === 'receiver') renderTime(msg.v || 0); break;
+      case 'begin': case 'done': break;
+    }
+  } catch (err) { console.warn('[CS] bad message', err, dataStr && dataStr.slice(0, 80)); }
+};
+
+window.addEventListener('load', () => {
+  if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) window.ImsDcBridge.createDataChannel('photo-share');
+  else if (window._dsbridge) { try { window._dsbridge.call('createAppDataChannel', 'photo-share'); } catch (e) {} }
+  const b = B(); if (b && typeof b.peerNumber === 'function') { try { window.shareEvent('peer', { peer: b.peerNumber() }); } catch (e) {} }
+});
+window.cleanUpImsDcObjects = function () { endSession(); };
 </script>
 </body>
 </html>

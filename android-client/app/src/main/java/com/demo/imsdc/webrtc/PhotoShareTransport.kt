@@ -213,7 +213,9 @@ class PhotoShareTransport(
     private suspend fun awaitOpenChannel(): DataChannel? {
         var waited = 0L
         while (waited < 10_000) {
-            val adc = webRtcManager.foregroundAdcChannel
+            // A Content Sharing session sends on its own stream (1002); older flows use the foreground ADC.
+            val adc = webRtcManager.shareChannel?.takeIf { it.state() == DataChannel.State.OPEN }
+                ?: webRtcManager.foregroundAdcChannel
             if (adc != null && adc.state() == DataChannel.State.OPEN) return adc
             kotlinx.coroutines.delay(100)
             waited += 100

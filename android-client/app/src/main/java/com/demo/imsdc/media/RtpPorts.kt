@@ -36,5 +36,21 @@ object RtpPorts {
         return audio to video
     }
 
+    /** Audio/video ports of the shared-content pair (a=content:slides); fresh for every share. */
+    @Volatile var slidesAudio: Int = 0
+        private set
+    @Volatile var slidesVideo: Int = 0
+        private set
+
+    @Synchronized
+    fun allocateSlides(): Pair<Int, Int> {
+        var a = freePort(); var v = freePort()
+        while (a == audio || a == video) a = freePort()
+        while (v == a || v == audio || v == video) v = freePort()
+        slidesAudio = a; slidesVideo = v
+        Log.i(TAG, "Allocated content-share RTP ports: audio=$a, video=$v")
+        return a to v
+    }
+
     private fun freePort(): Int = DatagramSocket(0).use { it.localPort }
 }

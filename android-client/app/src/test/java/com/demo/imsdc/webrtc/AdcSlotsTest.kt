@@ -200,6 +200,16 @@ class AdcSlotsTest {
     }
 
     @Test
+    fun peekShowsTheAwaitedCSeqForCancel() {
+        val p = PendingReInvite()
+        assertEquals(-1, p.peek())
+        p.begin(9)
+        assertEquals(9, p.peek())
+        p.finish(9)
+        assertEquals(-1, p.peek())
+    }
+
+    @Test
     fun nothingAwaitedRejectsEveryCSeq() {
         assertFalse(PendingReInvite().finish(1))
     }
