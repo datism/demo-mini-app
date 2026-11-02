@@ -841,6 +841,7 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Calls window.shareEvent(name, json) of the Content Sharing page. */
     fun emitShareEvent(name: String, json: String = "{}") {
+        Log.i(TAG, "share event -> page: $name $json")
         activity.runOnUiThread {
             val arg = org.json.JSONObject.quote(json)
             activity.binding.webviewMiniapp.evaluateJavascript("window.shareEvent && window.shareEvent('$name', $arg)", null)
@@ -902,6 +903,12 @@ class MiniAppManager(val activity: CallActivity) {
                                     r = ReInviteOutcome.Failed(488)
                                     activity.lifecycleScope.launch(Dispatchers.Main) { closeShareOnPeer() }
                                 }
+                            } else if (!SdpHelper.hasContentShare(lastAnswerRawSdp)) {
+                                // 200 OK without the share stream: the other phone cannot do Content Sharing.
+                                Log.w(TAG, "Share answer has no a=dcmap:1002; peer does not support photo sharing")
+                                sip.shareStream = false
+                                r = ReInviteOutcome.Failed(505)
+                                activity.lifecycleScope.launch(Dispatchers.Main) { closeShareOnPeer() }
                             } else {
                                 openShareSession()
                             }
@@ -942,6 +949,7 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sender: Hủy while waiting. CANCEL goes out; the far end answers 487 and the request ends quietly. */
     fun cancelShare() {
+        if (shareState == ShareState.ACTIVE) { stopShare(); return } // accepted, nothing sent yet: leave the session
         if (shareState != ShareState.INVITING) return
         shareCancelRequested = true
         val cs = pending.peek()

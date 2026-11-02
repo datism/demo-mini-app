@@ -157,6 +157,7 @@ class PhotoShareTransport(
         }
         val idHash = idHashOf(job.photoId)
         val total = job.totalChunks
+        Log.i(TAG, "streamFile start: ${job.photoId} ($total chunks) via channel '${adc.label()}' state=${adc.state()}")
 
         FileInputStream(job.filePath).use { fis ->
             var seq = 0
@@ -276,6 +277,7 @@ class PhotoShareTransport(
         // (double-encode ~33% phình + evaluateJavascript chuỗi BW lớn sẽ chậm).
         // Base64 chỉ chứa [A-Za-z0-9+/=] — an toàn trong single-quoted JS string.
         val b64 = android.util.Base64.encodeToString(payload, android.util.Base64.NO_WRAP)
+        Log.i(TAG, "photo assembled: idHash=$idHash ${payload.size} bytes -> page")
         val jsPayload = "PSHARE:$idHash:$b64"
         scope.launch(Dispatchers.Main) {
             val wv = webView
