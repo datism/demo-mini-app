@@ -448,6 +448,7 @@ class MiniAppManager(val activity: CallActivity) {
                 Log.i(TAG, "launchMiniApp targetId=$targetId already shown, not reloading")
                 return@launch
             }
+            if (targetId != SHARE_APP) leaveShareForAppSwitch()
             activity.currentAppId = targetId
             // A hotline app lives on the Home slot (mid 3), so its traffic is on the Home channel.
             activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu" || hotlineApp != null)
@@ -564,6 +565,8 @@ class MiniAppManager(val activity: CallActivity) {
         private const val SHARE_ANSWER_TIMEOUT_MS = 35_000L
         /** The callee declines on its own after this long without an answer from its user. */
         private const val SHARE_DECISION_TIMEOUT_MS = 30_000L
+        /** App id of the Content Sharing page. */
+        const val SHARE_APP = "photo-share"
     }
 
     /** One slot change. [sync]: re-offer the current local slots after a rejection; a sync is never re-synced. */
@@ -1007,6 +1010,20 @@ class MiniAppManager(val activity: CallActivity) {
         heldCancelled = true
         heldDecision?.complete(false)
         emitShareEvent("cancelled")
+    }
+
+    /**
+     * The user left the Content Sharing page for another page (menu, another app) without Thoát. The App line
+     * change that follows carries no content-share stream, which closes the share on the other phone; here
+     * only the local state is dropped. Left set, every later App Re-INVITE (e.g. reopening Content Sharing)
+     * would still carry a=dcmap:1002 and the other phone would take it for a new share request.
+     */
+    private fun leaveShareForAppSwitch() {
+        when (shareState) {
+            ShareState.INVITING -> cancelShare()
+            ShareState.ACTIVE -> { Log.i(TAG, "Leaving Content Sharing page: dropping the open share"); clearShareSession() }
+            ShareState.NONE -> if (activity.sipManager.shareStream) clearShareSession()
+        }
     }
 
     /** Receiver: the Re-INVITE was answered 200 OK with the stream; the session is open. */

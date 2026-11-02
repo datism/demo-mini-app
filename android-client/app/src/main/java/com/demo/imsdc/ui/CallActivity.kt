@@ -1068,7 +1068,11 @@ class CallActivity : AppCompatActivity() {
                     val slidesNow = sipManager.slides.mode
                     val slidesOpen = slidesNow == com.demo.imsdc.sip.SlidesState.Mode.SEND || slidesNow == com.demo.imsdc.sip.SlidesState.Mode.RECV
                     val offersSlides = com.demo.imsdc.sip.SdpHelper.slidesEndpoint(rawSdp) != null
-                    val photoOpening = com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && !sipManager.shareStream
+                    // A share request never changes the App line itself; an offer that opens or swaps the App line
+                    // (a page being launched) is an app switch even if it carries a stale a=dcmap:1002.
+                    val offeredApp = com.demo.imsdc.webrtc.pickSlots(com.demo.imsdc.webrtc.parseAppLines(rawSdp).drop(1)) { it.mid }.second
+                    val appLineUnchanged = com.demo.imsdc.webrtc.diffAppSlot(sipManager.appReqApp, offeredApp) == com.demo.imsdc.webrtc.AppSlotChange.None
+                    val photoOpening = com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && !sipManager.shareStream && appLineUnchanged
                     val photoClosing = !com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && sipManager.shareStream
                     val videoOpening = offersSlides && !slidesOpen
                     val videoClosing = !offersSlides && slidesOpen
