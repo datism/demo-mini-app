@@ -1015,6 +1015,11 @@ class CallActivity : AppCompatActivity() {
             lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteFailed(code, cseq) }
         }
 
+        // A CANCEL of the share request we are asking our user about: close the sheet, the call goes on.
+        sipManager.onHeldReInviteCancelled = {
+            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onHeldReInviteCancelled() }
+        }
+
         sipManager.onReInviteReceived = { sdp, rawMsg ->
             Log.i(TAG, "Handling incoming Re-INVITE automatically...")
             lifecycleScope.launch(Dispatchers.Main) {
@@ -1035,6 +1040,15 @@ class CallActivity : AppCompatActivity() {
                         sipManager.appReqApp = null
                     }
                     val rawSdp = com.demo.imsdc.sip.SdpHelper.extractSdpBody(rawMsg) ?: ""
+                    // Content Sharing: an offer that adds the content-share stream is a request the user decides on.
+                    // 180 goes out, the page shows the invite, and 200 OK / 603 follows its answer.
+                    val shareOpening = com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && !sipManager.shareStream
+                    val shareClosing = !com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && sipManager.shareStream
+                    if (shareOpening && !miniAppManager.awaitShareDecision(rawMsg, "photo")) {
+                        return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
+                    }
+                    if (shareOpening) sipManager.shareStream = true // the answer carries the stream too
+                    if (shareClosing) sipManager.shareStream = false
                     if (rawSdp.trim().isNotEmpty()) {
                         val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
                         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
@@ -1078,6 +1092,8 @@ class CallActivity : AppCompatActivity() {
 
                     val sdpAnswer = webRtcManager.createAnswer()
                     sipManager.sendOkAnswer(rawMsg, sdpAnswer)
+                    if (shareOpening) miniAppManager.onShareAccepted()
+                    if (shareClosing) miniAppManager.onShareClosedByPeer()
 
                     Log.i(TAG, "? Re-INVITE auto-answered successfully")
                     toLaunch = when (change) {
@@ -1235,6 +1251,13 @@ class CallActivity : AppCompatActivity() {
         photoShare.webView = binding.webviewMiniapp
         dcManager.photoShare = photoShare
         androidBridge.photoShare = photoShare
+        androidBridge.shareHandler = object : AndroidBridgeInterface.ShareHandler {
+            override fun requestShare(kind: String) = miniAppManager.requestShare(kind)
+            override fun cancelShare() = miniAppManager.cancelShare()
+            override fun answerShare(accept: Boolean) = miniAppManager.answerShare(accept)
+            override fun stopShare() = miniAppManager.stopShare()
+            override fun peerNumber(): String = remoteUser
+        }
 
         // Callback: PeerConnection connected ? m? DataChannels v� kh?i d?ng Mini-app
         webRtcManager.onPeerConnected = {
@@ -1691,7 +1714,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onAckWithSdp = null
         sipManager.onReInviteReceived = null
         sipManager.onReInviteFailed = null
-        if (::miniAppManager.isInitialized) miniAppManager.resetRequests()
+        sipManager.onHeldReInviteCancelled = null
+        if (::miniAppManager.isInitialized) { miniAppManager.resetShare(); miniAppManager.resetRequests() }
         sipManager.onReInviteResponse = null
         try {
             (binding.webviewMiniapp.parent as? android.view.ViewGroup)?.removeView(binding.webviewMiniapp)

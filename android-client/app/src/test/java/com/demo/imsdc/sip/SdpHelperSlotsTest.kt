@@ -113,4 +113,21 @@ class SdpHelperSlotsTest {
         assertTrue(out[1].contains("a=mid:3") && out[1].contains("a=ice-ufrag:u3"))
         assertTrue(out[2].contains("a=mid:4") && out[2].contains("a=ice-ufrag:u4"))
     }
+
+    @Test
+    fun shareStream_addsContentShareDcmapOnlyToAppSection() {
+        val withShare = SdpHelper.translateWebRtcOfferToSipOffer(webRtcOffer(true), "192.168.1.10", "fun-calling-app", false, 40002, 40004, "photo-share", true, true)
+        val s = sections(withShare)
+        assertEquals(3, s.size)
+        assertTrue(s[2].contains("a=dcmap:1002 subprotocol=\"content-share\""))
+        assertFalse(s[1].contains("a=dcmap:1002"))
+        assertTrue(SdpHelper.hasContentShare(withShare))
+    }
+
+    @Test
+    fun noShareStream_hasNoContentShareDcmap() {
+        val plain = SdpHelper.translateWebRtcOfferToSipOffer(webRtcOffer(true), "192.168.1.10", "fun-calling-app", false, 40002, 40004, "photo-share", true)
+        assertFalse(SdpHelper.hasContentShare(plain))
+        assertFalse(SdpHelper.hasContentShare(null))
+    }
 }

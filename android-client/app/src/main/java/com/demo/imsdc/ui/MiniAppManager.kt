@@ -555,6 +555,10 @@ class MiniAppManager(val activity: CallActivity) {
     companion object {
         const val HOME_APP = CallActivity.HOME_APP
         private const val ANSWER_TIMEOUT_MS = 5000L
+        /** A share request waits for a person, not for a stack: the far end rings (180) until its user decides. */
+        private const val SHARE_ANSWER_TIMEOUT_MS = 35_000L
+        /** The callee declines on its own after this long without an answer from its user. */
+        private const val SHARE_DECISION_TIMEOUT_MS = 30_000L
     }
 
     /** One slot change. [sync]: re-offer the current local slots after a rejection; a sync is never re-synced. */
@@ -727,7 +731,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /** Sends one Re-INVITE with the current local slots and waits for its final response. Caller holds [negotiation]. */
-    private suspend fun transact(): ReInviteOutcome {
+    private suspend fun transact(timeoutMs: Long = ANSWER_TIMEOUT_MS, cancelOnTimeout: Boolean = false): ReInviteOutcome {
         val localOffer = activity.webRtcManager.createOffer()
         val result = CompletableDeferred<ReInviteOutcome>()
         outcome = result
@@ -735,7 +739,13 @@ class MiniAppManager(val activity: CallActivity) {
             withContext(Dispatchers.IO) {
                 activity.sipManager.sendReInviteWithSdp(localOffer) { cseq -> pending.begin(cseq) }
             }
-            return withTimeoutOrNull(ANSWER_TIMEOUT_MS) { result.await() } ?: ReInviteOutcome.Timeout
+            val answered = withTimeoutOrNull(timeoutMs) { result.await() }
+            if (answered == null && cancelOnTimeout) {
+                // Nobody decided in time: withdraw the request (the far end answers 487 and the call goes on).
+                val cs = pending.peek()
+                if (cs > 0) withContext(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+            }
+            return answered ?: ReInviteOutcome.Timeout
         } finally {
             pending.clear()                           // a final response arriving after this is stale
             outcome = null
@@ -812,5 +822,164 @@ class MiniAppManager(val activity: CallActivity) {
         activity.sipManager.appReqApp = null          // mid 4 -> port 0 locally; appSlotUsed stays true
         android.widget.Toast.makeText(activity, "Không mở được ứng dụng, quay về emote", android.widget.Toast.LENGTH_SHORT).show()
         launchMiniApp(HOME_APP, sendRemoteTrigger = false)
+    }
+
+    // ───────────────────────── Content Sharing ─────────────────────────
+    // A share request is one Re-INVITE (photo: adds the content-share stream 1002 to the App line).
+    // 200 OK = accepted, 603 = declined, CANCEL = withdrawn; closing is another Re-INVITE without the stream.
+
+    private enum class ShareState { NONE, INVITING, ACTIVE }
+    @Volatile private var shareState = ShareState.NONE
+    @Volatile private var shareCancelRequested = false
+    private var heldDecision: CompletableDeferred<Boolean>? = null
+    @Volatile private var heldCancelled = false
+
+    /** Calls window.shareEvent(name, json) of the Content Sharing page. */
+    fun emitShareEvent(name: String, json: String = "{}") {
+        activity.runOnUiThread {
+            val arg = org.json.JSONObject.quote(json)
+            activity.binding.webviewMiniapp.evaluateJavascript("window.shareEvent && window.shareEvent('$name', $arg)", null)
+        }
+    }
+
+    private fun openShareSession() {
+        val web = activity.webRtcManager
+        web.openShareChannel()?.let { activity.dcManager.setupShareChannel(it) }
+        shareState = ShareState.ACTIVE
+    }
+
+    private fun clearShareSession() {
+        activity.sipManager.shareStream = false
+        activity.webRtcManager.closeShareChannel()
+        shareState = ShareState.NONE
+    }
+
+    /** Sender: the user picked Ảnh/Video. Sends the Re-INVITE and tells the page how it ended. */
+    fun requestShare(kind: String) {
+        if (kind != "photo") { emitShareEvent("failed", """{"code":501}"""); return } // video stream: not available yet
+        if (shareState != ShareState.NONE) { emitShareEvent("failed", """{"code":486}"""); return }
+        shareState = ShareState.INVITING
+        shareCancelRequested = false
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            var attempt = 1
+            try {
+                while (true) {
+                    val result = negotiation.withLock {
+                        if (shareCancelRequested) return@withLock ReInviteOutcome.Failed(487)
+                        if (activity.webRtcManager.appAdcPC == null) return@withLock ReInviteOutcome.Failed(488)
+                        activity.sipManager.shareStream = true
+                        val r = transact(SHARE_ANSWER_TIMEOUT_MS, cancelOnTimeout = true)
+                        if (r is ReInviteOutcome.Answered) {
+                            applyAnswer(r.sdp)
+                            openShareSession()
+                        } else {
+                            activity.sipManager.shareStream = false
+                        }
+                        r
+                    }
+                    when {
+                        result is ReInviteOutcome.Answered -> emitShareEvent("accepted")
+                        result is ReInviteOutcome.Failed && result.code == 603 -> { shareState = ShareState.NONE; emitShareEvent("declined") }
+                        result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> shareState = ShareState.NONE
+                        result is ReInviteOutcome.Failed && result.code == 491 && attempt < MAX_GLARE_ATTEMPTS && !shareCancelRequested -> {
+                            delay(reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner))
+                            attempt++
+                            continue
+                        }
+                        else -> {
+                            shareState = ShareState.NONE
+                            val code = (result as? ReInviteOutcome.Failed)?.code ?: 408
+                            Log.w(TAG, "Share request not accepted: $result")
+                            emitShareEvent("failed", """{"code":$code}""")
+                        }
+                    }
+                    break
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Share request cancelled (call ended)")
+                clearShareSession()
+            } catch (e: Exception) {
+                Log.e(TAG, "Share request failed: ${e.message}", e)
+                clearShareSession()
+                emitShareEvent("failed", """{"code":500}""")
+            }
+        }
+    }
+
+    /** Sender: Hủy while waiting. CANCEL goes out; the far end answers 487 and the request ends quietly. */
+    fun cancelShare() {
+        if (shareState != ShareState.INVITING) return
+        shareCancelRequested = true
+        val cs = pending.peek()
+        if (cs > 0) activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+    }
+
+    /** Either side: leave the session. A Re-INVITE without the content-share stream closes it for both. */
+    fun stopShare() {
+        if (shareState == ShareState.NONE) return
+        if (shareState == ShareState.INVITING) { cancelShare(); return }
+        activity.lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                negotiation.withLock {
+                    clearShareSession()
+                    val r = transact()
+                    if (r is ReInviteOutcome.Answered) applyAnswer(r.sdp) else Log.w(TAG, "Closing share Re-INVITE not accepted: $r")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.d(TAG, "Share close cancelled (call ended)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Share close failed: ${e.message}", e)
+            }
+        }
+    }
+
+    /** Page, receiver: Chấp nhận / Từ chối. Completes the decision the held Re-INVITE is waiting for. */
+    fun answerShare(accept: Boolean) { heldDecision?.complete(accept) }
+
+    /**
+     * Receiver, called with the negotiation lock held for an incoming Re-INVITE that asks to open a share:
+     * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
+     * CANCEL it has already sent the final response (603 / 487) and returns false.
+     */
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
+        val decision = CompletableDeferred<Boolean>()
+        heldCancelled = false
+        heldDecision = decision
+        try {
+            activity.sipManager.sendReInviteRinging(rawMsg)
+            emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.remoteUser).toString())
+            val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
+            if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
+            if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
+            activity.sipManager.sendReInviteReject(rawMsg, 603, "Decline")
+            if (accepted == null) emitShareEvent("cancelled") // no answer: close the sheet
+            return false
+        } finally {
+            heldDecision = null
+        }
+    }
+
+    /** SipManager saw CANCEL for the held Re-INVITE (487 already sent). Closes the sheet; the call goes on. */
+    fun onHeldReInviteCancelled() {
+        heldCancelled = true
+        heldDecision?.complete(false)
+        emitShareEvent("cancelled")
+    }
+
+    /** Receiver: the Re-INVITE was answered 200 OK with the stream; the session is open. */
+    fun onShareAccepted() = openShareSession()
+
+    /** Receiver: the far end closed the share (its Re-INVITE had no stream). */
+    fun onShareClosedByPeer() {
+        if (shareState == ShareState.NONE) return
+        clearShareSession()
+        emitShareEvent("closed")
+    }
+
+    /** Call ended: drop any share state. */
+    fun resetShare() {
+        heldCancelled = true
+        heldDecision?.complete(false)
+        clearShareSession()
     }
 }

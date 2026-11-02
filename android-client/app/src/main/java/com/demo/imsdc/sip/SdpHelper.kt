@@ -25,12 +25,18 @@ object SdpHelper {
      * derive it from the line's certificate fingerprint: the same PeerConnection gives the same id on
      * every Re-INVITE, a new PeerConnection (new certificate) gives a new one.
      */
+    /** SCTP stream 1002 on the App ADC: photo bytes of a Content Sharing session (relayed P2P by the MF). */
+    const val CONTENT_SHARE_DCMAP = "a=dcmap:1002 subprotocol=\"content-share\""
+
+    /** True when an SDP asks for the content-share stream (a=dcmap:1002), i.e. the far end wants to share. */
+    fun hasContentShare(sdp: String?): Boolean = sdp?.contains("a=dcmap:1002") == true
+
     fun tlsIdFor(label: String, fingerprintLine: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest("$label|$fingerprintLine".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, homeReqApp: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004, appReqApp: String? = null, appSlotUsed: Boolean = false): String {
+    fun translateWebRtcOfferToSipOffer(sdp: String, localIpAddress: String, homeReqApp: String? = null, isCallHoldActive: Boolean = false, localAudioPort: Int = 40002, localVideoPort: Int = 40004, appReqApp: String? = null, appSlotUsed: Boolean = false, shareStream: Boolean = false): String {
     Log.i("SipManager", "Raw local SDP to translate:\n$sdp")
     val validIp = if (!localIpAddress.isNullOrBlank() && !localIpAddress.contains(":") && localIpAddress != "0.0.0.0" && localIpAddress != "127.0.0.1" && localIpAddress != "::") {
         localIpAddress
@@ -229,7 +235,7 @@ object SdpHelper {
     newLines.add("a=3gpp-bdc-used-by:sender")
     newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
     
-    fun addAdcSection(mid: String, label: String, creds: Credentials, ep: Endpoint, appId: String) {
+    fun addAdcSection(mid: String, label: String, creds: Credentials, ep: Endpoint, appId: String, extraDcmap: String? = null) {
         newLines.add("m=application ${ep.port} UDP/DTLS/SCTP webrtc-datachannel")
         newLines.add("c=IN IP4 $validIp")
         newLines.add("a=mid:$mid")
@@ -241,6 +247,7 @@ object SdpHelper {
         newLines.add("a=tls-id:${tlsIdFor(label, creds.fingerprint)}")
         newLines.add("a=dcmap:1000 subprotocol=\"$appId\"")
         newLines.add("a=3gpp-req-app:\"$appId\";1000-UE")
+        if (extraDcmap != null) newLines.add(extraDcmap)
         newLines.add(if (isCallHoldActive) "a=inactive" else "a=sendrecv")
     }
     fun addClosedSection(mid: String) {
@@ -265,7 +272,7 @@ object SdpHelper {
         addClosedSection("3")
     }
     if (appOpen) {
-        addAdcSection("4", "app", appCreds, appEp, appReqApp!!)
+        addAdcSection("4", "app", appCreds, appEp, appReqApp!!, if (shareStream) CONTENT_SHARE_DCMAP else null)
     } else if (emitApp) {
         addClosedSection("4")
     }

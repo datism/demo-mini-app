@@ -209,6 +209,10 @@ class PendingReInvite {
         this.cseq = cseq
     }
 
+    /** CSeq of the Re-INVITE being awaited, or -1 when none is. */
+    @Synchronized
+    fun peek(): Int = cseq
+
     /** True once, for the awaited CSeq; false for a stale or unknown one. */
     @Synchronized
     fun finish(cseq: Int): Boolean {

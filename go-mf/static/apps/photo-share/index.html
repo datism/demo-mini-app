@@ -265,7 +265,7 @@ window.shareEvent = function (name, arg) {
     case 'declined': toast(peerLabel() + ' đã từ chối'); endSession(); break;
     case 'cancelled': if (s) { toast(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
     case 'closed': if (s) { toast(peerLabel() + (s.kind === 'video' ? ' đã dừng chia sẻ' : ' đã kết thúc chia sẻ')); endSession(); } break;
-    case 'failed': toast(a.code === 491 ? 'Thử lại sau' : 'Không thể chia sẻ lúc này'); endSession(); break;
+    case 'failed': toast(a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : 'Không thể chia sẻ lúc này'); endSession(); break;
     case 'videoReady': onVideoReady(a); break;
     case 'videoTime': if (state.video) { renderTime(a.t); sendJson({ t: 'vtime', v: a.t }); } break;
     case 'videoEnded': if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;

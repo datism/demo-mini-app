@@ -36,6 +36,68 @@ class AndroidBridgeInterface(
      */
     var photoShare: PhotoShareTransport? = null
 
+    /** Content Sharing: what the page can ask of the SIP side. Set by CallActivity. */
+    interface ShareHandler {
+        fun requestShare(kind: String)
+        fun cancelShare()
+        fun answerShare(accept: Boolean)
+        fun stopShare()
+        fun peerNumber(): String
+    }
+
+    var shareHandler: ShareHandler? = null
+
+    /** Page: the user chose Ảnh or Video. Native sends the Re-INVITE; the page hears back via window.shareEvent. */
+    @JavascriptInterface
+    fun requestShare(kind: String) { shareHandler?.requestShare(kind) }
+
+    /** Page: Hủy while waiting for the other person. */
+    @JavascriptInterface
+    fun cancelShare() { shareHandler?.cancelShare() }
+
+    /** Page, receiver: Chấp nhận (true) or Từ chối (false). */
+    @JavascriptInterface
+    fun answerShare(accept: Boolean) { shareHandler?.answerShare(accept) }
+
+    /** Page: leave the session; a Re-INVITE closes the channel for both people. */
+    @JavascriptInterface
+    fun stopShare() { shareHandler?.stopShare() }
+
+    @JavascriptInterface
+    fun peerNumber(): String = shareHandler?.peerNumber() ?: ""
+
+    /**
+     * Saves a photo to the gallery (Pictures/Content Sharing).
+     * @param payload JSON: {"id":"p1","data":"<base64>","type":"image/jpeg"}
+     */
+    @JavascriptInterface
+    fun savePhotoB64(payload: String): String {
+        val context = dataChannelManager.webView?.context ?: return """{"ok":false,"error":"no_context"}"""
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            return """{"ok":false,"error":"needs_android_10"}"""
+        }
+        return try {
+            val bytes = android.util.Base64.decode(org.json.JSONObject(payload).optString("data"), android.util.Base64.NO_WRAP)
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "ContentSharing_${System.currentTimeMillis()}.jpg")
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Content Sharing")
+                put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return """{"ok":false,"error":"insert_failed"}"""
+            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return """{"ok":false,"error":"open_failed"}"""
+            values.clear()
+            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            """{"ok":true}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "savePhotoB64 failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
     /**
      * Được gọi bởi JavaScript để kích hoạt khởi chạy Mini-app mới.
      * Ví dụ: AndroidBridge.startMiniApp('0003210000000038')

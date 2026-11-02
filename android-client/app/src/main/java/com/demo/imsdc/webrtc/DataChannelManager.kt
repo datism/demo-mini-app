@@ -464,6 +464,29 @@ class DataChannelManager(
 
     fun setupAppADC() = attachAdcObserver(webRtcManager.appAdcChannel, isHome = false)
 
+    /** Receives photo frames on the content-share channel (stream 1002) and hands them to the transport. */
+    fun setupShareChannel(ch: DataChannel?) {
+        ch ?: return
+        ch.registerObserver(object : DataChannel.Observer {
+            override fun onStateChange() { Log.i(TAG, "Share channel state: ${ch.state()}") }
+            override fun onMessage(buffer: DataChannel.Buffer?) {
+                try {
+                    buffer ?: return
+                    val bb = buffer.data
+                    val bytes = ByteArray(bb.remaining())
+                    bb.get(bytes)
+                    if (photoShare?.onIncomingBytes(bytes) != true) {
+                        // Control text on the share channel is not expected; ignore it rather than guess.
+                        Log.w(TAG, "Share channel: ignoring ${bytes.size} bytes that are not a photo frame")
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Share channel onMessage failed: ${t.message}", t)
+                }
+            }
+            override fun onBufferedAmountChange(previousAmount: Long) {}
+        })
+    }
+
     private fun attachAdcObserver(adc: DataChannel?, isHome: Boolean) {
         if (adc != null) {
             adc.registerObserver(object : DataChannel.Observer {
