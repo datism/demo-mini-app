@@ -858,7 +858,8 @@ class MiniAppManager(val activity: CallActivity) {
         activity.sipManager.shareStream = false
         // Once used, the shared-content lines stay in every SDP as port 0 so the m-line order never changes.
         if (activity.sipManager.slides.mode != SlidesState.Mode.OFF) activity.sipManager.slides = SlidesState(SlidesState.Mode.CLOSED)
-        activity.webRtcManager.closeShareChannel()
+        // Stream 1002 stays open until the App line closes (closeAppADC). Closing it resets the SCTP stream,
+        // the MF then closes its own 1002 for this phone for good, and every later share drops the photo bytes.
         releaseVideo()
         shareState = ShareState.NONE
     }
