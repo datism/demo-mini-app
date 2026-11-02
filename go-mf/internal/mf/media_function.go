@@ -144,6 +144,7 @@ type MediaFunction struct {
 	videoConn       *net.UDPConn
 	audioCalleeConn *net.UDPConn
 	videoCalleeConn *net.UDPConn
+	slides          *slidesRelay // shared-content audio/video pair (a=content:slides)
 
 	latchedAudioSessions map[string]*SessionInfo
 	latchedVideoSessions map[string]*SessionInfo
@@ -304,6 +305,7 @@ func NewMediaFunction(cfg *config.Config) *MediaFunction {
 		videoConn:            gVideoConn,
 		audioCalleeConn:      gAudioCalleeConn,
 		videoCalleeConn:      gVideoCalleeConn,
+		slides:               newSlidesRelay(pubPort),
 		latchedAudioSessions: make(map[string]*SessionInfo),
 		latchedVideoSessions: make(map[string]*SessionInfo),
 	}
