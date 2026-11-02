@@ -130,4 +130,42 @@ class SdpHelperSlotsTest {
         assertFalse(SdpHelper.hasContentShare(plain))
         assertFalse(SdpHelper.hasContentShare(null))
     }
+
+    private fun withSlides(mode: SlidesState.Mode) = SdpHelper.translateWebRtcOfferToSipOffer(
+        webRtcOffer(true), "192.168.1.10", "fun-calling-app", false, 40002, 40004, "photo-share", true, false,
+        SlidesState(mode, 50010, 50012)
+    )
+
+    @Test
+    fun slides_sendOffersSendonlyVideoAndAudioAfterTheApplicationLines() {
+        val sdp = withSlides(SlidesState.Mode.SEND)
+        assertTrue(sdp.contains("m=video 50012 RTP/AVP 97"))
+        assertTrue(sdp.contains("m=audio 50010 RTP/AVP 8"))
+        assertEquals(2, Regex("a=content:slides").findAll(sdp).count())
+        assertEquals(2, Regex("a=sendonly").findAll(sdp).count())
+        assertTrue(sdp.indexOf("m=video 50012") > sdp.lastIndexOf("m=application"))
+    }
+
+    @Test
+    fun slides_recvAnswersRecvonly_closedKeepsLinesAtPortZero_offHasNone() {
+        assertEquals(2, Regex("a=recvonly").findAll(withSlides(SlidesState.Mode.RECV)).count())
+        val closed = withSlides(SlidesState.Mode.CLOSED)
+        assertTrue(closed.contains("m=video 0 RTP/AVP 97") && closed.contains("m=audio 0 RTP/AVP 8"))
+        assertFalse(withSlides(SlidesState.Mode.OFF).contains("a=content:slides"))
+    }
+
+    @Test
+    fun slidesEndpoint_readsTheMfAddressOfTheSharedPair_notTheCameraPair() {
+        val sdp = "v=0\r\ns=-\r\nc=IN IP4 9.9.9.9\r\nt=0 0\r\n" +
+            "m=audio 40002 RTP/AVP 8\r\nc=IN IP4 10.0.0.5\r\na=mid:0\r\n" +
+            "m=video 40004 RTP/AVP 97\r\nc=IN IP4 10.0.0.5\r\na=mid:1\r\n" +
+            "m=video 40003 RTP/AVP 97\r\nc=IN IP4 10.0.0.5\r\na=mid:5\r\na=content:slides\r\n" +
+            "m=audio 40001 RTP/AVP 8\r\nc=IN IP4 10.0.0.5\r\na=mid:6\r\na=content:slides\r\n"
+        val ep = SdpHelper.slidesEndpoint(sdp)!!
+        assertEquals("10.0.0.5", ep.ip)
+        assertEquals(40001, ep.audioPort)
+        assertEquals(40003, ep.videoPort)
+        assertEquals(null, SdpHelper.slidesEndpoint(sdp.replace("m=video 40003", "m=video 0").replace("m=audio 40001", "m=audio 0")))
+        assertEquals(null, SdpHelper.slidesEndpoint(null))
+    }
 }

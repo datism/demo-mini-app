@@ -89,6 +89,8 @@ class SipManager(
     var appSlotUsed: Boolean = false  // mid 4 has appeared in this call; it stays in every SDP from then on
     /** The App line carries the content-share stream (a=dcmap:1002) while a Content Sharing photo session is open. */
     @Volatile var shareStream: Boolean = false
+    /** The shared-content video/audio pair (a=content:slides) of a Content Sharing video session. */
+    @Volatile var slides: SlidesState = SlidesState.OFF
 
     /** A provisional (180) response to one of our Re-INVITEs: the far end is asking its user. */
     var onReInviteProvisional: ((code: Int, cseq: Int) -> Unit)? = null
@@ -770,6 +772,7 @@ class SipManager(
         appReqApp = null
         appSlotUsed = false
         shareStream = false
+        slides = SlidesState.OFF
         heldReInviteMsg = null
         isCallHoldActive = false
         initialInviteCSeq = -1
@@ -918,7 +921,7 @@ class SipManager(
             callLocalIp = effectiveIp
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, effectiveIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("INVITE sip:$toUser@$sipServerHost SIP/2.0")
@@ -1015,7 +1018,7 @@ class SipManager(
 
             lastLocalOfferSdp = sdpBody
 
-            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream)
+            val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
             val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
 
             val msg = buildString {
@@ -1051,7 +1054,7 @@ class SipManager(
             val localIp = getLocalIp()
             lastLocalIp = localIp
             callLocalIp = localIp
-            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream)
+            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(
                 originalInvite, 200, "OK",
@@ -1157,7 +1160,7 @@ class SipManager(
             val localIp = getLocalIp()
 
             val msg = if (!sdpBody.isNullOrEmpty()) {
-                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream)
+                val translatedSdp = SdpHelper.translateWebRtcOfferToSipOffer(sdpBody, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
                 val contentLength = translatedSdp.toByteArray(Charsets.UTF_8).size
                 buildString {
                     appendLine("ACK sip:$remoteUser@$sipServerHost:$sipServerPort SIP/2.0")

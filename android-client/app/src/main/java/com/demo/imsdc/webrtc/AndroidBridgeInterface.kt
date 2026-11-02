@@ -42,6 +42,9 @@ class AndroidBridgeInterface(
         fun cancelShare()
         fun answerShare(accept: Boolean)
         fun stopShare()
+        fun pickVideo()
+        fun pauseVideo(paused: Boolean)
+        fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
     }
 
@@ -62,6 +65,18 @@ class AndroidBridgeInterface(
     /** Page: leave the session; a Re-INVITE closes the channel for both people. */
     @JavascriptInterface
     fun stopShare() { shareHandler?.stopShare() }
+
+    /** Page, sender: open the gallery for the video to stream (after the other person accepted). */
+    @JavascriptInterface
+    fun pickVideo() { shareHandler?.pickVideo() }
+
+    /** Page, sender: pause (true) or resume (false) the stream for both people. */
+    @JavascriptInterface
+    fun pauseVideo(paused: Boolean) { shareHandler?.pauseVideo(paused) }
+
+    /** Page, receiver: mute or unmute this phone's speaker for the shared video. */
+    @JavascriptInterface
+    fun muteShareAudio(muted: Boolean) { shareHandler?.muteShareAudio(muted) }
 
     @JavascriptInterface
     fun peerNumber(): String = shareHandler?.peerNumber() ?: ""

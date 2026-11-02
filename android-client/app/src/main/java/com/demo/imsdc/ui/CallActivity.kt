@@ -190,6 +190,29 @@ class CallActivity : AppCompatActivity() {
             false
         }
     }
+    private var videoPickerCallback: ((android.net.Uri?) -> Unit)? = null
+    private val videoPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        videoPickerCallback?.invoke(uri)
+        videoPickerCallback = null
+    }
+
+    /** Content Sharing: opens the gallery for one video; [onPicked] gets null when the user backs out. */
+    fun launchVideoPicker(onPicked: (android.net.Uri?) -> Unit) {
+        videoPickerCallback = onPicked
+        try {
+            videoPicker.launch(
+                androidx.activity.result.PickVisualMediaRequest.Builder()
+                    .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    .build()
+            )
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Cannot open the video picker: ${e.message}", e)
+            videoPickerCallback = null
+            onPicked(null)
+        }
+    }
     private var pendingInviteMsg: String? = null  // B-side: luu INVITE g?c d? g?i 200 OK
     private var eglBase: org.webrtc.EglBase? = null
     private var rtpMediaManager: RtpMediaManager? = null
@@ -1042,13 +1065,25 @@ class CallActivity : AppCompatActivity() {
                     val rawSdp = com.demo.imsdc.sip.SdpHelper.extractSdpBody(rawMsg) ?: ""
                     // Content Sharing: an offer that adds the content-share stream is a request the user decides on.
                     // 180 goes out, the page shows the invite, and 200 OK / 603 follows its answer.
-                    val shareOpening = com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && !sipManager.shareStream
-                    val shareClosing = !com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && sipManager.shareStream
-                    if (shareOpening && !miniAppManager.awaitShareDecision(rawMsg, "photo")) {
+                    val slidesNow = sipManager.slides.mode
+                    val slidesOpen = slidesNow == com.demo.imsdc.sip.SlidesState.Mode.SEND || slidesNow == com.demo.imsdc.sip.SlidesState.Mode.RECV
+                    val offersSlides = com.demo.imsdc.sip.SdpHelper.slidesEndpoint(rawSdp) != null
+                    val photoOpening = com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && !sipManager.shareStream
+                    val photoClosing = !com.demo.imsdc.sip.SdpHelper.hasContentShare(rawSdp) && sipManager.shareStream
+                    val videoOpening = offersSlides && !slidesOpen
+                    val videoClosing = !offersSlides && slidesOpen
+                    val shareOpening = photoOpening || videoOpening
+                    val shareClosing = photoClosing || videoClosing
+                    if (shareOpening && !miniAppManager.awaitShareDecision(rawMsg, if (videoOpening) "video" else "photo")) {
                         return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
                     }
-                    if (shareOpening) sipManager.shareStream = true // the answer carries the stream too
-                    if (shareClosing) sipManager.shareStream = false
+                    if (photoOpening) sipManager.shareStream = true // the answer carries the stream too
+                    if (photoClosing) sipManager.shareStream = false
+                    if (videoOpening) {
+                        val (a, v) = com.demo.imsdc.media.RtpPorts.allocateSlides()
+                        sipManager.slides = com.demo.imsdc.sip.SlidesState(com.demo.imsdc.sip.SlidesState.Mode.RECV, a, v)
+                    }
+                    if (videoClosing) sipManager.slides = com.demo.imsdc.sip.SlidesState(com.demo.imsdc.sip.SlidesState.Mode.CLOSED)
                     if (rawSdp.trim().isNotEmpty()) {
                         val (ip, aPort, vPort) = parseRemoteSdp(rawSdp)
                         rtpMediaManager?.setRemoteDestination(ip, aPort, vPort)
@@ -1092,7 +1127,8 @@ class CallActivity : AppCompatActivity() {
 
                     val sdpAnswer = webRtcManager.createAnswer()
                     sipManager.sendOkAnswer(rawMsg, sdpAnswer)
-                    if (shareOpening) miniAppManager.onShareAccepted()
+                    if (photoOpening) miniAppManager.onShareAccepted()
+                    if (videoOpening) miniAppManager.onVideoShareAccepted(rawSdp)
                     if (shareClosing) miniAppManager.onShareClosedByPeer()
 
                     Log.i(TAG, "? Re-INVITE auto-answered successfully")
@@ -1118,9 +1154,9 @@ class CallActivity : AppCompatActivity() {
         }
 
         // The answer is applied by MiniAppManager, under the negotiation lock, only if its CSeq is the one awaited.
-        sipManager.onReInviteResponse = { cseq, sdpAnswer, _ ->
+        sipManager.onReInviteResponse = { cseq, sdpAnswer, rawSdp ->
             Log.i(TAG, "? Re-INVITE 200 OK received (CSeq $cseq)")
-            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteAnswered(cseq, sdpAnswer) }
+            lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteAnswered(cseq, sdpAnswer, rawSdp) }
         }
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -1256,6 +1292,9 @@ class CallActivity : AppCompatActivity() {
             override fun cancelShare() = miniAppManager.cancelShare()
             override fun answerShare(accept: Boolean) = miniAppManager.answerShare(accept)
             override fun stopShare() = miniAppManager.stopShare()
+            override fun pickVideo() = miniAppManager.pickVideo()
+            override fun pauseVideo(paused: Boolean) = miniAppManager.pauseVideo(paused)
+            override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
         }
 
