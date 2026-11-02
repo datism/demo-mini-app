@@ -1214,6 +1214,7 @@ class MiniAppManager(val activity: CallActivity) {
     private var receiver: ContentReceiver? = null
     private var preview: android.media.MediaPlayer? = null
     private var contentSurface: android.view.SurfaceView? = null
+    private var remoteHiddenForContent = false
     private var videoTicker: kotlinx.coroutines.Job? = null
 
     /** The MF endpoint for the shared-content RTP of this phone's leg, from the SDP the far end answered/offered. */
@@ -1234,7 +1235,12 @@ class MiniAppManager(val activity: CallActivity) {
     private fun withContentSurface(use: (android.view.Surface) -> Unit) {
         activity.runOnUiThread {
             val sv = contentSurface ?: android.view.SurfaceView(activity).also { view ->
-                view.setZOrderMediaOverlay(true)
+                // Plain surface layer (not media overlay): my camera tile is the media overlay and two
+                // overlays draw in no fixed order, so the camera mixed into the shared video. The call's
+                // remote video is the other plain surface here; hide it while the content is shown.
+                val remote = activity.binding.remoteVideoView
+                remoteHiddenForContent = remote.visibility == View.VISIBLE
+                if (remoteHiddenForContent) remote.visibility = View.GONE
                 (activity.binding.root as android.view.ViewGroup).addView(
                     view, 1, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                 )
@@ -1322,6 +1328,8 @@ class MiniAppManager(val activity: CallActivity) {
         activity.runOnUiThread {
             contentSurface?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
             contentSurface = null
+            if (remoteHiddenForContent) activity.binding.remoteVideoView.visibility = View.VISIBLE
+            remoteHiddenForContent = false
         }
     }
 
