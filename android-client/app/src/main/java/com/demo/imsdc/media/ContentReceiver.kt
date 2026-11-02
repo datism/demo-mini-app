@@ -113,7 +113,11 @@ class ContentReceiver(
         val socket = videoSocket ?: return
         val buf = ByteArray(2048)
         val frame = ByteArrayOutputStream()
-        var lastSeq = -1
+        // Packets can arrive out of order on the way through the MF (seen: 36835 before 36831..36834).
+        // They are held here by sequence number and handled in order; a gap is only called a loss once
+        // REORDER_WINDOW later packets have arrived without it.
+        val pending = HashMap<Int, ByteArray>()
+        var expected = -1
         var broken = false
         var sawKey = false
         var hasIdr = false
@@ -127,55 +131,79 @@ class ContentReceiver(
             frame.write(startCode); frame.write(nal, off, len)
         }
 
+        fun handle(p: ByteArray) {
+            val n = p.size
+            val marker = (p[1].toInt() and 0x80) != 0
+            val type = p[12].toInt() and 0x1F
+            when {
+                type in 1..23 -> addNal(p, 12, n - 12)
+                type == 24 -> { // STAP-A: several NAL units in one packet
+                    var i = 13
+                    while (i + 2 <= n) {
+                        val size = ((p[i].toInt() and 0xFF) shl 8) or (p[i + 1].toInt() and 0xFF)
+                        if (size <= 0 || i + 2 + size > n) break
+                        addNal(p, i + 2, size)
+                        i += 2 + size
+                    }
+                }
+                type == 28 && n > 14 -> { // FU-A: rebuild the NAL header on the first fragment
+                    val header = p[13].toInt()
+                    if ((header and 0x80) != 0) {
+                        val nalHeader = ((p[12].toInt() and 0xE0) or (header and 0x1F)).toByte()
+                        if ((header and 0x1F) == 5) hasIdr = true
+                        frame.write(startCode); frame.write(nalHeader.toInt())
+                    }
+                    frame.write(p, 14, n - 14)
+                }
+            }
+            if (!marker) return
+
+            val picture = frame.toByteArray()
+            frame.reset()
+            val keyframe = hasIdr
+            hasIdr = false
+            if (broken) {
+                // Drop only the damaged picture. A damaged keyframe leaves nothing to decode against, so
+                // then wait for the next one; otherwise keep going (the decoder conceals the missing bit).
+                broken = false
+                if (keyframe) sawKey = false
+                return
+            }
+            if (keyframe) sawKey = true
+            if (!sawKey) return // decoding can only start at a keyframe
+            if (!pictures.offer(picture)) {
+                Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
+                pictures.clear()
+                sawKey = keyframe
+                if (keyframe) pictures.offer(picture)
+            }
+        }
+
+        fun drain() {
+            while (true) {
+                val p = pending.remove(expected) ?: return
+                handle(p)
+                expected = (expected + 1) and 0xFFFF
+            }
+        }
+
         while (running) {
             val pkt = DatagramPacket(buf, buf.size)
             socket.receive(pkt)
             val n = pkt.length
             if (n < 13 || (buf[1].toInt() and 0x7F) != 97) continue
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
-            if (lastSeq >= 0 && seq != ((lastSeq + 1) and 0xFFFF)) { // lost packet: drop this picture
-                if (sawKey) Log.w(TAG, "Lost ${(seq - lastSeq - 1) and 0xFFFF} video packet(s) before seq $seq: waiting for a keyframe")
+            if (expected < 0) expected = seq
+            if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
+            pending[seq] = buf.copyOf(n)
+            drain()
+            if (pending.size > REORDER_WINDOW) {
+                // Still missing after a window of later packets: it is lost. Skip to the oldest one held.
+                val next = pending.keys.minByOrNull { (it - expected) and 0xFFFF }!!
+                Log.w(TAG, "Lost ${(next - expected) and 0xFFFF} video packet(s) before seq $next")
                 broken = true
-            }
-            lastSeq = seq
-            val marker = (buf[1].toInt() and 0x80) != 0
-            val type = buf[12].toInt() and 0x1F
-            when {
-                type in 1..23 -> addNal(buf, 12, n - 12)
-                type == 24 -> { // STAP-A: several NAL units in one packet
-                    var p = 13
-                    while (p + 2 <= n) {
-                        val size = ((buf[p].toInt() and 0xFF) shl 8) or (buf[p + 1].toInt() and 0xFF)
-                        if (size <= 0 || p + 2 + size > n) break
-                        addNal(buf, p + 2, size)
-                        p += 2 + size
-                    }
-                }
-                type == 28 && n > 14 -> { // FU-A: rebuild the NAL header on the first fragment
-                    val header = buf[13].toInt()
-                    if ((header and 0x80) != 0) {
-                        val nalHeader = ((buf[12].toInt() and 0xE0) or (header and 0x1F)).toByte()
-                        val nalType = header and 0x1F
-                        if (nalType == 5) hasIdr = true
-                        frame.write(startCode); frame.write(nalHeader.toInt())
-                    }
-                    frame.write(buf, 14, n - 14)
-                }
-            }
-            if (!marker) continue
-
-            val picture = frame.toByteArray()
-            frame.reset()
-            val keyframe = hasIdr
-            hasIdr = false
-            if (broken) { broken = false; sawKey = false; continue } // lost packet: wait for the next keyframe
-            if (keyframe) sawKey = true
-            if (!sawKey) continue // decoding can only start at a keyframe
-            if (!pictures.offer(picture)) {
-                Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
-                pictures.clear()
-                sawKey = keyframe
-                if (keyframe) pictures.offer(picture)
+                expected = next
+                drain()
             }
         }
     }
@@ -252,5 +280,7 @@ class ContentReceiver(
     companion object {
         /** About a second of video at 30 fps. */
         private const val PICTURE_QUEUE = 30
+        /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
+        private const val REORDER_WINDOW = 64
     }
 }
