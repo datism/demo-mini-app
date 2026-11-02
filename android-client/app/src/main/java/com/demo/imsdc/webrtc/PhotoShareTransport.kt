@@ -187,6 +187,13 @@ class PhotoShareTransport(
                     adc.send(DataChannel.Buffer(ByteBuffer.wrap(frame), true))
                 }
 
+                if (sent.isSuccess && sent.getOrNull() != true) {
+                    // DataChannel.send() returns false (no exception) when the channel refused the message.
+                    Log.e(TAG, "send chunk refused at seq=$seq for ${job.photoId}: state=${adc.state()} buffered=${adc.bufferedAmount()} size=${frame.size}")
+                    job.onDone?.invoke(false)
+                    return
+                }
+                if (seq == 0 || seq % 10 == 0) Log.i(TAG, "sent chunk seq=$seq/$total (${frame.size} bytes) buffered=${adc.bufferedAmount()}")
                 if (sent.isFailure) {
                     Log.e(TAG, "send chunk failed at seq=$seq for ${job.photoId}: ${sent.exceptionOrNull()?.message}")
                     job.onDone?.invoke(false)
