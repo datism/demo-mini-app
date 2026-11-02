@@ -1556,7 +1556,17 @@ func (m *MediaFunction) handleADC(session *SessionInfo, dc *webrtc.DataChannel) 
 						log.Printf("[MF] 🔄 ADC P2P Relayed %d bytes (binary=%v) from session %s -> %s (stream %d)",
 							len(msg.Data), !msg.IsString, session.ID, peerSession.ID, chanID)
 					}
+				} else {
+					state := "nil"
+					if peerADC != nil {
+						state = peerADC.ReadyState().String()
+					}
+					log.Printf("[MF] ADC P2P relay DROPPED %d bytes from %s (stream %d): peer %s channel is %s",
+						len(msg.Data), session.ID, chanID, peerSession.ID, state)
 				}
+			} else {
+				log.Printf("[MF] ADC P2P relay DROPPED %d bytes from %s (stream %d): no peer session for call %s",
+					len(msg.Data), session.ID, chanID, session.CallID)
 			}
 		}
 
