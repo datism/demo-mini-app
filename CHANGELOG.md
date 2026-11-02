@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- Content Sharing video: the red "Dừng" pill is replaced by a back arrow (<) at the top-left of the video bar, the same as the photo viewer. Both people have it, and either one can end the share with it.
 - **Full screen, same layout as Caro:** in Content Sharing the call pill (green dot + timer) now sits at the bottom centre, and the call buttons appear only from a tap on the pill (no longer from a tap on the photo or video); they hide again after 3.5 s or on a second tap. My camera is back at the top-left. A tap on it folds it into a round camera button in the same corner, and a tap on the button opens the tile again; the choice lasts for the call and applies to every page that shows my camera (Caro keeps its two fixed tiles). The page keeps its bar clear of the camera and its dots and video controls clear of the pill.
 - **Full screen for Content Sharing and Caro:** while the photo viewer or a shared video is showing, and always in Caro, the app fills the whole screen. The call bar, the call buttons, the ‹ Menu button and Android's status and navigation bars are hidden; a small pill (green dot + call timer) stays on screen. Tapping the pill, or the photo/video, shows the call buttons (and ‹ Menu) for 3.5 s. My camera stays on by default: bottom-right in Content Sharing, where a tap shrinks it to 48×64 dp and another tap restores it (it can still be dragged); Caro keeps both camera tiles at the top with the board under them and the pill below the board. New page bridge calls `setFullScreen(bool)` and `showCallControls()` replace the unimplemented `setCameraTile`.
 - **Content Sharing, both people can add photos:** the ＋ button now shows on both phones in the photo viewer. The person who accepted can add photos too; they are offered, fetched and turned to on both phones exactly like the first person's. Photo ids get a random part so the two phones never pick the same id.
@@ -35,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - **Mini-app page reloaded several times on open (1900 flight booking, caro callee):** every BDC `304 Not Modified` reloaded the WebView although `launchMiniApp` had already loaded that cache, and `setupBDC` sent up to three GETs for the same app. A 304 no longer reloads the page, only one GET per app is in flight, and a remote `LAUNCH_APP`/Re-INVITE for the page already on screen no longer reloads it.
 
 ### Added & Enhanced
+- Content Sharing video: the red "Dừng" pill is replaced by a back arrow (<) at the top-left of the video bar, the same as the photo viewer. Both people have it, and either one can end the share with it.
 - **Hotline 1900 home menu, booking history, membership and support:** dialling 1900 now opens a menu (Đặt vé, Lịch sử đặt vé, Hội viên, Gọi hỗ trợ) instead of going straight to flight search. The caller's phone number is the account, so there is no login: DCAS reads it from the IMS-AS session in Redis (`imsas:session:<call id>`, with the `-app`/`-adc` suffix removed; `guest` when it can't be found).
   - Confirmed bookings are kept per caller and shown under Lịch sử đặt vé; tapping one opens its ticket with the QR code. New callers start with two sample bookings (one flown, one upcoming) and 4.800 points.
   - SkyLotus Club: 1 point per 10.000₫; Silver below 5.000, Gold from 5.000, Platinum from 15.000. The membership screen shows the tier, points, progress to the next tier, benefits and recent points; the confirmation screen shows the points earned.
@@ -83,6 +85,7 @@ All notable changes to this project will be documented in this file.
 ## [16.0.0] - 2026-08-20
 
 ### Added & Enhanced
+- Content Sharing video: the red "Dừng" pill is replaced by a back arrow (<) at the top-left of the video bar, the same as the photo viewer. Both people have it, and either one can end the share with it.
 - **Android Native Collapsible Dialpad & Call History Expansion:**
   - Implemented smooth dynamic layout transition in `MainActivity.kt` and `activity_main.xml`. Tapping the call history automatically collapses the dialpad and shows a floating dialpad button (`fabShowDialpad`), maximizing call history display matching native flagship dialers.
 - **E2E Simulation Test Suite (`dc-test-tool`) 100% Feature Coverage:**
@@ -109,6 +112,7 @@ All notable changes to this project will be documented in this file.
 ## [15.0.3] - 2026-08-16
 
 ### Added & Enhanced
+- Content Sharing video: the red "Dừng" pill is replaced by a back arrow (<) at the top-left of the video bar, the same as the photo viewer. Both people have it, and either one can end the share with it.
 - **Smart Customer Service 198 (Hotline UAS / Enterprise 5G New Calling):**
   - Designed and deployed the interactive Smart Customer Service hotline `198` per GSMA 5G New Calling enterprise specifications.
   - **Core Network Terminating UAS:** IMS-AS and DCAS act as the terminating hotline UAS automatically answering calls to `198` with `200 OK`, establishing conversational voice/video and Bootstrap Data Channel (BDC).
@@ -125,6 +129,7 @@ All notable changes to this project will be documented in this file.
 ## [15.0.2] - 2026-08-15
 
 ### Added & Enhanced
+- Content Sharing video: the red "Dừng" pill is replaced by a back arrow (<) at the top-left of the video bar, the same as the photo viewer. Both people have it, and either one can end the share with it.
 - **Screen-Off Call Handling & Deep Doze Wakeup:**
   - Implemented `WakeLock`, `setShowWhenLocked(true)`, `setTurnScreenOn(true)`, and `KeyguardManager.requestDismissKeyguard()` in `CallActivity` and `CallNotificationManager`.
   - Enables incoming calls to instantly wake devices from `DOZE_SUSPEND` state (<1.6s) and display full-screen incoming call UI without requiring user unlock.
