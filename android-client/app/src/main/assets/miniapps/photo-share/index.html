@@ -333,7 +333,7 @@ $('fileInput').onchange = async () => {
   toast('Đang xử lý ' + files.length + ' ảnh…');
   const offered = [];
   for (let i = 0; i < files.length; i++) {
-    const id = 'p' + Date.now() + '_' + i;
+    const id = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + i;
     let res;
     try {
       const data = await fileToJpegB64(files[i]);
@@ -346,8 +346,8 @@ $('fileInput').onchange = async () => {
   }
   if (!offered.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
   sendJson({ t: 'offer', photos: offered.map(o => ({ id: o.id, bytes: o.bytes, thumb: o.thumb })) });
-  const first = state.s && !$('viewer').hidden ? false : true;
-  if (first) enterViewer();
+  if ($('viewer').hidden) enterViewer();
+  else toast('Đã gửi ' + offered.length + ' ảnh');
   gotoPhoto(offered[0].id, true);
 };
 $('btnAdd').onclick = pickPhotos;
@@ -401,7 +401,7 @@ function onPshare(idHash, b64) {
 
 /* ─────────────── Viewer ảnh ─────────────── */
 function enterViewer() {
-  $('btnAdd').classList.toggle('hide', !(state.s && state.s.role === 'sender'));
+  $('btnAdd').classList.remove('hide'); // either person can add photos once the session is open
   show('viewer'); wakeBar();
 }
 function gotoPhoto(id, userInitiated) {
