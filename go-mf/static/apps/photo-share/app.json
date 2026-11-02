@@ -1,7 +1,7 @@
 {
   "appId": "photo-share",
-  "appName": "PhotoShare",
-  "version": "1.0.0",
+  "appName": "Content Sharing",
+  "version": "2.0.0",
   "connectionPolicy": "P2P",
   "qosHint": {
     "latencyMs": 200,
