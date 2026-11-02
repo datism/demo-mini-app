@@ -1357,12 +1357,19 @@
     // ------------------------------------------------------------ data
     // Local copy of the DCAS schedule so the page still works if the ADC is slow;
     // DCAS replies (flight_booking.go) replace it.
-    const AIRPORTS = { HAN: 'Hà Nội', SGN: 'TP. Hồ Chí Minh' };
-    const DATES = [
-      { wd: 'T2', d: 9, f: '1,29tr' }, { wd: 'T3', d: 10, f: '1,19tr' }, { wd: 'T4', d: 11, f: '1,09tr' },
-      { wd: 'T5', d: 12, f: '999K', low: true }, { wd: 'T6', d: 13, f: '1,39tr' }, { wd: 'T7', d: 14, f: '1,59tr' },
-      { wd: 'CN', d: 15, f: '1,49tr' }, { wd: 'T2', d: 16, f: '1,09tr' }
-    ];
+    const AIRPORTS = { HAN: 'Hà Nội', SGN: 'TP. Hồ Chí Minh', DAD: 'Đà Nẵng', HPH: 'Hải Phòng', VDH: 'Quảng Bình', DLI: 'Đà Lạt' };
+    const AIRPORT_ORDER = ['HAN', 'SGN', 'DAD', 'HPH', 'VDH', 'DLI'];
+    const AIRPORT_NAME = { HAN: 'Nội Bài', SGN: 'Tân Sơn Nhất', DAD: 'Đà Nẵng', HPH: 'Cát Bi', VDH: 'Đồng Hới', DLI: 'Liên Khương' };
+    // Today and the next 7 days, from the phone's clock.
+    const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const DATES = (() => {
+      const now = new Date(), out = [];
+      for (let i = 0; i < 8; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+        out.push({ wd: WD[d.getDay()], dow: d.getDay(), d: d.getDate(), m: d.getMonth() + 1, y: d.getFullYear() });
+      }
+      return out;
+    })();
     const FLEX = 600000, EXTRA_FEE = 150000, TAX = 480000;
     const LOCAL_FLIGHTS = [
       { no: 'SL 201', dep: '06:00', arr: '08:10', dur: '2g 10p', price: 1479000 },
@@ -1370,6 +1377,39 @@
       { no: 'SL 225', dep: '11:15', arr: '13:20', dur: '2g 05p', price: 1670000 },
       { no: 'SL 241', dep: '19:45', arr: '21:55', dur: '2g 10p', price: 1570000 }
     ];
+    // Same routes, flight numbers and fares as DCAS (flight_booking.go). HAN–HPH,
+    // DAD–VDH and HPH–VDH have no flights: the cities are too close.
+    const ROUTES = [
+      ['HAN', 'DAD', 80], ['HAN', 'DLI', 110], ['HAN', 'VDH', 70],
+      ['SGN', 'DAD', 85], ['SGN', 'HPH', 125], ['SGN', 'VDH', 95], ['SGN', 'DLI', 55],
+      ['DAD', 'HPH', 80], ['DAD', 'DLI', 70], ['HPH', 'DLI', 115], ['VDH', 'DLI', 90]
+    ];
+    const DEPARTURES = ['06:00', '08:30', '11:15', '19:45'], SPREAD = [0, 291000, 191000, 91000];
+    const DAY_PCT = [115, 100, 95, 90, 85, 110, 120]; // Sunday first
+    const routeKey = (a, b) => a < b ? a + '-' + b : b + '-' + a;
+    const two = n => String(n).padStart(2, '0'); // `pad` is defined further down
+    const addMin = (hhmm, m) => { const t = +hhmm.slice(0, 2) * 60 + +hhmm.slice(3) + m; return two(Math.floor(t / 60) % 24) + ':' + two(t % 60); };
+    const durText = m => m < 60 ? m + 'p' : Math.floor(m / 60) + 'g ' + two(m % 60) + 'p';
+    const NETWORK = (() => {
+      const net = { 'HAN-SGN': LOCAL_FLIGHTS };
+      ROUTES.forEach(([a, b, mins], k) => {
+        let first = Math.max(790000, Math.floor(1479000 * mins / 130));
+        first = Math.floor((first + 500) / 1000) * 1000;
+        net[routeKey(a, b)] = DEPARTURES.map((dep, i) => ({
+          no: 'SL ' + (300 + 10 * (k + 1) + i + 1), dep, arr: addMin(dep, mins), dur: durText(mins), price: first + SPREAD[i]
+        }));
+      });
+      return net;
+    })();
+    const dayPrice = (p, dow) => Math.floor((Math.floor(p * DAY_PCT[dow] / 100) + 500) / 1000) * 1000;
+    const shortFare = p => p >= 1000000 ? (p / 1000000).toFixed(2).replace('.', ',') + 'tr' : Math.round(p / 1000) + 'K';
+    // Flights for a route on DATES[di], priced for that weekday; null when the route has no flights.
+    function flightsFor(from, to, di) {
+      const day = NETWORK[routeKey(from, to)];
+      if (!day || from === to) return null;
+      const pick = routeKey(from, to) === 'HAN-SGN' ? 'SL 213' : day[1].no;
+      return day.map(f => Object.assign({}, f, { price: dayPrice(f.price, DATES[di].dow), pick: f.no === pick }));
+    }
     const LOCAL_TAKEN = ['1A', '1B', '1F', '2E', '2F', '3C', '3D', '4B', '4C', '5E', '6A', '6F', '7C', '7D', '8B', '9A', '9F', '10C', '10D', '11A', '12B', '12C', '13D', '13E', '14A', '14F', '15C', '16B', '16D', '17E', '17F', '18A', '19C', '20D'];
     const SEAT_NAME = { A: 'cửa sổ', F: 'cửa sổ', C: 'lối đi', D: 'lối đi', B: 'giữa', E: 'giữa' };
     const METHODS = [
@@ -1401,6 +1441,7 @@
       member: { n: 0, menu: true, pill: 'Hội viên', pillEn: 'Membership' },
       support: { n: 0, menu: true, pill: 'Hỗ trợ', pillEn: 'Support' },
       search: { n: 1, vn: 'Tìm chuyến', en: 'Search', pill: 'Đang tìm chuyến', pillEn: 'Searching' },
+      city: { n: 1, vn: 'Tìm chuyến', en: 'Search', pill: 'Đang tìm chuyến', pillEn: 'Searching' },
       results: { n: 2, vn: 'Chọn chuyến', en: 'Choose flight', pill: 'Đang chọn chuyến', pillEn: 'Choosing flight' },
       seat: { n: 3, vn: 'Chọn ghế', en: 'Seat', pill: 'Đang chọn ghế', pillEn: 'Choosing seat' },
       review: { n: 4, vn: 'Thanh toán', en: 'Review & pay', pill: 'Đang thanh toán', pillEn: 'Review & pay' },
@@ -1415,7 +1456,7 @@
       return {
         screen: 'home', minimized: false,
         member: memberFor(4800), bookings: LOCAL_BOOKINGS, viewing: 0, supportBanner: null, pointsEarned: 0,
-        flip: false, rot: 0, dateIdx: 3, pax: { a: 1, c: 0 },
+        from: 'HAN', to: 'SGN', citySide: 'from', rot: 0, dateIdx: 0, pax: { a: 1, c: 0 },
         flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
         taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
         name: 'NGUYỄN VĂN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
@@ -1430,11 +1471,16 @@
     const money = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '₫';
     const pad = n => String(n).padStart(2, '0');
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const route = () => state.flip ? ['SGN', 'HAN'] : ['HAN', 'SGN'];
+    const route = () => [state.from, state.to];
     const paxCount = () => state.pax.a + state.pax.c;
     const paxText = () => state.pax.a + ' người lớn' + (state.pax.c ? ', ' + state.pax.c + ' trẻ em' : '');
-    const dateText = () => DATES[state.dateIdx].wd + ', ' + DATES[state.dateIdx].d + '/11';
-    const dateIso = () => '2026-11-' + pad(DATES[state.dateIdx].d);
+    const dateText = () => DATES[state.dateIdx].wd + ', ' + DATES[state.dateIdx].d + '/' + DATES[state.dateIdx].m;
+    const dateIso = () => DATES[state.dateIdx].y + '-' + pad(DATES[state.dateIdx].m) + '-' + pad(DATES[state.dateIdx].d);
+    const monthText = () => {
+      const a = DATES[0], b = DATES[DATES.length - 1];
+      if (a.m === b.m) return 'Tháng ' + a.m + '/' + a.y;
+      return a.y === b.y ? 'Tháng ' + a.m + '–' + b.m + '/' + a.y : 'Tháng ' + a.m + '/' + a.y + ' – ' + b.m + '/' + b.y;
+    };
     const seatRow = s => parseInt(s, 10);
     const isExtra = s => !!s && state.extraRows.indexOf(seatRow(s)) >= 0;
     const farePerPax = f => f.price + (state.fare === 'flex' ? FLEX : 0);
@@ -1528,9 +1574,12 @@
 
     function screenSearch() {
       const [from, to] = route();
+      // Lowest Saver fare per day for this route; the cheapest day is highlighted.
+      const lows = DATES.map((d, i) => { const fl = flightsFor(from, to, i); return fl ? Math.min.apply(null, fl.map(f => f.price)) : null; });
+      const best = lows.every(p => p === null) ? null : Math.min.apply(null, lows.filter(p => p !== null));
       const dates = DATES.map((d, i) =>
         '<button role="option" aria-selected="' + (i === state.dateIdx) + '" class="date tap' + (i === state.dateIdx ? ' sel' : '') + '" data-act="date" data-i="' + i + '">' +
-        '<span class="wd">' + d.wd + '</span><span class="d tnum">' + d.d + '</span><span class="f tnum' + (d.low ? ' low' : '') + '">' + d.f + '</span></button>').join('');
+        '<span class="wd">' + (i === 0 ? 'Hôm nay' : d.wd) + '</span><span class="d tnum">' + d.d + '</span><span class="f tnum' + (lows[i] !== null && lows[i] === best ? ' low' : '') + '">' + (lows[i] === null ? '—' : shortFare(lows[i])) + '</span></button>').join('');
       const rows = [
         { k: 'a', vn: 'Người lớn', en: 'Adult · 12+', min: 1 },
         { k: 'c', vn: 'Trẻ em', en: 'Child · 2–11', min: 0 }
@@ -1545,16 +1594,31 @@
         main:
           titleRow('home', 'Tìm chuyến bay', 'Search flights') +
           '<div class="route">' +
-          '<button class="route-field tap"><span class="k">Từ · From</span><span class="v">' + AIRPORTS[from] + ' <span>' + from + '</span></span></button>' +
+          '<button class="route-field tap" data-act="city" data-side="from"><span class="k">Từ · From</span><span class="v">' + AIRPORTS[from] + ' <span>' + from + '</span></span></button>' +
           '<div class="route-sep"></div>' +
-          '<button class="route-field tap"><span class="k">Đến · To</span><span class="v">' + AIRPORTS[to] + ' <span>' + to + '</span></span></button>' +
+          '<button class="route-field tap" data-act="city" data-side="to"><span class="k">Đến · To</span><span class="v">' + AIRPORTS[to] + ' <span>' + to + '</span></span></button>' +
           '<button class="swap tap" data-act="swap" aria-label="Đổi chiều · Swap">' + ICONS.swap.replace('<svg', '<svg style="transform:rotate(' + state.rot + 'deg)"') + '</button>' +
           '</div>' +
-          '<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-label">Ngày đi <small>· Date</small></span><span class="muted" style="font-size:13px">Tháng 11/2026</span></div>' +
+          '<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-label">Ngày đi <small>· Date</small></span><span class="muted" style="font-size:13px">' + monthText() + '</span></div>' +
           '<div class="dates hscroll" role="listbox" aria-label="Ngày đi">' + dates + '</div>' +
-          '<div class="caption" style="margin-top:8px">Giá thấp nhất / người lớn · Lowest fare per day</div></div>' +
+          '<div class="caption" style="margin-top:8px">' + (flightsFor(from, to, 0) ? 'Giá thấp nhất / người lớn · Lowest fare per day' : 'Chưa có chuyến bay thẳng trên tuyến này · No direct flight on this route') + '</div></div>' +
           '<div><div class="section-label" style="margin-bottom:4px">Hành khách <small>· Passengers</small></div>' + rows + '</div>',
         footer: '<button class="btn" data-act="search">Tìm chuyến bay<span class="sub">· Search flights</span></button>'
+      };
+    }
+
+    function screenCity() {
+      const side = state.citySide, other = side === 'from' ? state.to : state.from;
+      const list = AIRPORT_ORDER.map(code => {
+        const sel = code === state[side];
+        return '<button role="option" aria-selected="' + sel + '" class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)" data-act="setcity" data-code="' + code + '">' +
+          '<span class="info"><span class="times">' + AIRPORTS[code] + (sel ? ' ✓' : '') + '</span><span class="meta">' + code + ' · Sân bay ' + AIRPORT_NAME[code] +
+          (code === other ? ' · đổi chiều · swap' : '') + '</span></span></button>';
+      }).join('');
+      return {
+        main: titleRow('search', side === 'from' ? 'Điểm đi' : 'Điểm đến', side === 'from' ? 'From' : 'To') +
+          '<div role="listbox" aria-label="Chọn thành phố">' + list + '</div>',
+        footer: ''
       };
     }
 
@@ -1647,7 +1711,7 @@
         main:
           titleRow('seat', 'Xem lại &amp; thanh toán', 'Review &amp; pay') +
           '<div class="trip"><div class="trip-line tnum"><span>' + from + ' ' + f.dep + '</span><span class="muted">' + ICONS.arrow + '</span><span>' + to + ' ' + f.arr + '</span></div>' +
-          '<div class="caption" style="font-size:13px;margin-top:6px">' + dateText() + '/2026 · ' + f.no + ' · ' + fareName + ' · ' + f.dur + '</div>' +
+          '<div class="caption" style="font-size:13px;margin-top:6px">' + dateText() + '/' + DATES[state.dateIdx].y + ' · ' + f.no + ' · ' + fareName + ' · ' + f.dur + '</div>' +
           '<div class="trip-seat"><span>' + seatLine + '</span><button class="link tap" data-act="go" data-to="seat">Đổi ghế</button></div></div>' +
           '<div><div class="group-label">Hành khách · Passenger</div>' +
           '<label style="display:block"><span class="field-label"><span>Họ và tên</span><em>Từ số gọi đến · Caller ID</em></span>' +
@@ -1814,7 +1878,7 @@
       };
     }
 
-    const SCREENS = { home: screenHome, history: screenHistory, ticket: screenTicket, member: screenMember, support: screenSupport, search: screenSearch, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
+    const SCREENS = { home: screenHome, history: screenHistory, ticket: screenTicket, member: screenMember, support: screenSupport, search: screenSearch, city: screenCity, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
 
     // ------------------------------------------------------------ render
     function render() {
@@ -1849,7 +1913,15 @@
       minimize: () => setState({ minimized: true }),
       restore: () => setState({ minimized: false }),
       go: el => go(el.dataset.to),
-      swap: () => setState({ flip: !state.flip, rot: state.rot + 180 }),
+      swap: () => setState({ from: state.to, to: state.from, rot: state.rot + 180 }),
+      city: el => { state.citySide = el.dataset.side; go('city'); },
+      // Picking the city already on the other side swaps the two.
+      setcity: el => {
+        const code = el.dataset.code, side = state.citySide, other = side === 'from' ? 'to' : 'from';
+        if (code === state[other]) { state[other] = state[side]; state.rot += 180; }
+        state[side] = code;
+        go('search');
+      },
       date: el => setState({ dateIdx: +el.dataset.i }),
       pax: el => {
         const k = el.dataset.k, min = k === 'a' ? 1 : 0;
@@ -1859,8 +1931,17 @@
       },
       search: () => {
         const [from, to] = route();
+        const flights = flightsFor(from, to, state.dateIdx);
+        if (!flights) {
+          showToast('Chưa có chuyến bay thẳng giữa ' + AIRPORTS[from] + ' và ' + AIRPORTS[to]);
+          return;
+        }
         sendAdcMessage({ action: 'search', from, to, date: dateIso(), adults: state.pax.a, children: state.pax.c });
-        state.flightBanner = { vn: 'Tổng đài viên gợi ý chuyến SL 213', en: 'Agent suggested this flight' };
+        // Local copy until DCAS replies; both price the same way.
+        const pick = flights.find(f => f.pick).no;
+        state.flights = flights;
+        state.open = pick;
+        state.flightBanner = { vn: 'Tổng đài viên gợi ý chuyến ' + pick, en: 'Agent suggested this flight' };
         go('results');
       },
       toggle: el => setState({ open: state.open === el.dataset.no ? null : el.dataset.no }),
@@ -1896,7 +1977,7 @@
           return;
         }
         sendAdcMessage({
-          action: 'confirm', flight: state.flight.no, date: dateIso(), fare: state.fare, seats: state.seats, seat: state.seats[0] || '',
+          action: 'confirm', flight: state.flight.no, from: state.from, to: state.to, date: dateIso(), fare: state.fare, seats: state.seats, seat: state.seats[0] || '',
           adults: state.pax.a, children: state.pax.c, name: state.name.trim().toUpperCase(), payment: state.pm
         });
         setState({ booking: true });

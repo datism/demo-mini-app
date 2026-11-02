@@ -73,11 +73,115 @@ type FlightBookingResponse struct {
 	PointsEarned int                   `json:"points_earned,omitempty"` // confirm
 }
 
+// flightSchedule is the Hà Nội ↔ TP. Hồ Chí Minh day, flown both ways. The
+// sample bookings and SL 213 (the agent pick) refer to it, so it stays as is.
 var flightSchedule = []FlightOption{
 	{No: "SL 201", Dep: "06:00", Arr: "08:10", Dur: "2g 10p", Price: 1479000},
 	{No: "SL 213", Dep: "08:30", Arr: "10:40", Dur: "2g 10p", Price: 1770000},
 	{No: "SL 225", Dep: "11:15", Arr: "13:20", Dur: "2g 05p", Price: 1670000},
 	{No: "SL 241", Dep: "19:45", Arr: "21:55", Dur: "2g 10p", Price: 1570000},
+}
+
+// flightAirports: the cities SkyLotus flies to. The page keeps the same list.
+var flightAirports = map[string]string{
+	"HAN": "Hà Nội", "SGN": "TP. Hồ Chí Minh", "DAD": "Đà Nẵng",
+	"HPH": "Hải Phòng", "VDH": "Quảng Bình", "DLI": "Đà Lạt",
+}
+
+// flightRoute is one city pair, flown both ways with the same four flights.
+// Route k numbers its flights SL 3k1..3k4 (k=10, 11 give SL 401.., SL 411..).
+// HAN–HPH, DAD–VDH and HPH–VDH are missing on purpose: too close to fly.
+type flightRoute struct {
+	A, B string
+	Mins int
+}
+
+var flightRoutes = []flightRoute{
+	{"HAN", "DAD", 80}, {"HAN", "DLI", 110}, {"HAN", "VDH", 70},
+	{"SGN", "DAD", 85}, {"SGN", "HPH", 125}, {"SGN", "VDH", 95}, {"SGN", "DLI", 55},
+	{"DAD", "HPH", 80}, {"DAD", "DLI", 70}, {"HPH", "DLI", 115}, {"VDH", "DLI", 90},
+}
+
+var (
+	flightDepartures = []string{"06:00", "08:30", "11:15", "19:45"}
+	flightSpread     = []int{0, 291000, 191000, 91000} // over the route's first flight, as on HAN–SGN
+)
+
+const (
+	flightBaseMins  = 130     // HAN–SGN, whose first flight costs flightBasePrice
+	flightBasePrice = 1479000 // VND
+	flightMinPrice  = 790000  // VND, cheapest first flight of any route
+)
+
+// flightDays maps a route key ("DAD-HAN", sorted) to its flights; flightByNo
+// indexes every flight. Built once from flightSchedule and flightRoutes.
+var flightDays, flightByNo = buildFlightNetwork()
+
+func routeKey(a, b string) string {
+	if a > b {
+		a, b = b, a
+	}
+	return a + "-" + b
+}
+
+func buildFlightNetwork() (map[string][]FlightOption, map[string]*FlightOption) {
+	days := map[string][]FlightOption{routeKey("HAN", "SGN"): flightSchedule}
+	for k, r := range flightRoutes {
+		first := flightBasePrice * r.Mins / flightBaseMins
+		if first < flightMinPrice {
+			first = flightMinPrice
+		}
+		first = (first + 500) / 1000 * 1000
+		list := make([]FlightOption, len(flightDepartures))
+		for i, dep := range flightDepartures {
+			list[i] = FlightOption{
+				No:    "SL " + strconv.Itoa(300+10*(k+1)+i+1),
+				Dep:   dep,
+				Arr:   addMinutes(dep, r.Mins),
+				Dur:   flightDuration(r.Mins),
+				Price: first + flightSpread[i],
+			}
+		}
+		days[routeKey(r.A, r.B)] = list
+	}
+	byNo := map[string]*FlightOption{}
+	for key := range days {
+		for i := range days[key] {
+			byNo[days[key][i].No] = &days[key][i]
+		}
+	}
+	return days, byNo
+}
+
+func addMinutes(hhmm string, mins int) string {
+	t, _ := time.Parse("15:04", hhmm)
+	return t.Add(time.Duration(mins) * time.Minute).Format("15:04")
+}
+
+// flightDuration formats 85 as "1g 25p" and 55 as "55p".
+func flightDuration(mins int) string {
+	if mins < 60 {
+		return strconv.Itoa(mins) + "p"
+	}
+	m := strconv.Itoa(mins % 60)
+	if len(m) == 1 {
+		m = "0" + m
+	}
+	return strconv.Itoa(mins/60) + "g " + m + "p"
+}
+
+// flightDayPercent: fares follow the weekday (Sunday first). The page uses the
+// same table for the lowest fare under each date.
+var flightDayPercent = [7]int{115, 100, 95, 90, 85, 110, 120}
+
+// dayPrice is price on date ("2006-01-02"), rounded to 1.000₫; no or a bad date
+// leaves it unchanged.
+func dayPrice(price int, date string) int {
+	d, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return price
+	}
+	return (price*flightDayPercent[d.Weekday()]/100 + 500) / 1000 * 1000
 }
 
 var flightTakenSeats = []string{
@@ -263,13 +367,31 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 
 	switch req.Action {
 	case "search":
-		resp.Flights = make([]FlightOption, len(flightSchedule))
-		copy(resp.Flights, flightSchedule)
-		for i := range resp.Flights {
-			resp.Flights[i].Pick = resp.Flights[i].No == flightAgentPick
+		from, to := req.From, req.To
+		if from == "" && to == "" {
+			from, to = "HAN", "SGN" // pages before the city picker
 		}
-		resp.AgentPick = flightAgentPick
-		resp.Message = "Tổng đài viên gợi ý chuyến " + flightAgentPick
+		if flightAirports[from] == "" || flightAirports[to] == "" || from == to {
+			return flightError(resp, "Tuyến bay không hợp lệ")
+		}
+		day, ok := flightDays[routeKey(from, to)]
+		if !ok {
+			resp = flightError(resp, "Chưa có chuyến bay thẳng giữa "+flightAirports[from]+" và "+flightAirports[to])
+			resp.MessageEn = "No direct flight on this route"
+			return resp
+		}
+		pick := day[1].No
+		if from+to == "HANSGN" || from+to == "SGNHAN" {
+			pick = flightAgentPick
+		}
+		resp.Flights = make([]FlightOption, len(day))
+		copy(resp.Flights, day)
+		for i := range resp.Flights {
+			resp.Flights[i].Price = dayPrice(resp.Flights[i].Price, req.Date)
+			resp.Flights[i].Pick = resp.Flights[i].No == pick
+		}
+		resp.AgentPick = pick
+		resp.Message = "Tổng đài viên gợi ý chuyến " + pick
 		resp.MessageEn = "Agent suggested this flight"
 	case "select":
 		if findFlight(req.Flight) == nil {
@@ -333,12 +455,7 @@ func flightError(resp FlightBookingResponse, msg string) FlightBookingResponse {
 }
 
 func findFlight(no string) *FlightOption {
-	for i := range flightSchedule {
-		if flightSchedule[i].No == no {
-			return &flightSchedule[i]
-		}
-	}
-	return nil
+	return flightByNo[no]
 }
 
 func seatTaken(seat string) bool {
@@ -383,7 +500,7 @@ func validSeat(seat string) bool {
 // flightTotal returns the amount due and the tax part of it.
 func flightTotal(f FlightOption, req FlightBookingRequest) (int, int) {
 	pax := paxCount(req)
-	perPax := f.Price
+	perPax := dayPrice(f.Price, req.Date)
 	if req.Fare == "flex" {
 		perPax += flightFlexSurcharge
 	}

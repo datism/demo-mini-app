@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - 2026-10-25
 
+### Added & Enhanced
+- **1900 flight search: real dates and 6 cities.** The date chips now run from today to today + 7 days, from the phone's clock (the first chip reads "Hôm nay"); the header shows the real month. From/To can be tapped to pick Hà Nội (HAN), TP. Hồ Chí Minh (SGN), Đà Nẵng (DAD), Hải Phòng (HPH), Quảng Bình (VDH) or Đà Lạt (DLI); picking the city on the other side swaps them.
+  - 12 direct routes, 4 flights a day each (06:00, 08:30, 11:15, 19:45) with realistic flight times; HAN–SGN keeps SL 201/213/225/241 and its prices, the others are SL 311–414. HAN–HPH, DAD–VDH and HPH–VDH have no flights (the search says so).
+  - Fares scale with flight time and follow the weekday (T5 cheapest, T7 dearest); the fare under each date is the lowest Saver fare that day, and the confirmed total uses the same price. Same tables in DCAS (`flight_booking.go`) and the page.
+
 ### Fixed
 - **Caro "Bàn cờ đã đủ 2 người chơi" and both phones showing X:** since the background-emote ADC, a call keeps the Home (emote) sessions connected to DCAS next to the caro App sessions, and DCAS gave a caro seat to any session of the call. A seat could go to a session that never opened caro, which locked the real second player out; a player without a seat was still told it was X. DCAS now seats only sessions that sent a caro message (Redis set `caro:players:<call id>`), frees a seat held by a gone or non-caro session before a move, and answers a third page with the "full" error instead of a fake X (`go-mf/internal/dcas/caro_game.go`).
 - **Mini-app page reloaded several times on open (1900 flight booking, caro callee):** every BDC `304 Not Modified` reloaded the WebView although `launchMiniApp` had already loaded that cache, and `setupBDC` sent up to three GETs for the same app. A 304 no longer reloads the page, only one GET per app is in flight, and a remote `LAUNCH_APP`/Re-INVITE for the page already on screen no longer reloads it.
