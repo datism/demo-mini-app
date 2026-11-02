@@ -93,6 +93,8 @@
   .round svg { width: 22px; height: 22px; }
   .stop { font: inherit; font-size: 13.5px; font-weight: 600; color: #fff; background: rgba(255,69,58,.9); border: 0; border-radius: 999px; padding: 10px 18px; }
 
+  /* Full screen (native hides the call UI): keep the page's bar clear of the native call pill at the top-left. */
+  html.full .bar { padding-top: 52px; }
   #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(21,24,29,.92); color: #fff; font-size: 12.5px;
            padding: 9px 14px; border-radius: 999px; z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
   #toast.show { opacity: 1; }
@@ -178,7 +180,7 @@
  * Báo hiệu SIP do native đảm nhiệm (re-INVITE / 180 / 200 / 603 / CANCEL).
  * Trang gọi:  AndroidBridge.requestShare(kind) · cancelShare() · answerShare(bool)
  *             stopShare() · pickVideo() · pauseVideo(bool) · muteShareAudio(bool)
- *             savePhotoB64(json) · setCameraTile(bool)
+ *             savePhotoB64(json) · setFullScreen(bool) · showCallControls()
  * Native gọi: window.shareEvent(name, argJson)
  *   ringing | accepted | declined | cancelled | closed | failed{code} | invite{kind,peer}
  *   videoReady{name,dur} | videoTime{t} | videoEnded | videoError{msg}
@@ -202,7 +204,7 @@ function sendJson(obj) {
   const s = JSON.stringify(obj), b = B();
   if (b && b.send) b.send(1000, s); else if (b && b.sendData) b.sendData(s); else console.warn('[CS] no bridge', s);
 }
-function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); if (name !== 'setCameraTile') console.warn('[CS] bridge missing', name); }
+function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); if (name !== 'setFullScreen' && name !== 'showCallControls') console.warn('[CS] bridge missing', name); }
 window._handleMessageFromNative = window._handleMessageFromNative || function () {};
 
 let toastTimer = null;
@@ -215,7 +217,9 @@ function show(v) {
   VIEWS.forEach(id => { $(id).hidden = id !== v; });
   document.documentElement.classList.toggle('dark', v === 'viewer');
   document.documentElement.classList.toggle('video', v === 'videoView');
-  call('setCameraTile', v === 'viewer' || v === 'videoView');
+  const full = v === 'viewer' || v === 'videoView';
+  document.documentElement.classList.toggle('full', full);
+  call('setFullScreen', full);
 }
 function peerLabel() { return state.peer || 'đối phương'; }
 
@@ -333,7 +337,7 @@ $('fileInput').onchange = async () => {
   toast('Đang xử lý ' + files.length + ' ảnh…');
   const offered = [];
   for (let i = 0; i < files.length; i++) {
-    const id = 'p' + Date.now() + '_' + i;
+    const id = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + i;
     let res;
     try {
       const data = await fileToJpegB64(files[i]);
@@ -346,8 +350,8 @@ $('fileInput').onchange = async () => {
   }
   if (!offered.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
   sendJson({ t: 'offer', photos: offered.map(o => ({ id: o.id, bytes: o.bytes, thumb: o.thumb })) });
-  const first = state.s && !$('viewer').hidden ? false : true;
-  if (first) enterViewer();
+  if ($('viewer').hidden) enterViewer();
+  else toast('Đã gửi ' + offered.length + ' ảnh');
   gotoPhoto(offered[0].id, true);
 };
 $('btnAdd').onclick = pickPhotos;
@@ -401,7 +405,7 @@ function onPshare(idHash, b64) {
 
 /* ─────────────── Viewer ảnh ─────────────── */
 function enterViewer() {
-  $('btnAdd').classList.toggle('hide', !(state.s && state.s.role === 'sender'));
+  $('btnAdd').classList.remove('hide'); // either person can add photos once the session is open
   show('viewer'); wakeBar();
 }
 function gotoPhoto(id, userInitiated) {
@@ -479,7 +483,7 @@ function wakeBar() { const bar = $('photoBar'); bar.classList.remove('fade'); cl
     if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); st.classList.remove('dragging');
     if (pinch) { if (pts.size < 2) pinch = null; start = null; return; }
     if (start && state.zoom.k === 1) { const dx = e.clientX - start.x; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }
-    if (!moved) { const now = Date.now(); if (now - lastTap < 280) setZoom(state.zoom.k > 1 ? 1 : 2.5, 0, 0); else wakeBar(); lastTap = now; }
+    if (!moved) { const now = Date.now(); if (now - lastTap < 280) setZoom(state.zoom.k > 1 ? 1 : 2.5, 0, 0); else { wakeBar(); call('showCallControls'); } lastTap = now; }
     start = null;
   };
   st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
@@ -520,6 +524,8 @@ $('btnPlayPause').onclick = () => {
   call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused });
 };
 $('btnStop').onclick = () => { call('stopShare'); toast('Đã dừng chia sẻ'); endSession(); };
+// Full-screen video: a tap outside the page's own buttons shows the call buttons.
+$('videoView').addEventListener('click', e => { if (!e.target.closest('button')) call('showCallControls'); });
 $('btnMute').onclick = () => { state.muted = !state.muted; renderMute(); call('muteShareAudio', state.muted); toast(state.muted ? 'Đã tắt tiếng' : 'Đã bật tiếng'); };
 
 /* ─────────────── Điểm vào duy nhất: nhận message từ ADC ─────────────── */

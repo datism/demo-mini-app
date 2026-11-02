@@ -46,6 +46,8 @@ class AndroidBridgeInterface(
         fun pauseVideo(paused: Boolean)
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
+        fun setFullScreen(on: Boolean)
+        fun showCallControls()
     }
 
     var shareHandler: ShareHandler? = null
@@ -80,6 +82,14 @@ class AndroidBridgeInterface(
 
     @JavascriptInterface
     fun peerNumber(): String = shareHandler?.peerNumber() ?: ""
+
+    /** Page: full screen on (photo viewer, video) or off. Hides the call bar and buttons, keeps my camera. */
+    @JavascriptInterface
+    fun setFullScreen(on: Boolean) { shareHandler?.setFullScreen(on) }
+
+    /** Page: the user tapped the content in full screen; show the call buttons for a few seconds. */
+    @JavascriptInterface
+    fun showCallControls() { shareHandler?.showCallControls() }
 
     /**
      * Saves a photo to the gallery (Pictures/Content Sharing).
