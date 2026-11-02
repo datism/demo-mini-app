@@ -778,8 +778,9 @@ class CallActivity : AppCompatActivity() {
         val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
         var isDragging = false
 
-        // A tap (not a drag) on my camera tile shrinks it or brings it back to full size.
+        // A tap (not a drag) on my camera tile folds it into a camera button; tapping the button opens it again.
         binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
+        binding.btnCameraRestore.setOnClickListener { miniAppManager.onCameraButtonTapped() }
         // Full screen: the call pill shows (or hides) the call buttons.
         binding.layoutCallPill.setOnClickListener { miniAppManager.toggleCallControls() }
 

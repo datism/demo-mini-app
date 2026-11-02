@@ -395,8 +395,8 @@ class MiniAppManager(val activity: CallActivity) {
     private val FULLSCREEN_TILE_TOP_DP = 12
     /** Full-screen Caro: room under the board for the call pill. */
     private val CARO_PILL_SPACE_DP = 52
-    /** Full screen: my camera sits bottom-right, above the call buttons and the page's own bottom controls. */
-    private val FULLSCREEN_TILE_BOTTOM_DP = 132
+    /** Full screen: my camera's distance from the top of the screen. */
+    private val FULLSCREEN_SELF_TOP_DP = 12
     /** How long the call buttons stay up after a tap in full screen. */
     private val CALL_CONTROLS_SHOW_MS = 3500L
 
@@ -404,8 +404,8 @@ class MiniAppManager(val activity: CallActivity) {
 
     // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
     // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
-    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left (bottom-right
-    // in full screen), or 48x64dp when the user shrank it.
+    // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left (folded into a
+    // button when the user tapped it, see onCameraTileTapped).
     private fun applyVideoTiles(enabled: Boolean, fullScreen: Boolean = false) {
         val b = activity.binding
         val local = b.localVideoView
@@ -419,14 +419,18 @@ class MiniAppManager(val activity: CallActivity) {
         local.translationX = 0f
         local.translationY = 0f
 
-        // Anchor: below the top bar on the left (default), top of the screen (full-screen Caro),
-        // or bottom-right (full screen, other apps).
-        val bottomRight = fullScreen && !enabled
+        // Anchor: top-left, below the top bar, or at the top of the screen in full screen (no top bar).
         localLp.topToBottom = if (fullScreen) unset else b.layoutTopBar.id
-        localLp.topToTop = if (fullScreen && enabled) parent else unset
-        localLp.startToStart = if (bottomRight) unset else parent
-        localLp.endToEnd = if (bottomRight) parent else unset
-        localLp.bottomToBottom = if (bottomRight) parent else unset
+        localLp.topToTop = if (fullScreen) parent else unset
+        localLp.startToStart = parent
+        localLp.endToEnd = unset
+        localLp.bottomToBottom = unset
+        // The folded camera button sits where the tile's corner is.
+        val btnLp = b.btnCameraRestore.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        btnLp.topToBottom = localLp.topToBottom
+        btnLp.topToTop = localLp.topToTop
+        btnLp.setMargins(dp(16), if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16), 0, 0)
+        b.btnCameraRestore.layoutParams = btnLp
 
         if (enabled) {
             val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
@@ -452,10 +456,9 @@ class MiniAppManager(val activity: CallActivity) {
             }
             if (fullScreen || b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
         } else {
-            localLp.width = dp(if (cameraTileSmall) 48 else 90)
-            localLp.height = dp(if (cameraTileSmall) 64 else 125)
-            if (bottomRight) localLp.setMargins(dp(16), dp(16), dp(16), dp(FULLSCREEN_TILE_BOTTOM_DP))
-            else localLp.setMargins(dp(16), dp(16), dp(16), dp(16))
+            localLp.width = dp(90)
+            localLp.height = dp(125)
+            localLp.setMargins(dp(16), if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16), dp(16), dp(16))
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
 
@@ -471,13 +474,13 @@ class MiniAppManager(val activity: CallActivity) {
     // ───────────────────────── Full screen ─────────────────────────
     // Caro is always full screen; Content Sharing asks for it while its photo viewer or video is showing.
     // Full screen hides the call bar, the call buttons, the exit button and Android's status and navigation
-    // bars, and leaves a small call pill (green dot + timer). A tap on the pill, or the page calling
-    // showCallControls(), brings the call buttons back for a few seconds. My camera stays on screen.
+    // bars, and leaves a small call pill (green dot + timer) at the bottom centre. A tap on the pill brings
+    // the call buttons back for a few seconds. My camera stays at the top left (or folded into a button).
 
     /** The page currently on screen asked for full screen (reset whenever another page is launched). */
     @Volatile private var fullScreenRequested = false
-    /** The user shrank the camera tile; kept for the rest of the call. */
-    private var cameraTileSmall = false
+    /** The user folded the camera tile into a button; kept for the rest of the call. */
+    private var cameraFolded = false
     private var callControlsShown = false
     private val hideCallControls = Runnable { setCallControlsShown(false) }
 
@@ -498,7 +501,7 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    /** Page or call pill: show the call buttons for a few seconds (full screen only). */
+    /** Show the call buttons for a few seconds (full screen only). The pill is the only trigger now; kept for pages. */
     fun showCallControls() {
         activity.runOnUiThread { if (isFullScreen(activity.currentAppId)) setCallControlsShown(true) }
     }
@@ -509,15 +512,36 @@ class MiniAppManager(val activity: CallActivity) {
         setCallControlsShown(!callControlsShown)
     }
 
-    /** Tap on my camera tile (not dragged): switch between the normal and the small size. Caro keeps its tiles. */
+    /** Tap on my camera tile (not dragged): fold it into a camera button. Caro keeps its two tiles. */
     fun onCameraTileTapped() {
         if (activity.currentAppId == "caro") return
-        cameraTileSmall = !cameraTileSmall
-        val local = activity.binding.localVideoView
-        val lp = local.layoutParams
-        lp.width = dp(if (cameraTileSmall) 48 else 90)
-        lp.height = dp(if (cameraTileSmall) 64 else 125)
-        local.layoutParams = lp
+        cameraFolded = true
+        applyCameraFold()
+    }
+
+    /** Tap on the camera button: open my camera tile again. */
+    fun onCameraButtonTapped() {
+        cameraFolded = false
+        applyCameraFold()
+    }
+
+    /** The page on screen shows my camera (some apps and hotlines hide it). */
+    private fun cameraWanted(appId: String): Boolean =
+        CallActivity.hotlineApp(activity.remoteUser) == null &&
+            appId != "enterprise-callerid" && appId != "smart-menu" && appId != "flight-booking"
+
+    /** Shows my camera as the tile or as the folded button; Caro always shows the tile. */
+    private fun applyCameraFold() {
+        val b = activity.binding
+        val appId = activity.currentAppId
+        if (!cameraWanted(appId) || b.webviewMiniapp.visibility != View.VISIBLE) {
+            b.btnCameraRestore.visibility = View.GONE
+            return
+        }
+        val folded = cameraFolded && appId != "caro"
+        b.localVideoView.visibility = if (folded) View.GONE else View.VISIBLE
+        b.btnCameraRestore.visibility = if (folded) View.VISIBLE else View.GONE
+        if (folded) b.btnCameraRestore.bringToFront() else b.localVideoView.bringToFront()
     }
 
     private fun applyFullScreenChrome(appId: String, on: Boolean) {
@@ -526,17 +550,12 @@ class MiniAppManager(val activity: CallActivity) {
         if (on) {
             insets.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             insets.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            // Caro has its tiles at the top: the pill goes under the board instead.
+            // The pill sits at the bottom centre: my camera has the top-left corner.
             val pillLp = b.layoutCallPill.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
             val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
             val parent = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            if (appId == "caro") {
-                pillLp.topToTop = unset; pillLp.bottomToBottom = parent; pillLp.endToEnd = parent
-                pillLp.setMargins(0, 0, 0, dp(12))
-            } else {
-                pillLp.topToTop = parent; pillLp.bottomToBottom = unset; pillLp.endToEnd = unset
-                pillLp.setMargins(dp(16), dp(12), 0, 0)
-            }
+            pillLp.topToTop = unset; pillLp.bottomToBottom = parent; pillLp.startToStart = parent; pillLp.endToEnd = parent
+            pillLp.setMargins(0, 0, 0, dp(12))
             b.layoutCallPill.layoutParams = pillLp
             setCallControlsShown(false)
         } else {
@@ -554,6 +573,7 @@ class MiniAppManager(val activity: CallActivity) {
      * (page launch, page loaded): those would otherwise cover the pill or show the windowed chrome again.
      */
     private fun raiseFullScreenOverlays() {
+        applyCameraFold()
         if (!isFullScreen(activity.currentAppId)) return
         setCallControlsShown(callControlsShown)
     }
@@ -573,7 +593,7 @@ class MiniAppManager(val activity: CallActivity) {
         } else {
             b.layoutCallPill.bringToFront()
         }
-        b.localVideoView.bringToFront()
+        applyCameraFold()
     }
 
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {

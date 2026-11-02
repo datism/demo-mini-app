@@ -249,6 +249,23 @@
             android:orientation="horizontal"
             app:layout_constraintGuide_percent="0.82" />
 
+        <!-- My camera folded into a button (tap the camera tile); a tap opens the tile again. -->
+        <ImageButton
+            android:id="@+id/btn_camera_restore"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_margin="16dp"
+            android:background="@drawable/bg_call_btn"
+            android:backgroundTint="#8C000000"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_camera_tile"
+            android:elevation="8dp"
+            android:contentDescription="Hiện camera của bạn"
+            android:visibility="gone"
+            app:layout_constraintTop_toBottomOf="@id/layout_top_bar"
+            app:layout_constraintStart_toStartOf="parent" />
+
         <!-- Full-screen mode: the only call UI left on screen. A tap shows the call buttons for a few seconds. -->
         <LinearLayout
             android:id="@+id/layout_call_pill"
