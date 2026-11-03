@@ -408,5 +408,42 @@ class AndroidBridgeInterface(
         }
     }
 
+    /**
+     * Lưu bảng vẽ (sketch-sync-app: ảnh nền + nét, đã composite phía JS) vào
+     * Thư viện ảnh qua MediaStore — không cần quyền WRITE_EXTERNAL_STORAGE trên API 29+.
+     *
+     * @param payload JSON: {"data":"<base64 JPEG>"}
+     * @return JSON: {"ok":true,"uri":"content://..."} hoặc {"ok":false,"error":"..."}
+     */
+    @JavascriptInterface
+    fun saveCanvasToGallery(payload: String): String {
+        val context = dataChannelManager.webView?.context
+            ?: return """{"ok":false,"error":"no_context"}"""
+        return try {
+            val data = org.json.JSONObject(payload).optString("data")
+            if (data.isEmpty()) return """{"ok":false,"error":"data_missing"}"""
+            val bytes = android.util.Base64.decode(data, android.util.Base64.NO_WRAP)
+
+            val resolver = context.contentResolver
+            val name = "bang_ve_${System.currentTimeMillis()}.jpg"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/5GNewCalling")
+                }
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return """{"ok":false,"error":"insert_failed"}"""
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: return """{"ok":false,"error":"stream_failed"}"""
+            Log.i(TAG, "Saved draw canvas to gallery: $name ($bytes bytes)")
+            """{"ok":true,"uri":"$uri"}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "saveCanvasToGallery failed: ${e.message}", e)
+            """{"ok":false,"error":"${e.message ?: "exception"}"}"""
+        }
+    }
+
 }
 
