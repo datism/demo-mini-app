@@ -5,122 +5,661 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Bảng vẽ — 5G New Calling</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent;
-                 font-family: 'Segoe UI', Roboto, sans-serif; }
+    :root {
+      --glass-bg: rgba(22, 24, 30, 0.72);
+      --glass-bg-heavy: rgba(18, 20, 26, 0.88);
+      --glass-border: rgba(255, 255, 255, 0.14);
+      --glass-highlight: rgba(255, 255, 255, 0.08);
+      --accent: #0a84ff;
+      --accent-glow: rgba(10, 132, 255, 0.35);
+      --danger: #ff453a;
+      --success: #30d158;
+      --text-main: #f5f7fa;
+      --text-muted: rgba(235, 235, 245, 0.6);
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --spring: cubic-bezier(0.22, 1, 0.36, 1);
+    }
 
-    /* Nền trong suốt — video cuộc gọi hiện xuyên qua phần không có ảnh nền. */
-    #board { position: absolute; inset: 0; display: block; touch-action: none; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
-    /* ── Top status pill: tên app + peer presence ── */
-    #topBar { position: fixed; top: 10px; left: 0; right: 0; z-index: 30;
-              display: flex; justify-content: center; pointer-events: none; }
-    #topBar .title { display: flex; align-items: center; gap: 7px; padding: 7px 16px;
-                     border-radius: 16px; font-size: 12px; color: #fff;
-                     background: rgba(20,20,24,0.55); backdrop-filter: blur(14px);
-                     -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.12); }
-    #peerDot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.35);
-               transition: background .2s, box-shadow .2s; }
-    #peerDot.live { background: #30d158; box-shadow: 0 0 6px #30d158; }
-    #peerLbl { color: rgba(255,255,255,0.75); }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, sans-serif;
+      color: var(--text-main);
+    }
 
-    /* ── Bottom control pill (ngôn ngữ chung với tray caro + điều khiển cuộc gọi) ── */
-    #pill { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 40;
-            display: flex; align-items: center; gap: 4px; padding: 8px 10px;
-            max-width: calc(100vw - 24px); overflow-x: auto; scrollbar-width: none;
-            border-radius: 26px; background: rgba(20,20,24,0.62);
-            backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-            border: 1px solid rgba(255,255,255,0.14); white-space: nowrap;
-            transition: opacity .25s, transform .25s; }
-    #pill::-webkit-scrollbar { display: none; }
-    #pill.hidden { opacity: 0; transform: translateX(-50%) scale(.7); pointer-events: none; }
+    /* Nền trong suốt — video cuộc gọi hiện xuyên qua phần không có ảnh nền */
+    #board {
+      position: absolute;
+      inset: 0;
+      display: block;
+      touch-action: none;
+      cursor: crosshair;
+    }
 
-    #pill button.tool { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%;
-                        border: none; background: rgba(255,255,255,0.1);
-                        font-size: 19px; color: #fff; touch-action: manipulation; }
-    #pill button.tool:active { transform: scale(.9); }
-    #pill button.tool.active { background: #1f3a56; box-shadow: 0 0 0 2px #58a6ff; }
-    #pill button.tool[disabled] { opacity: .3; }
+    /* ── Top HUD: Status Pill + Zoom Reset Pill ── */
+    #topBar {
+      position: fixed;
+      top: calc(12px + var(--safe-top));
+      left: 14px;
+      right: 14px;
+      z-index: 30;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+    }
 
-    .sep { width: 1px; height: 26px; flex: 0 0 1px; margin: 0 3px;
-           background: rgba(255,255,255,0.15); }
+    .hud-spacer { width: 68px; }
 
-    #widths { display: flex; align-items: center; gap: 4px; }
-    #widths .w { width: 34px; height: 42px; flex: 0 0 34px; border-radius: 12px; border: none;
-                 background: transparent; display: flex; align-items: center; justify-content: center; }
-    #widths .w.active { background: rgba(255,255,255,0.16); }
-    #widths .w i { border-radius: 50%; background: #fff; display: block; }
+    .status-pill {
+      pointer-events: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      color: var(--text-main);
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 var(--glass-highlight);
+      transition: transform 0.25s var(--spring), border-color 0.25s;
+    }
 
-    #colors { display: flex; align-items: center; gap: 5px; }
-    #colors .c { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%;
-                 border: 2px solid rgba(255,255,255,0.35); }
-    #colors .c.active { border-color: #fff; transform: scale(1.14); }
+    #peerDot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.35);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    #peerDot.live {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+      animation: pulseDot 1.8s infinite;
+    }
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.75; }
+    }
 
-    /* Chip mở lại pill khi đang vẽ */
-    #chip { position: fixed; bottom: 20px; right: 18px; z-index: 39; width: 46px; height: 46px;
-            border-radius: 50%; border: 1px solid rgba(255,255,255,0.16);
-            background: rgba(20,20,24,0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            font-size: 21px; color: #fff; transition: opacity .2s, transform .2s; }
-    #chip.hidden { opacity: 0; transform: scale(.6); pointer-events: none; }
+    #peerLbl {
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 11.5px;
+    }
 
-    #toast { position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 50;
-             padding: 8px 16px; border-radius: 18px; font-size: 12px; color: #fff;
-             background: rgba(30,35,42,0.92); border: 1px solid rgba(255,255,255,0.15);
-             opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 86vw; }
-    #toast.show { opacity: 1; }
+    #zoomBadge {
+      pointer-events: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 11px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      opacity: 0;
+      transform: translateY(-8px) scale(0.9);
+      pointer-events: none;
+      transition: opacity 0.22s, transform 0.22s var(--spring);
+      cursor: pointer;
+    }
+    #zoomBadge.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    #zoomBadge:active { transform: scale(0.92); }
+    #zoomBadge svg { width: 13px; height: 13px; opacity: 0.8; }
 
-    /* Ack progress — không có % thật theo từng chunk nên dùng dạng hoạt ảnh -> xong là ẩn */
-    #progress { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 50;
-                display: none; align-items: center; gap: 8px; padding: 6px 14px;
-                border-radius: 14px; background: rgba(20,20,24,0.85); color: #fff; font-size: 12px; }
-    #progress.on { display: flex; }
-    #progress .bar { width: 90px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.18); overflow: hidden; }
-    #progress .bar i { display: block; height: 100%; width: 30%; border-radius: 2px;
-                       background: #58a6ff; animation: slide 1.1s ease-in-out infinite; }
-    @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(340%); } }
+    /* ── Toast & Transfer Progress ── */
+    #hudAlerts {
+      position: fixed;
+      top: calc(56px + var(--safe-top));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+      width: max-content;
+      max-width: 88vw;
+    }
+
+    #toast {
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-main);
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+      opacity: 0;
+      transform: translateY(-10px) scale(0.94);
+      transition: opacity 0.25s, transform 0.25s var(--spring);
+      text-align: center;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    #progress {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+      color: var(--text-main);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    #progress.on { display: inline-flex; }
+    #progress .bar {
+      width: 76px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.16);
+      overflow: hidden;
+    }
+    #progress .bar i {
+      display: block;
+      height: 100%;
+      width: 35%;
+      border-radius: 2px;
+      background: var(--accent);
+      animation: slideBar 1.05s ease-in-out infinite;
+    }
+    @keyframes slideBar {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(310%); }
+    }
+
+    /* ── Floating Popovers (Brush Studio & Clear Menu) ── */
+    .popover {
+      position: fixed;
+      bottom: calc(84px + var(--safe-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(14px) scale(0.94);
+      z-index: 42;
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(26px) saturate(190%);
+      -webkit-backdrop-filter: blur(26px) saturate(190%);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 14px 16px;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.48), inset 0 1px 0 var(--glass-highlight);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s, transform 0.26s var(--spring);
+      width: max-content;
+      max-width: calc(100vw - 24px);
+    }
+    .popover.open {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .popover-section-lbl {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Brush Studio */
+    #widths {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 5px;
+      border-radius: 16px;
+    }
+    #widths .w {
+      flex: 1;
+      height: 36px;
+      min-width: 52px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+    }
+    #widths .w.active {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    #widths .w i {
+      border-radius: 50%;
+      background: currentColor;
+      display: block;
+      transition: transform 0.2s;
+    }
+
+    #colors {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    #colors .c {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      cursor: pointer;
+      position: relative;
+      transition: transform 0.2s var(--spring), border-color 0.2s, box-shadow 0.2s;
+    }
+    #colors .c:active { transform: scale(0.88); }
+    #colors .c.active {
+      border-color: #fff;
+      transform: scale(1.12);
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
+    }
+
+    /* Clear Popover Menu */
+    .menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 210px;
+    }
+    .menu-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: none;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.12s;
+    }
+    .menu-item:active {
+      transform: scale(0.97);
+      background: rgba(255, 255, 255, 0.14);
+    }
+    .menu-item.danger { color: #ff6961; }
+    .menu-item[disabled] {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+    .menu-item svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+    .menu-item .sub {
+      display: block;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-top: 1px;
+    }
+
+    /* ── Main Bottom Dock ── */
+    #pill {
+      position: fixed;
+      bottom: calc(16px + var(--safe-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      max-width: calc(100vw - 20px);
+      border-radius: 999px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(24px) saturate(190%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px 0 var(--glass-highlight);
+      transition: opacity 0.28s, transform 0.32s var(--spring);
+    }
+    #pill.hidden {
+      opacity: 0;
+      transform: translateX(-50%) translateY(24px) scale(0.85);
+      pointer-events: none;
+    }
+
+    #pill button.tool {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      background: rgba(255, 255, 255, 0.07);
+      color: var(--text-main);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform 0.16s var(--spring), background 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+    #pill button.tool svg {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2;
+    }
+    #pill button.tool:active { transform: scale(0.88); }
+    #pill button.tool.active {
+      background: rgba(10, 132, 255, 0.24);
+      border-color: rgba(88, 166, 255, 0.65);
+      color: #fff;
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+    #pill button.tool[disabled] {
+      opacity: 0.28;
+      pointer-events: none;
+    }
+
+    /* Nút chọn màu & nét tích hợp chấm hiển thị trực quan */
+    #btnStyle {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    #stylePreviewDot {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #ff3b30;
+      border: 2px solid #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+      transition: background 0.2s, transform 0.2s var(--spring);
+    }
+    #styleSizeBadge {
+      position: absolute;
+      bottom: 3px;
+      right: 3px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 3px;
+      border-radius: 999px;
+      background: #1c1c1e;
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Badge báo có ảnh nền trên nút Photo */
+    #photoDot {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+      display: none;
+    }
+    #photoDot.on { display: block; }
+
+    .sep {
+      width: 1px;
+      height: 24px;
+      flex: 0 0 1px;
+      margin: 0 2px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    /* ── Floating Action Chip (mở lại thanh công cụ khi đang vẽ) ── */
+    #chip {
+      position: fixed;
+      bottom: calc(20px + var(--safe-bottom));
+      right: 18px;
+      z-index: 39;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+      cursor: pointer;
+      transition: opacity 0.22s, transform 0.26s var(--spring);
+    }
+    #chip svg { width: 22px; height: 22px; }
+    #chip:active { transform: scale(0.9); }
+    #chip.hidden {
+      opacity: 0;
+      transform: scale(0.5) translateY(20px);
+      pointer-events: none;
+    }
+    #chipColorRing {
+      position: absolute;
+      inset: 3px;
+      border-radius: 50%;
+      border: 2px solid #ff3b30;
+      opacity: 0.85;
+      pointer-events: none;
+    }
 
     input[type=file] { display: none; }
-
-    #zoomHint { position: fixed; top: 44px; right: 14px; z-index: 35; padding: 5px 10px;
-                border-radius: 10px; font-size: 10.5px; color: #fff;
-                background: rgba(20,20,24,0.7); display: none; }
   </style>
 </head>
 <body>
 
 <canvas id="board"></canvas>
 
-<div id="topBar"><div class="title"><span id="peerDot"></span><span>🎨 Bảng vẽ</span><span id="peerLbl"></span></div></div>
-
-<div id="pill">
-  <button class="tool active" id="btnPen" title="Bút vẽ">✏️</button>
-  <button class="tool" id="btnEraser" title="Tẩy nét (chạm vào nét muốn xóa)">🧽</button>
-  <div class="sep"></div>
-  <div id="widths">
-    <button class="w" data-w="2" title="Nét mảnh"><i style="width:4px;height:4px"></i></button>
-    <button class="w active" data-w="4" title="Nét vừa"><i style="width:7px;height:7px"></i></button>
-    <button class="w" data-w="9" title="Nét đậm"><i style="width:12px;height:12px"></i></button>
+<!-- Top HUD -->
+<div id="topBar">
+  <div class="hud-spacer"></div>
+  <div class="status-pill">
+    <span id="peerDot"></span>
+    <span>Bảng vẽ 5G</span>
+    <span id="peerLbl"></span>
   </div>
-  <div class="sep"></div>
-  <div id="colors">
-    <div class="c active" style="background:#ff3b30" data-color="#ff3b30"></div>
-    <div class="c" style="background:#30d158" data-color="#30d158"></div>
-    <div class="c" style="background:#0a84ff" data-color="#0a84ff"></div>
-    <div class="c" style="background:#ffd60a" data-color="#ffd60a"></div>
-    <div class="c" style="background:#ffffff; border-color:#999" data-color="#ffffff"></div>
-    <div class="c" style="background:#1c1c1e" data-color="#1c1c1e"></div>
-  </div>
-  <div class="sep"></div>
-  <button class="tool" id="btnUndo" title="Hoàn tác (nét của mình / thao tác xóa vừa rồi)">↶</button>
-  <button class="tool" id="btnPhoto" title="Chèn ảnh nền">🖼️</button>
-  <button class="tool" id="btnClear" title="Xóa hết nét — giữ để bỏ ảnh nền">🧹</button>
-  <button class="tool" id="btnSave" title="Lưu bảng vẽ vào Thư viện ảnh">💾</button>
+  <button id="zoomBadge" title="Chạm để đặt lại thu phóng">
+    <span id="zoomPct">100%</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+      <path d="M3 3v5h5"/>
+    </svg>
+  </button>
 </div>
-<button id="chip" class="hidden" aria-label="Mở thanh công cụ">🎨</button>
 
-<div id="toast"></div>
-<div id="progress"><div class="bar"><i></i></div><span id="progressLbl">Đang truyền</span></div>
-<div id="zoomHint">chạm 2 lần để đặt lại thu phóng</div>
+<!-- Alerts & Transfer Progress -->
+<div id="hudAlerts">
+  <div id="progress">
+    <div class="bar"><i></i></div>
+    <span id="progressLbl">Đang truyền</span>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<!-- Popover 1: Brush Studio (Color + Stroke Width) -->
+<div class="popover" id="stylePopover">
+  <div class="popover-section-lbl">
+    <span>Độ dày nét bút</span>
+    <span id="widthLblVal">Vừa (4px)</span>
+  </div>
+  <div id="widths">
+    <button class="w" data-w="2" data-lbl="Mảnh (2px)" title="Nét mảnh">
+      <i style="width:4px;height:4px"></i><span>Mảnh</span>
+    </button>
+    <button class="w active" data-w="4" data-lbl="Vừa (4px)" title="Nét vừa">
+      <i style="width:8px;height:8px"></i><span>Vừa</span>
+    </button>
+    <button class="w" data-w="9" data-lbl="Đậm (9px)" title="Nét đậm">
+      <i style="width:13px;height:13px"></i><span>Đậm</span>
+    </button>
+    <button class="w" data-w="16" data-lbl="Bút dạ (16px)" title="Bút dạ lớn">
+      <i style="width:17px;height:17px"></i><span>Dạ</span>
+    </button>
+  </div>
+  <div class="popover-section-lbl"><span>Màu mực</span></div>
+  <div id="colors">
+    <div class="c active" style="background:#ff3b30" data-color="#ff3b30" title="Đỏ"></div>
+    <div class="c" style="background:#ff9500" data-color="#ff9500" title="Cam"></div>
+    <div class="c" style="background:#ffd60a" data-color="#ffd60a" title="Vàng"></div>
+    <div class="c" style="background:#30d158" data-color="#30d158" title="Xanh lá"></div>
+    <div class="c" style="background:#0a84ff" data-color="#0a84ff" title="Xanh dương"></div>
+    <div class="c" style="background:#bf5af2" data-color="#bf5af2" title="Tím"></div>
+    <div class="c" style="background:#ffffff" data-color="#ffffff" title="Trắng"></div>
+    <div class="c" style="background:#1c1c1e; border-color:rgba(255,255,255,0.5)" data-color="#1c1c1e" title="Đen"></div>
+  </div>
+</div>
+
+<!-- Popover 2: Clear Menu (Explicit Stroke vs Photo Clear) -->
+<div class="popover" id="clearPopover">
+  <div class="menu-list">
+    <button class="menu-item" id="actClearStrokes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z"/>
+        <path d="M17 17L7 7"/>
+      </svg>
+      <div>
+        <div>Xóa toàn bộ nét vẽ</div>
+        <span class="sub">Giữ nguyên ảnh nền hiện tại</span>
+      </div>
+    </button>
+    <button class="menu-item danger" id="actClearPhoto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <line x1="3" y1="3" x2="21" y2="21"/>
+      </svg>
+      <div>
+        <div>Gỡ bỏ ảnh nền</div>
+        <span class="sub">Nhấn giữ nút Xóa để gỡ nhanh</span>
+      </div>
+    </button>
+  </div>
+</div>
+
+<!-- Bottom Control Dock -->
+<div id="pill">
+  <button class="tool active" id="btnPen" title="Bút vẽ">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+      <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+      <path d="M2 2l7.586 7.586"/>
+      <circle cx="11" cy="11" r="2"/>
+    </svg>
+  </button>
+
+  <button class="tool" id="btnEraser" title="Tẩy nét (chạm hoặc kéo qua nét muốn xóa)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>
+      <path d="M22 21H7"/>
+      <path d="m5 11 9 9"/>
+    </svg>
+  </button>
+
+  <button class="tool" id="btnStyle" title="Màu mực & Độ dày nét">
+    <span id="stylePreviewDot"></span>
+    <span id="styleSizeBadge">4</span>
+  </button>
+
+  <div class="sep"></div>
+
+  <button class="tool" id="btnUndo" title="Hoàn tác" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7v6h6"/>
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+    </svg>
+  </button>
+
+  <button class="tool" id="btnPhoto" title="Chèn ảnh nền">
+    <span id="photoDot"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/>
+      <polyline points="21 15 16 10 5 21"/>
+    </svg>
+  </button>
+
+  <button class="tool" id="btnClear" title="Xóa nét hoặc gỡ ảnh nền">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>
+  </button>
+
+  <button class="tool" id="btnSave" title="Lưu bảng vẽ vào Thư viện ảnh">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/>
+      <line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Minimized Quick Chip -->
+<button id="chip" class="hidden" aria-label="Mở thanh công cụ">
+  <span id="chipColorRing"></span>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+  </svg>
+</button>
 
 <input type="file" id="fileInput" accept="image/*">
 
@@ -128,32 +667,8 @@
   'use strict';
 
   /* ═══════════════════════════════════════════════════════════════════
-   * BẢNG VẼ (sketch-sync-app v2.1) — vẽ tự do 2 chiều + ảnh nền + undo/tẩy.
-   *
-   * Wire protocol trên ADC stream 1000 (P2P relay qua MF, 2 lớp):
-   *   A. JSON control — qua AndroidBridge.send(1000, s):
-   *      {t:"photo",  id, bytes, thumb}   — thông báo ảnh nền mới (thumb = base64)
-   *      {t:"fetch",  id}                 — máy kia xin ảnh full
-   *      {t:"begin",  id, chunks, bytes}  — bắt đầu chuỗi binary chunks
-   *      {t:"done",   id, ok}             — xác nhận nhận đủ
-   *      {t:"stroke", id, color, w, pts}  — nét mới (id = strokeId duy nhất)
-   *      {t:"erase",  id}                 — xóa 1 nét theo id (tẩy / undo từ xa)
-   *      {t:"clear",  backup}             — xóa hết nét; backup = mảng nét cũ
-   *      {t:"photo.clear", backup}        — bỏ ảnh nền; backup = {id} để undo
-   *          → backup:null ở cả 2 lệnh trên nghĩa là "HOÀN TÁC clear vừa rồi"
-   *      {t:"ping"} / {t:"pong"}          — heartbeat presence
-   *   B. Binary chunk — native PhotoTransport tự ghép (byte đầu 0x01), khi đủ
-   *      đẩy lên JS: window.receiveData("PSHARE:<idHash>:<b64>")
-   *
-   * Hoàn tác (undo):
-   *   - Không có clear nào: xóa nét CỦA MÌNH gần nhất ({t:"erase"}).
-   *   - Clear gửi KÈM backup; cả 2 máy giữ backup. Ai bấm ↶ trước thì gửi
-   *     backup:null, cả 2 khôi phục lại TRỌN vẹn (mine flag gốc giữ nguyên →
-   *     undo tiếp theo của mỗi máy vẫn đúng tác giả).
-   *
-   * Tương thích legacy (debug broadcast của CallActivity + uesim):
-   *   {type:"draw", fromX, fromY, toX, toY, color, size} — tọa độ tuyệt đối
-   *   chuẩn hóa về [0,1] theo khung 1000x1000 gốc; {type:"clear"} (không undo).
+   * BẢNG VẼ (sketch-sync-app v2.2 Pro UI) — Air-gapped 5G New Calling
+   * Tương thích 100% giao thức ADC stream 1000 & native PhotoTransport.
    * ═══════════════════════════════════════════════════════════════════ */
 
   const $ = id => document.getElementById(id);
@@ -166,6 +681,7 @@
     pendingPhoto: null,             // ảnh đang chờ fetch từ xa
     lastBackup: null,               // {kind:'strokes',strokes:[..]} | {kind:'photo',photo:{..}}
     peerActiveAt: 0,                // presence: thời điểm msg cuối từ đối phương
+    eraserCursor: null,             // {x, y, hitId} hiển thị vòng tròn tẩy trực quan
   };
   let seq = 0;
   const newId = () => 's' + Date.now().toString(36) + (seq++).toString(36);
@@ -178,30 +694,69 @@
       window.AndroidBridge.send(1000, s);
     } else if (window.AndroidBridge && window.AndroidBridge.sendData) {
       window.AndroidBridge.sendData(s);
-    } else { console.warn('[SK] no bridge', s); }
+    } else {
+      console.warn('[SK] no bridge', s);
+    }
   }
 
   /* ─────────────── Toast / progress / haptic ─────────────── */
   let toastTimer = null;
   function toast(msg, ms) {
-    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200);
   }
-  function showProgress(label) { $('progressLbl').textContent = label || 'Đang truyền'; $('progress').classList.add('on'); }
-  function hideProgress() { $('progress').classList.remove('on'); }
-  /** Rung nhẹ xác nhận thao tác (WebView hỗ trợ navigator.vibrate — caro dùng cùng cơ chế). */
+  function showProgress(label) {
+    $('progressLbl').textContent = label || 'Đang truyền';
+    $('progress').classList.add('on');
+  }
+  function hideProgress() {
+    $('progress').classList.remove('on');
+  }
   function buzz(pattern) {
     try { if (navigator.vibrate) navigator.vibrate(pattern || 8); } catch (e) {}
+  }
+
+  /* ─────────────── Popovers Management ─────────────── */
+  function closePopovers() {
+    $('stylePopover').classList.remove('open');
+    $('clearPopover').classList.remove('open');
+  }
+  function togglePopover(id) {
+    const target = $(id);
+    const isOpen = target.classList.contains('open');
+    closePopovers();
+    if (!isOpen) {
+      updateToolbar();
+      target.classList.add('open');
+      resetPillIdle();
+    }
   }
 
   /* ═══════════════ CANVAS & VẼ ═══════════════ */
   const board = $('board');
   const ctx = board.getContext('2d');
 
-  /* Ảnh nền: khung contain-fit CƠ SỞ là hệ quy chiếu chung của 2 máy;
-     zoom/pan là GÓC NHÌN cục bộ của mỗi máy (không đồng bộ — nét vẫn lưu [0,1]). */
   let zoom = { k: 1, x: 0, y: 0 };
+
+  function updateZoomUI() {
+    const badge = $('zoomBadge');
+    if (zoom.k > 1.03 && state.photo) {
+      $('zoomPct').textContent = Math.round(zoom.k * 100) + '%';
+      badge.classList.add('show');
+    } else {
+      badge.classList.remove('show');
+    }
+  }
+
+  $('zoomBadge').onclick = () => {
+    zoom = { k: 1, x: 0, y: 0 };
+    updateZoomUI();
+    redraw();
+    buzz(8);
+  };
 
   function sizeBoard() {
     const dpr = window.devicePixelRatio || 1;
@@ -214,7 +769,6 @@
     redraw();
   }
 
-  /** Khung contain-fit lúc zoom=1 (hệ [0,1] của nét vẽ). */
   function baseRect() {
     const p = state.photo;
     if (!p || !p.img || !p.img.naturalWidth) return null;
@@ -222,7 +776,7 @@
     const w = p.img.naturalWidth * k, h = p.img.naturalHeight * k;
     return { x: (window.innerWidth - w) / 2, y: (window.innerHeight - h) / 2, width: w, height: h };
   }
-  /** Khung hiện tại sau zoom/pan. */
+
   function viewRect() {
     const r = baseRect();
     if (!r) return null;
@@ -232,24 +786,48 @@
   function redraw() {
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     const r = viewRect();
-    if (r && state.photo.img) ctx.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
-    state.strokes.forEach(st => renderStroke(ctx, st));
+    if (r && state.photo && state.photo.img) {
+      ctx.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
+    }
+    const highlightId = state.eraserCursor ? state.eraserCursor.hitId : null;
+    state.strokes.forEach(st => renderStroke(ctx, st, null, st.id === highlightId));
+
+    // Vẽ tâm tẩy trực quan khi đang ở chế độ Eraser
+    if (state.eraserCursor) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(state.eraserCursor.x, state.eraserCursor.y, 18, 0, Math.PI * 2);
+      ctx.fillStyle = state.eraserCursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(255, 255, 255, 0.15)';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = state.eraserCursor.hitId ? '#ff453a' : 'rgba(255, 255, 255, 0.75)';
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
-  /** Vẽ 1 nét lên context bất kỳ (dùng cho cả màn hình và export).
-   *  Làm mịn: đường bậc-2 qua trung điểm các đoạn thay vì polyline gãy. */
-  function renderStroke(c, st, extra) {
+  function renderStroke(c, st, extra, isHighlighted) {
     if (!st.pts || !st.pts.length) return;
     const r = viewRect();
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
+    const scale = r ? zoom.k : 1;
     const pts = extra ? st.pts.concat([extra]) : st.pts;
     const X = p => fx + p[0] * fw, Y = p => fy + p[1] * fh;
-    c.strokeStyle = st.color; c.lineWidth = st.w || 4;
+
+    c.save();
+    const lineW = (st.w || 4) * scale;
+    c.strokeStyle = isHighlighted ? '#ff453a' : st.color;
+    c.lineWidth = isHighlighted ? lineW + 3 : lineW;
     c.lineJoin = c.lineCap = 'round';
+    if (isHighlighted) c.globalAlpha = 0.65;
+
     if (pts.length === 1) {
-      c.beginPath(); c.arc(X(pts[0]), Y(pts[0]), (st.w || 4) / 2, 0, Math.PI * 2);
-      c.fillStyle = st.color; c.fill();
+      c.beginPath();
+      c.arc(X(pts[0]), Y(pts[0]), lineW / 2, 0, Math.PI * 2);
+      c.fillStyle = isHighlighted ? '#ff453a' : st.color;
+      c.fill();
+      c.restore();
       return;
     }
     c.beginPath();
@@ -258,63 +836,90 @@
       c.lineTo(X(pts[1]), Y(pts[1]));
     } else {
       for (let i = 1; i < pts.length - 1; i++) {
-        c.quadraticCurveTo(X(pts[i]), Y(pts[i]), (X(pts[i]) + X(pts[i + 1])) / 2, (Y(pts[i]) + Y(pts[i + 1])) / 2);
+        c.quadraticCurveTo(
+          X(pts[i]), Y(pts[i]),
+          (X(pts[i]) + X(pts[i + 1])) / 2,
+          (Y(pts[i]) + Y(pts[i + 1])) / 2
+        );
       }
       c.lineTo(X(pts[pts.length - 1]), Y(pts[pts.length - 1]));
     }
     c.stroke();
+    c.restore();
   }
 
-  /** screen → [0,1] trong khung ảnh (đảo cả zoom/pan để nét luôn đúng hệ chung). */
   function normPoint(cx, cy) {
     const r = viewRect();
     if (!r) return [cx / window.innerWidth, cy / window.innerHeight];
-    return [Math.min(1.2, Math.max(-0.2, (cx - r.x) / r.width)),
-            Math.min(1.2, Math.max(-0.2, (cy - r.y) / r.height))];
+    return [
+      Math.min(1.2, Math.max(-0.2, (cx - r.x) / r.width)),
+      Math.min(1.2, Math.max(-0.2, (cy - r.y) / r.height))
+    ];
   }
 
   /* ═══════════════ CHẠM: 1 ngón vẽ/tẩy — 2 ngón zoom/pan — chạm đôi reset ═══════════════ */
   (function () {
     let stroking = null;
-    const pointers = new Map();     // pointerId → {x, y}
-    let gesture = null;             // {mid0:{x,y}, k0, x0, y0, dist0}
+    const pointers = new Map();
+    let gesture = null;
     let lastTap = 0;
 
     board.addEventListener('pointerdown', e => {
       e.preventDefault();
+      closePopovers();
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       try { board.setPointerCapture(e.pointerId); } catch (_) {}
 
+      // 2 ngón: Chuyển sang thu phóng / kéo ảnh
       if (pointers.size === 2 && state.photo) {
-        stroking = null;            // ngón thứ 2 = rời chế độ vẽ, bắt đầu pinch
+        stroking = null;
+        state.eraserCursor = null;
         const [a, b] = [...pointers.values()];
         gesture = {
           mid0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-          dist0: Math.hypot(a.x - b.x, a.y - b.y), k0: zoom.k, x0: zoom.x, y0: zoom.y,
+          dist0: Math.hypot(a.x - b.x, a.y - b.y),
+          k0: zoom.k, x0: zoom.x, y0: zoom.y,
         };
+        redraw();
         return;
       }
       if (pointers.size > 1) return;
 
       const now = Date.now();
-      if (now - lastTap < 300 && state.photo) {   // chạm đôi: reset góc nhìn
+      if (now - lastTap < 280 && state.photo && zoom.k > 1.03) {
         zoom = { k: 1, x: 0, y: 0 };
-        $('zoomHint').style.display = 'none';
+        updateZoomUI();
         redraw();
         lastTap = 0;
         return;
       }
       lastTap = now;
 
-      if (state.mode === 'eraser') return;        // tẩy chọn nét ở pointerup
-      stroking = { id: newId(), mine: true, color: state.color, w: state.penW, pts: [normPoint(e.clientX, e.clientY)] };
+      if (state.mode === 'eraser') {
+        const hit = hitStroke(e.clientX, e.clientY);
+        state.eraserCursor = { x: e.clientX, y: e.clientY, hitId: hit ? hit.id : null };
+        if (hit) {
+          removeStroke(hit.id, true);
+          state.eraserCursor.hitId = null;
+          buzz(10);
+        }
+        redraw();
+        return;
+      }
+
+      stroking = {
+        id: newId(),
+        mine: true,
+        color: state.color,
+        w: state.penW,
+        pts: [normPoint(e.clientX, e.clientY)]
+      };
     });
 
     board.addEventListener('pointermove', e => {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // 2 ngón: zoom quanh điểm giữa + pan theo độ dời điểm giữa (một công thức duy nhất).
       if (gesture && pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         const br = baseRect();
@@ -322,11 +927,22 @@
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         zoom.k = Math.min(6, Math.max(1, gesture.k0 * d / gesture.dist0));
-        // Giữ điểm ảnh nằm dưới mid0 word đầu tiên nằm dưới mid hiện tại:
-        // u = (mid0.x - (br.x + x0)) / k0  (theo biến ở phần trăm chiều rộng)
         zoom.x = mid.x - br.x - ((gesture.mid0.x - (br.x + gesture.x0)) / gesture.k0) * zoom.k;
         zoom.y = mid.y - br.y - ((gesture.mid0.y - (br.y + gesture.y0)) / gesture.k0) * zoom.k;
-        $('zoomHint').style.display = zoom.k > 1.05 ? 'block' : 'none';
+        updateZoomUI();
+        redraw();
+        return;
+      }
+
+      // Chế độ tẩy: cho phép kéo ngón tay qua nhiều nét để xóa liên tục (Scrubbing Eraser)
+      if (state.mode === 'eraser' && pointers.size === 1) {
+        const hit = hitStroke(e.clientX, e.clientY);
+        state.eraserCursor = { x: e.clientX, y: e.clientY, hitId: hit ? hit.id : null };
+        if (hit) {
+          removeStroke(hit.id, true);
+          state.eraserCursor.hitId = null;
+          buzz(8);
+        }
         redraw();
         return;
       }
@@ -334,7 +950,8 @@
       if (!stroking) return;
       const p = normPoint(e.clientX, e.clientY);
       const lastP = stroking.pts[stroking.pts.length - 1];
-      if (Math.hypot(p[0] - lastP[0], p[1] - lastP[1]) < 0.004) return;  // bỏ điểm trùng — nét mượt, wire nhẹ
+      if (Math.hypot(p[0] - lastP[0], p[1] - lastP[1]) < 0.0035) return;
+      if (stroking.pts.length === 2) collapsePill(); // Ẩn pill ngay khi bắt đầu kéo nét thực sự
       stroking.pts.push(p);
       redraw();
       renderStroke(ctx, stroking);
@@ -344,9 +961,13 @@
       pointers.delete(e.pointerId);
       if (pointers.size < 2) gesture = null;
 
-      if (state.mode === 'eraser' && !stroking) {
-        const hit = hitStroke(e.clientX, e.clientY);
-        if (hit) { removeStroke(hit.id, true); buzz(12); }
+      if (state.mode === 'eraser') {
+        if (state.eraserCursor) {
+          const hit = hitStroke(e.clientX, e.clientY);
+          if (hit) { removeStroke(hit.id, true); buzz(12); }
+          state.eraserCursor = null;
+          redraw();
+        }
         return;
       }
       if (!stroking) return;
@@ -356,6 +977,7 @@
         buzz(6);
         collapsePill();
         updateToolbar();
+        redraw();
       }
       stroking = null;
     }
@@ -364,16 +986,35 @@
     board.addEventListener('lostpointercapture', finish);
   })();
 
-  /** Hit-test nét gần vị trí chạm (khoảng cách tới đỉnh polyline, ngưỡng tính theo bút + ngón tay). */
+  /** Khoảng cách từ điểm P tới đoạn thẳng AB (giúp tẩy nhạy cả với nét vẩy nhanh). */
+  function distToSegment(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
   function hitStroke(cx, cy) {
     const r = viewRect();
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
+    const scale = r ? zoom.k : 1;
     let best = null, bestD = Infinity;
+
     for (const st of state.strokes) {
-      const thr = (st.w || 4) / 2 + 14;
-      for (const p of st.pts) {
-        const d = Math.hypot(cx - (fx + p[0] * fw), cy - (fy + p[1] * fh));
+      const thr = ((st.w || 4) * scale) / 2 + 16;
+      const pts = st.pts;
+      if (!pts || !pts.length) continue;
+      if (pts.length === 1) {
+        const d = Math.hypot(cx - (fx + pts[0][0] * fw), cy - (fy + pts[0][1] * fh));
+        if (d < thr && d < bestD) { best = st; bestD = d; }
+        continue;
+      }
+      for (let i = 0; i < pts.length - 1; i++) {
+        const ax = fx + pts[i][0] * fw, ay = fy + pts[i][1] * fh;
+        const bx = fx + pts[i + 1][0] * fw, by = fy + pts[i + 1][1] * fh;
+        const d = distToSegment(cx, cy, ax, ay, bx, by);
         if (d < thr && d < bestD) { best = st; bestD = d; }
       }
     }
@@ -392,34 +1033,74 @@
   /* ═══════════════ THANH CÔNG CỤ ═══════════════ */
   function updateToolbar() {
     $('btnUndo').disabled = myStrokes().length === 0 && !state.lastBackup;
+    $('photoDot').classList.toggle('on', Boolean(state.photo));
+    $('actClearStrokes').disabled = state.strokes.length === 0;
+    $('actClearPhoto').disabled = !state.photo;
+    $('stylePreviewDot').style.background = state.color;
+    $('chipColorRing').style.borderColor = state.color;
+    $('styleSizeBadge').textContent = state.penW;
   }
 
   function setTool(id) {
     ['btnPen', 'btnEraser'].forEach(x => $(x).classList.toggle('active', x === id));
   }
-  $('btnPen').onclick = () => { state.mode = 'pen'; setTool('btnPen'); };
-  $('btnEraser').onclick = () => { state.mode = 'eraser'; setTool('btnEraser'); toast('🧽 Chạm vào nét cần xóa'); };
+
+  $('btnPen').onclick = () => {
+    state.mode = 'pen';
+    setTool('btnPen');
+    closePopovers();
+    resetPillIdle();
+  };
+
+  $('btnEraser').onclick = () => {
+    state.mode = 'eraser';
+    setTool('btnEraser');
+    closePopovers();
+    toast('Chạm hoặc kéo qua nét để xóa');
+    resetPillIdle();
+  };
+
+  $('btnStyle').onclick = (e) => {
+    e.stopPropagation();
+    state.mode = 'pen';
+    setTool('btnPen');
+    togglePopover('stylePopover');
+  };
 
   document.querySelectorAll('#widths .w').forEach(b => {
     b.onclick = () => {
       state.penW = Number(b.dataset.w);
+      $('widthLblVal').textContent = b.dataset.lbl || (state.penW + 'px');
       document.querySelectorAll('#widths .w').forEach(x => x.classList.toggle('active', x === b));
-      state.mode = 'pen'; setTool('btnPen');
+      state.mode = 'pen';
+      setTool('btnPen');
+      updateToolbar();
+      buzz(6);
     };
   });
+
   document.querySelectorAll('#colors .c').forEach(sw => {
     sw.onclick = () => {
       state.color = sw.dataset.color;
       document.querySelectorAll('#colors .c').forEach(x => x.classList.remove('active'));
       sw.classList.add('active');
-      state.mode = 'pen'; setTool('btnPen');
+      state.mode = 'pen';
+      setTool('btnPen');
+      updateToolbar();
+      buzz(6);
+      setTimeout(closePopovers, 140);
     };
   });
 
-  /** ↶ Hoàn tác: nét của mình gần nhất; hết thì hoàn tác clear/photo-clear vừa rồi (cả 2 máy). */
+  /** Hoàn tác: nét của mình gần nhất; hết thì hoàn tác clear/photo-clear vừa rồi. */
   $('btnUndo').onclick = () => {
+    closePopovers();
     const mine = myStrokes();
-    if (mine.length) { removeStroke(mine[mine.length - 1].id, true); return; }
+    if (mine.length) {
+      removeStroke(mine[mine.length - 1].id, true);
+      buzz(8);
+      return;
+    }
     const b = state.lastBackup;
     if (!b) return;
     state.lastBackup = null;
@@ -430,47 +1111,83 @@
       restorePhoto(b.photo);
       sendJson({ t: 'photo.clear', backup: null });
     }
-    redraw(); updateToolbar();
+    redraw();
+    updateToolbar();
     toast('Đã hoàn tác');
+    buzz(10);
   };
 
-  /* 🧹 Nhấn = xóa hết nét (backup để undo). GIỮ 550ms = bỏ ảnh nền. */
+  /* Nút Xóa: Hỗ trợ cả Menu trực quan lẫn giữ 550ms để gỡ nhanh ảnh nền */
   let clearHold = null, clearArmed = false;
   $('btnClear').addEventListener('pointerdown', () => {
-    clearArmed = false;                               // reset cờ mỗi lần chạm mới
+    clearArmed = false;
     clearTimeout(clearHold);
-    clearHold = setTimeout(doPhotoClear, 550);
+    clearHold = setTimeout(() => {
+      closePopovers();
+      doPhotoClear();
+    }, 550);
   });
   $('btnClear').addEventListener('pointerup', () => clearTimeout(clearHold));
   $('btnClear').addEventListener('pointerleave', () => clearTimeout(clearHold));
-  $('btnClear').onclick = () => { if (!clearArmed) doClear(); };
+  $('btnClear').onclick = (e) => {
+    e.stopPropagation();
+    if (clearArmed) return;
+    // Nếu chỉ có nét (không có ảnh nền), xóa nét luôn cho nhanh; nếu có cả ảnh nền thì bật menu chọn
+    if (state.photo) {
+      togglePopover('clearPopover');
+    } else {
+      closePopovers();
+      doClear();
+    }
+  };
+
+  $('actClearStrokes').onclick = () => {
+    closePopovers();
+    doClear();
+  };
+  $('actClearPhoto').onclick = () => {
+    closePopovers();
+    doPhotoClear();
+  };
 
   function doClear() {
     if (!state.strokes.length) { toast('Không còn nét để xóa'); return; }
     const backup = state.strokes.map(s => ({ ...s }));
     state.lastBackup = { kind: 'strokes', strokes: backup };
     state.strokes = [];
-    redraw(); updateToolbar();
+    redraw();
+    updateToolbar();
     sendJson({ t: 'clear', backup: backup.map(s => ({ id: s.id, mine: s.mine, color: s.color, w: s.w, pts: s.pts })) });
+    toast('Đã xóa toàn bộ nét — bấm Hoàn tác để khôi phục');
     buzz([10, 40, 10]);
   }
 
   function doPhotoClear() {
-    clearArmed = true;                                // chặn onclick nổ sau long-press
-    if (!state.photo) return;
-    // KHÔNG revoke blob URL — ancora cho undo khôi phục lại.
+    clearArmed = true;
+    if (!state.photo) { toast('Chưa có ảnh nền để gỡ'); return; }
     state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
-    state.photo = null; state.pendingPhoto = null;
+    state.photo = null;
+    state.pendingPhoto = null;
     zoom = { k: 1, x: 0, y: 0 };
-    redraw(); updateToolbar();
+    updateZoomUI();
+    redraw();
+    updateToolbar();
     sendJson({ t: 'photo.clear', backup: { id: state.lastBackup.photo.id } });
-    toast('Đã bỏ ảnh nền — ↶ để hoàn tác');
+    toast('Đã gỡ ảnh nền — bấm Hoàn tác để khôi phục');
     buzz(14);
   }
 
   /* ─────────────── Pill: thu gọn khi vẽ, hiện qua chip / idle ─────────────── */
   let pillIdle = null;
+  function resetPillIdle() {
+    clearTimeout(pillIdle);
+    pillIdle = setTimeout(() => {
+      const anyPopover = $('stylePopover').classList.contains('open') || $('clearPopover').classList.contains('open');
+      if (state.mode === 'pen' && !anyPopover && state.strokes.length > 0) collapsePill();
+    }, 7000);
+  }
   function collapsePill() {
+    closePopovers();
     $('pill').classList.add('hidden');
     $('chip').classList.remove('hidden');
     clearTimeout(pillIdle);
@@ -478,13 +1195,15 @@
   function expandPill() {
     $('pill').classList.remove('hidden');
     $('chip').classList.add('hidden');
-    clearTimeout(pillIdle);
-    pillIdle = setTimeout(() => { if (state.mode === 'pen') collapsePill(); }, 6000);
+    resetPillIdle();
   }
-  $('chip').onclick = expandPill;
+  $('chip').onclick = () => { expandPill(); buzz(6); };
 
   /* ═══════════════ CHÈN ẢNH NỀN ═══════════════ */
-  $('btnPhoto').onclick = () => $('fileInput').click();
+  $('btnPhoto').onclick = () => {
+    closePopovers();
+    $('fileInput').click();
+  };
 
   function blobToB64(blob) {
     return new Promise((resolve, reject) => {
@@ -495,7 +1214,6 @@
     });
   }
 
-  /** File ảnh → base64 JPEG cạnh dài 1920 (EXIF native áp lần nữa khi decode). */
   async function fileToJpegB64(file) {
     try {
       const bmp = await createImageBitmap(file);
@@ -507,7 +1225,7 @@
       if (bmp.close) bmp.close();
       const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
       if (blob) return await blobToB64(blob);
-    } catch (e) { /* rơi xuống bản gốc */ }
+    } catch (e) {}
     if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
     return await blobToB64(file);
   }
@@ -517,7 +1235,8 @@
     $('fileInput').value = '';
     if (!file) return;
     if (!window.AndroidBridge || typeof window.AndroidBridge.importPhotoB64 !== 'function') {
-      toast('Không tìm thấy AndroidBridge'); return;
+      toast('Không tìm thấy AndroidBridge');
+      return;
     }
     toast('Đang xử lý ảnh...');
     let b64;
@@ -530,17 +1249,15 @@
     } catch (e) { toast('Lỗi khi gửi ảnh sang Android: ' + (e && e.message || e)); return; }
     if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); return; }
 
-    // Nét sẵn có giữ nguyên hệ [0,1] — sang khung ảnh mới chúng khớp vị trí TƯƠNG ĐỐI.
-    if (state.strokes.length) toast('Nét cũ đã ghép theo khung ảnh mới');
+    if (state.strokes.length) toast('Nét cũ đã khớp theo khung ảnh mới');
 
     const url = window.AndroidBridge ? window.AndroidBridge.mediaUrl(id, false) : '';
     setPhotoState({ id: id, ready: true, url: url, img: null });
-    showProgress('Đang gửi ảnh');
+    showProgress('Đang đồng bộ ảnh');
     const thumb = await thumbB64Of(id);
     sendJson({ t: 'photo', id: id, bytes: res.bytes, thumb: thumb });
   };
 
-  /** Đọc thumbnail <id>_t.jpg từ photostore qua /media/ rồi trả base64 thuần. */
   async function thumbB64Of(id) {
     try {
       const url = window.AndroidBridge.mediaUrl(id, true);
@@ -555,9 +1272,15 @@
     } catch (e) { return ''; }
   }
 
-  /** Gán ảnh nền (local hay blob) — revoke blob cũ chỉ khi THAY THẾ (không phải khi clear). */
   function setPhotoState(p) {
-    if (!p) { state.photo = null; redraw(); return; }
+    if (!p) {
+      state.photo = null;
+      zoom = { k: 1, x: 0, y: 0 };
+      updateZoomUI();
+      updateToolbar();
+      redraw();
+      return;
+    }
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:') &&
         state.photo.url !== p.url) {
       URL.revokeObjectURL(state.photo.url);
@@ -569,10 +1292,11 @@
     }
     if (p.url) p.img.src = p.url;
     zoom = { k: 1, x: 0, y: 0 };
+    updateZoomUI();
+    updateToolbar();
     redraw();
   }
 
-  /** Khôi phục ảnh từ backup undo — blob (nhận từ xa) hoặc /media/ (như của mình). */
   function restorePhoto(p) {
     if (!p) return;
     const url = p.url || (window.AndroidBridge ? window.AndroidBridge.mediaUrl(p.id, false) : '');
@@ -584,10 +1308,9 @@
     let thumbUrl = '';
     if (msg.thumb) thumbUrl = msg.thumb.startsWith('data:') ? msg.thumb : 'data:image/jpeg;base64,' + msg.thumb;
     state.pendingPhoto = { id: msg.id, bytes: msg.bytes };
-    // Nền tạm = thumb trong lúc chờ full.
     setPhotoState({ id: msg.id, ready: false, url: thumbUrl, img: null });
-    toast('📨 Đối phương chèn ảnh — đang nhận...');
-    showProgress('Đang nhận ảnh');
+    toast('Đối phương chèn ảnh nền...');
+    showProgress('Đang tải ảnh HD');
     sendJson({ t: 'fetch', id: msg.id });
   }
 
@@ -597,7 +1320,6 @@
     if (res.ok) sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes });
   }
 
-  /** Frame ảnh đã ghép xong phía native: "PSHARE:<idHash>:<b64>". */
   function onPshare(idHash, b64) {
     const pending = state.pendingPhoto;
     if (!pending || hash16(pending.id) !== Number(idHash)) {
@@ -611,37 +1333,43 @@
     setPhotoState({ id: pending.id, ready: true, url: url, img: null });
     hideProgress();
     sendJson({ t: 'done', id: pending.id, ok: true });
-    toast('🖼️ Đã nhận ảnh nền — chạm 2 ngón để phóng to');
+    toast('Đã nhận ảnh nền — dùng 2 ngón để thu phóng');
     buzz([12, 30, 12]);
   }
-  function hash16(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return h & 0xffff; }
+  function hash16(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return h & 0xffff;
+  }
 
   /* ═══════════════ PRESENCE ═══════════════ */
   setInterval(() => {
     const live = Date.now() - state.peerActiveAt < 3000;
     $('peerDot').classList.toggle('live', live);
-    $('peerLbl').textContent = live ? ' · đối phương đang vẽ' : '';
+    $('peerLbl').textContent = live ? '· Đang tương tác' : '';
     if (live) sendJson({ t: 'ping' });
   }, 1500);
 
   /* ═══════════════ LƯU BẢNG VẼ (photo + nét composite) ═══════════════ */
   $('btnSave').onclick = () => {
+    closePopovers();
     const w = window.innerWidth, h = window.innerHeight;
     const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const c = document.createElement('canvas');
-    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
     const oc = c.getContext('2d');
     oc.setTransform(dpr, 0, 0, dpr, 0, 0);
     oc.fillStyle = '#0d1117';
     oc.fillRect(0, 0, w, h);
     const r = viewRect();
-    if (r && state.photo.img) oc.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
+    if (r && state.photo && state.photo.img) oc.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
     state.strokes.forEach(st => renderStroke(oc, st));
 
-    const dataUrl = c.toDataURL('image/jpeg', 0.9);
+    const dataUrl = c.toDataURL('image/jpeg', 0.92);
     if (window.AndroidBridge && typeof window.AndroidBridge.saveCanvasToGallery === 'function') {
       const res = JSON.parse(window.AndroidBridge.saveCanvasToGallery(JSON.stringify({ data: dataUrl.split(',')[1] })) || '{}');
-      toast(res.ok ? '💾 Đã lưu vào Thư viện ảnh' : 'Lỗi lưu: ' + (res.error || '?'));
+      toast(res.ok ? 'Đã lưu vào Thư viện ảnh' : 'Lỗi lưu: ' + (res.error || '?'));
       buzz(10);
     } else {
       toast('Thiết bị chưa hỗ trợ lưu ảnh');
@@ -652,7 +1380,6 @@
   window.receiveData = function (dataStr) {
     state.peerActiveAt = Date.now();
     try {
-      // 1) Binary photo frame đã ghép: "PSHARE:<idHash>:<b64>"
       if (typeof dataStr === 'string' && dataStr.startsWith('PSHARE:')) {
         const parts = dataStr.split(':');
         onPshare(parts[1], parts.slice(2).join(':'));
@@ -660,7 +1387,6 @@
       }
       const msg = typeof dataStr === 'object' ? dataStr : JSON.parse(dataStr);
 
-      // 2) Legacy: debug broadcast / uesim
       if (msg.type === 'draw') {
         const st = legacyStroke(msg);
         if (st) { state.strokes.push(st); redraw(); updateToolbar(); }
@@ -669,19 +1395,18 @@
       if (msg.type === 'clear') {
         state.photo = null; state.pendingPhoto = null; state.lastBackup = null;
         state.strokes = []; zoom = { k: 1, x: 0, y: 0 };
-        redraw(); updateToolbar();
+        updateZoomUI(); redraw(); updateToolbar();
         return;
       }
-      if (msg.action === 'LAUNCH_APP' || msg.service) return;   // lệnh app khác
+      if (msg.action === 'LAUNCH_APP' || msg.service) return;
 
-      // 3) JSON control của Bảng vẽ
       switch (msg.t) {
         case 'photo': onRemotePhoto(msg); break;
         case 'fetch': onFetch(msg); break;
         case 'begin': showProgress('Đang nhận ảnh'); break;
         case 'done':
           hideProgress();
-          if (msg.ok) toast('Đã gửi xong ảnh');
+          if (msg.ok) toast('Đã đồng bộ xong ảnh nền');
           break;
 
         case 'stroke':
@@ -691,12 +1416,10 @@
         case 'erase': removeStroke(msg.id, false); break;
 
         case 'ping': sendJson({ t: 'pong' }); break;
-        case 'pong': break;   // presence đã cap ở đầu hàm
+        case 'pong': break;
 
         case 'clear':
           if (msg.backup === null) {
-            // Đối phương hoàn tác clear → khôi phục TRỌN vẹn từ backup mình đang giữ
-            // (mine flag gốc giữ nguyên để undo của mỗi máy vẫn đúng tác giả).
             if (state.lastBackup && state.lastBackup.kind === 'strokes') {
               state.strokes = state.lastBackup.strokes.map(s => ({ ...s }));
               redraw();
@@ -707,7 +1430,8 @@
             state.strokes = [];
             redraw();
           } else {
-            state.strokes = []; redraw();
+            state.strokes = [];
+            redraw();
           }
           updateToolbar();
           break;
@@ -719,12 +1443,13 @@
             }
             state.lastBackup = null;
           } else if (state.photo) {
-            // Không revoke blob — mình có thể cần cho undo chéo.
             state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
-            state.photo = null; state.pendingPhoto = null;
+            state.photo = null;
+            state.pendingPhoto = null;
             zoom = { k: 1, x: 0, y: 0 };
+            updateZoomUI();
             redraw();
-            toast('Đối phương đã bỏ ảnh nền');
+            toast('Đối phương đã gỡ ảnh nền');
           }
           updateToolbar();
           break;
@@ -734,7 +1459,6 @@
     }
   };
 
-  /** {type:"draw", fromX..., toX...} (tọa độ gốc 250..900, khung 1000x1000) → stroke [0,1]. */
   function legacyStroke(m) {
     if (typeof m.fromX !== 'number' || typeof m.fromY !== 'number') return null;
     const n = v => Math.min(1, Math.max(0, v / 1000));
@@ -751,7 +1475,6 @@
     sizeBoard();
     expandPill();
     updateToolbar();
-    // Yêu cầu ADC nếu chưa có (vào app bằng deep-link không qua operator-menu).
     if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) {
       window.ImsDcBridge.createDataChannel('sketch-sync-app');
     } else if (window._dsbridge) {
@@ -761,7 +1484,6 @@
 
   window.addEventListener('resize', sizeBoard);
 
-  /* GSMA TS.66 — dọn blob URLs khi app bị đóng. */
   window.cleanUpImsDcObjects = function () {
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:')) URL.revokeObjectURL(state.photo.url);
     state.photo = null; state.pendingPhoto = null; state.strokes = []; state.lastBackup = null;
