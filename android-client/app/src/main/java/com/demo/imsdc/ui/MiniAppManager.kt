@@ -1256,26 +1256,68 @@ class MiniAppManager(val activity: CallActivity) {
      * app's page is not loaded yet. Same 180 / 200 / 603 / CANCEL flow as a share request.
      */
     suspend fun awaitAppDecision(rawMsg: String, appId: String): Boolean {
-        var dialog: androidx.appcompat.app.AlertDialog? = null
+        var dialog: android.app.Dialog? = null
         return try {
             awaitHeldDecision(
                 rawMsg,
-                ask = {
-                    activity.runOnUiThread {
-                        dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
-                            .setTitle("Mở ứng dụng")
-                            .setMessage("${activity.peerName} muốn mở ${appLabel(appId)}")
-                            .setCancelable(false)
-                            .setNegativeButton("Từ chối") { _, _ -> answerShare(false) }
-                            .setPositiveButton("Đồng ý") { _, _ -> answerShare(true) }
-                            .show()
-                    }
-                },
+                ask = { activity.runOnUiThread { dialog = showAppRequestSheet(appId) } },
                 dismiss = { activity.runOnUiThread { dialog?.dismiss() } }
             )
         } finally {
             activity.runOnUiThread { dialog?.dismiss() }
         }
+    }
+
+    /** Dark bottom sheet in the call screen's style; the buttons answer [answerShare]. Caller is on the UI thread. */
+    private fun showAppRequestSheet(appId: String): android.app.Dialog {
+        val sheet = android.app.Dialog(activity)
+        sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        sheet.setContentView(R.layout.sheet_app_request)
+        sheet.setCancelable(false)
+        sheet.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.BOTTOM)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.45f)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+        }
+        val root = sheet.findViewById<View>(R.id.sheet_root)
+        root.setOnApplyWindowInsetsListener { v, insets ->
+            @Suppress("DEPRECATION") val nav = insets.systemWindowInsetBottom
+            val base = (20 * activity.resources.displayMetrics.density).toInt()
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, base + nav)
+            insets
+        }
+        val name = activity.peerName
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_avatar).text =
+            name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_name).text = name
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_app).text =
+            "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" ")
+        val note = sheet.findViewById<android.widget.TextView>(R.id.tv_req_note)
+        var left = (SHARE_DECISION_TIMEOUT_MS / 1000).toInt()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                note.text = "Đang trong cuộc gọi · ${left}s"
+                if (left-- > 0) handler.postDelayed(this, 1000)
+            }
+        }
+        tick.run()
+        sheet.setOnDismissListener { handler.removeCallbacks(tick) }
+        sheet.findViewById<View>(R.id.btn_req_decline).setOnClickListener { answerShare(false); sheet.dismiss() }
+        sheet.findViewById<View>(R.id.btn_req_accept).setOnClickListener { answerShare(true); sheet.dismiss() }
+        sheet.show()
+        return sheet
+    }
+
+    /** Same emoji as the operator menu tray. */
+    private fun appEmoji(appId: String): String? = when (appId) {
+        "sketch-sync-app" -> "🎨"
+        SHARE_APP -> "📲"
+        "caro" -> "♟️"
+        else -> null
     }
 
     private fun appLabel(appId: String): String = when (appId) {
