@@ -1377,13 +1377,12 @@
       { no: 'SL 225', dep: '11:15', arr: '13:20', dur: '2g 05p', price: 1670000 },
       { no: 'SL 241', dep: '19:45', arr: '21:55', dur: '2g 10p', price: 1570000 }
     ];
-    // Same routes, flight numbers and fares as DCAS (flight_booking.go): every city pair is flown.
-    // The three short hops come last so the older flight numbers stay as they were.
+    // Same routes, flight numbers and fares as DCAS (flight_booking.go). HAN–HPH,
+    // DAD–VDH and HPH–VDH have no flights: the cities are too close.
     const ROUTES = [
       ['HAN', 'DAD', 80], ['HAN', 'DLI', 110], ['HAN', 'VDH', 70],
       ['SGN', 'DAD', 85], ['SGN', 'HPH', 125], ['SGN', 'VDH', 95], ['SGN', 'DLI', 55],
-      ['DAD', 'HPH', 80], ['DAD', 'DLI', 70], ['HPH', 'DLI', 115], ['VDH', 'DLI', 90],
-      ['HAN', 'HPH', 45], ['DAD', 'VDH', 50], ['HPH', 'VDH', 60]
+      ['DAD', 'HPH', 80], ['DAD', 'DLI', 70], ['HPH', 'DLI', 115], ['VDH', 'DLI', 90]
     ];
     const DEPARTURES = ['06:00', '08:30', '11:15', '19:45'], SPREAD = [0, 291000, 191000, 91000];
     const DAY_PCT = [115, 100, 95, 90, 85, 110, 120]; // Sunday first

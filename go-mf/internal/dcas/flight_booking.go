@@ -90,8 +90,7 @@ var flightAirports = map[string]string{
 
 // flightRoute is one city pair, flown both ways with the same four flights.
 // Route k numbers its flights SL 3k1..3k4 (k=10, 11 give SL 401.., SL 411..).
-// Every pair of cities is flown; the three short hops (HAN–HPH, DAD–VDH, HPH–VDH)
-// come last so the older flight numbers stay as they were.
+// HAN–HPH, DAD–VDH and HPH–VDH are missing on purpose: too close to fly.
 type flightRoute struct {
 	A, B string
 	Mins int
@@ -101,7 +100,6 @@ var flightRoutes = []flightRoute{
 	{"HAN", "DAD", 80}, {"HAN", "DLI", 110}, {"HAN", "VDH", 70},
 	{"SGN", "DAD", 85}, {"SGN", "HPH", 125}, {"SGN", "VDH", 95}, {"SGN", "DLI", 55},
 	{"DAD", "HPH", 80}, {"DAD", "DLI", 70}, {"HPH", "DLI", 115}, {"VDH", "DLI", 90},
-	{"HAN", "HPH", 45}, {"DAD", "VDH", 50}, {"HPH", "VDH", 60},
 }
 
 var (
