@@ -569,7 +569,8 @@ func (s *DCASServer) handleFunCallingMessage(sessionID, callID string, data []by
 		s.mu.RUnlock()
 	}
 
-	// Translate action from send_emoji to render_emoji
+	// Translate action from send_emoji to render_emoji. Everything else is forwarded as is,
+	// including "emoji" (any emoji picked from the phone's keyboard, with type "custom").
 	var payload map[string]interface{}
 	if err := json.Unmarshal(data, &payload); err == nil {
 		if service, ok := payload["service"].(string); ok && service == "fun-calling" {

@@ -67,6 +67,24 @@
       height: 36px;
       font-size: 18px;
     }
+    /* Any emoji from the phone's keyboard: recent ones, the ＋ button and its input box */
+    #emote-recent { display: contents; }
+    .emote-list button.plus { font-size: 20px; font-weight: 600; }
+    .emote-pick {
+      position: absolute;
+      right: 46px;
+      width: 150px;
+      height: 36px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(20, 20, 24, 0.75);
+      color: #fff;
+      font-size: 18px;
+      padding: 0 12px;
+      outline: none;
+    }
+    .emote-pick::placeholder { color: rgba(255, 255, 255, 0.7); font-size: 13px; }
+    .emote-pick.hidden { display: none; }
     .emote-list.hidden {
       opacity: 0;
       transform: translateY(-8px) scaleY(.6);
@@ -251,7 +269,11 @@
       <button onclick="sendSticker('smile')" title="Mặt cười">😊</button>
       <button onclick="sendSticker('angry')" title="Tức giận">😡</button>
       <button onclick="sendSticker('wave')" title="Vẫy chào">👋</button>
+      <div id="emote-recent"></div>
+      <button class="plus" id="emote-plus" onclick="openPicker()" title="Emoji khác">＋</button>
     </div>
+    <input class="emote-pick hidden" id="emote-pick" type="text" inputmode="text" autocomplete="off"
+      placeholder="Chọn emoji trên bàn phím" aria-label="Chọn emoji">
   </div>
 
   <div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
@@ -268,7 +290,67 @@
     function toggleEmotes() {
       const closed = document.getElementById('emote-list').classList.toggle('hidden');
       document.getElementById('emote-toggle').textContent = closed ? '❤️' : '✕';
+      if (closed) closePicker();
     }
+
+    /* ── Any emoji from the phone's keyboard ── */
+    const RECENT_KEY = 'emote.recent', MAX_RECENT = 4;
+    function loadRecent() {
+      try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.slice(0, MAX_RECENT) : []; }
+      catch (e) { return []; }
+    }
+    function renderRecent() {
+      const box = document.getElementById('emote-recent');
+      box.textContent = '';
+      loadRecent().forEach(e => {
+        const b = document.createElement('button');
+        b.textContent = e;
+        b.title = e;
+        b.onclick = () => sendCustom(e);
+        box.appendChild(b);
+      });
+    }
+    function rememberRecent(e) {
+      const a = [e].concat(loadRecent().filter(x => x !== e)).slice(0, MAX_RECENT);
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(a)); } catch (err) { /* private mode: no recents */ }
+      renderRecent();
+    }
+    // First user-perceived character (grapheme), so 👍🏽 or 👨‍👩‍👧 stay whole.
+    function firstGrapheme(text) {
+      if (window.Intl && Intl.Segmenter) {
+        for (const seg of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) return seg.segment;
+        return '';
+      }
+      return Array.from(text)[0] || '';
+    }
+    const isEmoji = g => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(g);
+    function openPicker() {
+      const inp = document.getElementById('emote-pick');
+      const plus = document.getElementById('emote-plus');
+      inp.style.top = (plus.offsetTop + document.getElementById('emote-list').offsetTop) + 'px';
+      inp.value = '';
+      inp.placeholder = 'Chọn emoji trên bàn phím';
+      inp.classList.remove('hidden');
+      inp.focus();
+    }
+    function closePicker() {
+      const inp = document.getElementById('emote-pick');
+      inp.classList.add('hidden');
+      inp.blur();
+    }
+    document.getElementById('emote-pick').addEventListener('input', ev => {
+      const inp = ev.target, g = firstGrapheme(inp.value.trim());
+      if (!g) return;
+      if (!isEmoji(g)) { inp.value = ''; inp.placeholder = 'Chỉ gửi được emoji 🙂'; return; }
+      closePicker();
+      sendCustom(g);
+    });
+    document.getElementById('emote-pick').addEventListener('blur', () => setTimeout(closePicker, 150));
+    function sendCustom(e) {
+      rememberRecent(e);
+      sendSticker('custom', e);
+    }
+    renderRecent();
 
     function launchApp(appId) {
       if (window.AndroidBridge && window.AndroidBridge.startMiniApp) {
@@ -284,14 +366,15 @@
 
   <script>
     // Send sticker action to native Go backend via the W3C IMSDataChannelBridge
-    function sendSticker(emojiType) {
-      console.log("[MiniApp] Sending sticker type: " + emojiType);
+    function sendSticker(emojiType, emoji) {
+      console.log("[MiniApp] Sending sticker type: " + emojiType + (emoji ? " " + emoji : ""));
 
       const payload = {
         service: "fun-calling",
         action: "send_emoji",
         type: emojiType
       };
+      if (emoji) payload.emoji = emoji; // any emoji from the keyboard; older pages show ❤️ for "custom"
 
       const payloadStr = JSON.stringify(payload);
       if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
@@ -301,7 +384,7 @@
       }
 
       // Self-render on originating side for quick responsiveness
-      renderEmoji(emojiType);
+      renderEmoji(emojiType, emoji);
     }
 
     // Standard receive callback called by the container
@@ -310,7 +393,7 @@
       try {
         const payload = typeof dataStr === 'object' ? dataStr : JSON.parse(dataStr);
         if (payload.action === "render_emoji" || payload.action === "send_emoji") {
-          renderEmoji(payload.type);
+          renderEmoji(payload.type, payload.emoji);
         }
       } catch (e) {
         console.error("[MiniApp] Parse failed: " + e.message);
@@ -330,7 +413,7 @@
     }
 
     // Render floating sticker animation
-    function renderEmoji(emojiType) {
+    function renderEmoji(emojiType, emoji) {
       const area = document.getElementById("animation-area");
       if (!area) return;
 
@@ -346,8 +429,13 @@
       if (emojiType === "smile") emojiIcon = "😊";
       if (emojiType === "angry") emojiIcon = "😡";
       if (emojiType === "wave") emojiIcon = "👋";
+      // A keyboard emoji from the other phone: shown as text only, never as HTML, and kept short.
+      if (typeof emoji === "string" && emoji.length > 0 && emoji.length <= 16) emojiIcon = emoji;
 
-      div.innerHTML = `<span class="emoji-icon">${emojiIcon}</span>`;
+      const icon = document.createElement("span");
+      icon.className = "emoji-icon";
+      icon.textContent = emojiIcon;
+      div.appendChild(icon);
       area.appendChild(div);
 
       // Force repaint on the next frame (critical for transparent HW-accel WebView)
