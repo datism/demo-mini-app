@@ -311,17 +311,27 @@
     const DEFAULT_RECENT = ['❤️', '👍', '😊', '😡'];
     // The old five keep their keywords so pages without the panel still show them.
     const KEYWORD = { '❤️': 'heart', '👍': 'like', '😊': 'smile', '😡': 'angry', '👋': 'wave' };
-    function loadRecent() {
+    // Slots keep their place: tapping one only marks it used; a new emoji from ＋ takes the slot
+    // used longest ago, in that same position. Stored as [{e, t}] (emoji, last-used time).
+    function loadSlots() {
       try {
         const a = JSON.parse(localStorage.getItem(RECENT_KEY) || 'null');
-        if (Array.isArray(a) && a.length) return a.filter(x => typeof x === 'string').slice(0, MAX_RECENT);
+        if (Array.isArray(a) && a.length) {
+          const slots = a.map((x, k) => typeof x === 'string' ? { e: x, t: -k }   // old format: list, newest first
+                                       : (x && typeof x.e === 'string' ? { e: x.e, t: Number(x.t) || 0 } : null))
+                         .filter(Boolean).slice(0, MAX_RECENT);
+          if (slots.length) return slots;
+        }
       } catch (e) { /* unreadable: defaults */ }
-      return DEFAULT_RECENT.slice();
+      return DEFAULT_RECENT.map((e, k) => ({ e, t: -k }));
+    }
+    function saveSlots(slots) {
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(slots)); } catch (err) { /* private mode */ }
     }
     function renderRecent() {
       const box = document.getElementById('emote-recent');
       box.textContent = '';
-      loadRecent().forEach(e => {
+      loadSlots().forEach(({ e }) => {
         const b = document.createElement('button');
         b.textContent = e;
         b.onclick = () => sendEmote(e);
@@ -329,8 +339,17 @@
       });
     }
     function rememberRecent(e) {
-      const a = [e].concat(loadRecent().filter(x => x !== e)).slice(0, MAX_RECENT);
-      try { localStorage.setItem(RECENT_KEY, JSON.stringify(a)); } catch (err) { /* private mode */ }
+      const slots = loadSlots();
+      const now = Date.now();
+      const hit = slots.find(x => x.e === e);
+      if (hit) { hit.t = now; saveSlots(slots); return; }      // already shown: same place, no re-render
+      if (slots.length < MAX_RECENT) slots.push({ e, t: now });
+      else {
+        let old = 0;
+        slots.forEach((x, k) => { if (x.t < slots[old].t) old = k; });
+        slots[old] = { e, t: now };                               // replace in place
+      }
+      saveSlots(slots);
       renderRecent();
     }
     function sendEmote(e) {
