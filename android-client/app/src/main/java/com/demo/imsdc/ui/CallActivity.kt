@@ -810,6 +810,9 @@ class CallActivity : AppCompatActivity() {
         // A tap (not a drag) on my camera tile folds it into a camera button; tapping the button opens it again.
         binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
         binding.btnCameraRestore.setOnClickListener { miniAppManager.onCameraButtonTapped() }
+        // Vẽ / Chia sẻ: the other person's tile folds the same way.
+        binding.viewRemoteTileTouch.setOnClickListener { miniAppManager.onRemoteTileTapped() }
+        binding.btnRemoteRestore.setOnClickListener { miniAppManager.onRemoteButtonTapped() }
         // Full screen: the call pill shows (or hides) the call buttons.
         binding.layoutCallPill.setOnClickListener { miniAppManager.toggleCallControls() }
 
