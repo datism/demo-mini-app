@@ -311,7 +311,13 @@ class RtpMediaManager(
     }
 
     @Synchronized
-    fun onSurfaceDestroyed() {
+    fun onSurfaceDestroyed(surface: Surface? = null) {
+        // Two views can show the call video (background, Vẽ/Chia sẻ tile): one going away while the
+        // decoder draws to the other must not stop it.
+        if (surface != null && surface !== decoderSurface) {
+            Log.i(TAG, "Surface destroyed, but the decoder draws elsewhere: keeping it")
+            return
+        }
         Log.i(TAG, "Surface destroyed, releasing video decoder safely")
         // The receiver thread may be inside feedDecoder() with this decoder: wait for it.
         synchronized(decoderLock) {

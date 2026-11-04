@@ -331,16 +331,16 @@
             app:layout_constraintTop_toBottomOf="@id/layout_top_bar"
             app:layout_constraintStart_toStartOf="parent" />
 
-        <!-- Vẽ / Chia sẻ: the other person's video is a tile under my camera (remote_video_view, placed by
-             MiniAppManager.applyRemoteFold). The video sits under the page, so this catches the tap that folds it. -->
-        <View
-            android:id="@+id/view_remote_tile_touch"
+        <!-- Vẽ / Chia sẻ: the other person's video as a tile under my camera (placed by
+             MiniAppManager.applyRemoteFold). Its own SurfaceView inside this layout, brought to the front like
+             my camera: remote_video_view sits under the page, which paints over it. A tap folds it. -->
+        <SurfaceView
+            android:id="@+id/remote_tile_view"
             android:layout_width="90dp"
             android:layout_height="125dp"
             android:layout_marginStart="16dp"
             android:clickable="true"
             android:focusable="true"
-            android:elevation="8dp"
             android:contentDescription="Thu nhỏ video người kia"
             android:visibility="gone"
             app:layout_constraintTop_toBottomOf="@id/layout_top_bar"

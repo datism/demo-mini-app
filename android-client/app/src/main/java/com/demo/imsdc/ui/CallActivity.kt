@@ -814,8 +814,15 @@ class CallActivity : AppCompatActivity() {
         binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
         binding.btnCameraRestore.setOnClickListener { miniAppManager.onCameraButtonTapped() }
         // Vẽ / Chia sẻ: the other person's tile folds the same way.
-        binding.viewRemoteTileTouch.setOnClickListener { miniAppManager.onRemoteTileTapped() }
+        binding.remoteTileView.setOnClickListener { miniAppManager.onRemoteTileTapped() }
         binding.btnRemoteRestore.setOnClickListener { miniAppManager.onRemoteButtonTapped() }
+        // The tile is a media overlay like my camera, set before it is ever shown (no runtime layer switch).
+        binding.remoteTileView.setZOrderMediaOverlay(true)
+        binding.remoteTileView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) { attachRemoteVideo() }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) { rtpMediaManager?.onSurfaceDestroyed(holder.surface) }
+        })
         // Full screen: the call pill shows (or hides) the call buttons.
         binding.layoutCallPill.setOnClickListener { miniAppManager.toggleCallControls() }
 
@@ -1683,13 +1690,13 @@ class CallActivity : AppCompatActivity() {
             binding.remoteVideoView.holder.addCallback(object : SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: SurfaceHolder) {
                     Log.i(TAG, "remoteVideoView surface created, updating RTP media decoder surface now")
-                    rtpMediaManager?.updateDecoderSurface(holder.surface)
+                    attachRemoteVideo()
                     rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
                 }
                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {}
                 override fun surfaceDestroyed(holder: SurfaceHolder) {
                     Log.i(TAG, "remoteVideoView surface destroyed, releasing decoder safely")
-                    rtpMediaManager?.onSurfaceDestroyed()
+                    rtpMediaManager?.onSurfaceDestroyed(holder.surface)
                 }
             })
         }
@@ -1794,11 +1801,19 @@ class CallActivity : AppCompatActivity() {
                 cameraPausedInBackground = false
             }
             rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
-            val surface = binding.remoteVideoView.holder.surface
-            if (surface != null && surface.isValid) {
-                rtpMediaManager?.updateDecoderSurface(surface)
-            }
+            attachRemoteVideo()
         }
+    }
+
+    /**
+     * Points the call-video decoder at the view that shows it: the tile in Vẽ / Chia sẻ
+     * (MiniAppManager.remoteTileShown), the full-screen background otherwise. No-op until that surface exists.
+     */
+    fun attachRemoteVideo() {
+        val tile = binding.remoteTileView.holder.surface
+        val surface = if (::miniAppManager.isInitialized && miniAppManager.remoteTileShown && tile != null && tile.isValid) tile
+            else binding.remoteVideoView.holder.surface
+        if (surface != null && surface.isValid) rtpMediaManager?.updateDecoderSurface(surface)
     }
 
     /** onStop paused my camera (no camera-type call service); onStart resumes it. */
