@@ -369,6 +369,14 @@ class MiniAppManager(val activity: CallActivity) {
     private val TILE_TO_GAME_GAP_DP = 12
     // Each tile's share of the screen width; the pair is centred. Keeps the board large on S24-class phones.
     private val TILE_WIDTH_FRACTION = 0.34f
+    /** Full-screen Caro: the page's header (score pills, turn line) plus the board panel's top padding. */
+    private val CARO_PAGE_CHROME_DP = 80
+    /** The Caro page's board is 92% of its width (--board-size in caro/index.html). */
+    private val CARO_BOARD_WIDTH_FRACTION = 0.92f
+    /** Full-screen Caro: height left over after growing the tiles (the page centres the board in it). */
+    private val CARO_SLACK_DP = 24
+    /** Side margin of the tile pair when the tiles grow to fill a tall screen. */
+    private val CARO_TILE_SIDE_DP = 12
     /** Full-screen Caro: tiles start this far from the top of the screen. */
     private val FULLSCREEN_TILE_TOP_DP = 12
     /** Full-screen Caro: room under the board for the call pill. */
@@ -414,7 +422,17 @@ class MiniAppManager(val activity: CallActivity) {
 
         if (enabled) {
             val screenW = (b.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels)
-            val tileW = (screenW * TILE_WIDTH_FRACTION).toInt()
+            var tileW = (screenW * TILE_WIDTH_FRACTION).toInt()
+            if (fullScreen) {
+                // Tall screens left the bottom empty under the board: grow the tiles into that height,
+                // up to the pair filling the width. What is left (CARO_SLACK_DP and up) the page centres.
+                val screenH = b.root.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
+                val pageNeed = dp(CARO_PAGE_CHROME_DP) + (screenW * CARO_BOARD_WIDTH_FRACTION).toInt()
+                val spareH = screenH - dp(FULLSCREEN_TILE_TOP_DP) - dp(TILE_TO_GAME_GAP_DP) -
+                    dp(CARO_PILL_SPACE_DP) - pageNeed - dp(CARO_SLACK_DP)
+                val maxW = (screenW - dp(TILE_GAP_DP) - 2 * dp(CARO_TILE_SIDE_DP)) / 2
+                tileW = (spareH * 3 / 4).coerceIn(tileW, maxOf(tileW, maxW))
+            }
             val tileH = tileW * 4 / 3
             val sideMargin = (screenW - 2 * tileW - dp(TILE_GAP_DP)) / 2
             val topMargin = if (fullScreen) dp(FULLSCREEN_TILE_TOP_DP) else dp(TILE_GAP_DP)
