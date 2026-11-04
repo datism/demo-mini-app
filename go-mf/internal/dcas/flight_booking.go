@@ -90,7 +90,7 @@ var flightAirports = map[string]string{
 
 // flightRoute is one city pair, flown both ways with the same four flights.
 // Route k numbers its flights SL 3k1..3k4 (k=10, 11 give SL 401.., SL 411..).
-// HAN–HPH, DAD–VDH and HPH–VDH are missing on purpose: too close to fly.
+// HAN–HPH, DAD–VDH and HPH–VDH are not flown; the page does not offer them.
 type flightRoute struct {
 	A, B string
 	Mins int
