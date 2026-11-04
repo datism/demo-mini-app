@@ -60,6 +60,9 @@ private const val TAG = "CallActivity"
 class CallActivity : AppCompatActivity() {
 
     companion object {
+        /** 1900 agent attempt: how long it rings, and how long "không trả lời" stays before the page returns. */
+        private const val AGENT_RING_MS = 20_000L
+        private const val AGENT_NO_ANSWER_MS = 2_500L
         @Volatile
         var activeInstance: CallActivity? = null
         val isCallActive: Boolean
@@ -1733,6 +1736,7 @@ class CallActivity : AppCompatActivity() {
     private fun endCall() {
         if (isEndingCall) return
         isEndingCall = true
+        agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
         sipManager.markCallEnding()
         Log.i(TAG, "Ending call...")
@@ -1781,6 +1785,7 @@ class CallActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
         isEndingCall = true
         if (activeInstance === this) {
@@ -1974,6 +1979,46 @@ class CallActivity : AppCompatActivity() {
         binding.tvVerifiedBadge.visibility = View.VISIBLE
         binding.tvVerifiedBy.visibility = View.VISIBLE
     }
+
+    // ── 1900 "Gặp tổng đài viên": the verified screen rings, nobody answers, back to the booking page ──
+    private var agentCallJob: kotlinx.coroutines.Job? = null
+
+    fun startAgentCall() {
+        if (agentCallJob?.isActive == true) return
+        val c = CertifiedNumbers.of(remoteUser)
+        agentCallJob = lifecycleScope.launch(Dispatchers.Main) {
+            try {
+                if (c != null) showCertified(c)
+                binding.tvBigNumber.text = "Tổng đài viên · $remoteUser"
+                binding.tvBigNumber.visibility = View.VISIBLE
+                binding.tvVerifiedBy.text = "Đang gọi tổng đài viên…"
+                binding.tvVerifiedBy.visibility = View.VISIBLE
+                binding.webviewMiniapp.visibility = View.INVISIBLE
+                binding.viewBackgroundPlaceholder.visibility = View.VISIBLE
+                binding.layoutMiddleDetails.visibility = View.VISIBLE
+                binding.layoutMiddleDetails.setOnClickListener { agentRingCancelled = true }
+                agentRingCancelled = false
+                Log.i(TAG, "Agent call: ringing")
+                startRingbackTone()
+                var waited = 0L
+                while (waited < AGENT_RING_MS && !agentRingCancelled) { delay(250); waited += 250 }
+                stopRingbackTone()
+                binding.tvVerifiedBy.text = "Tổng đài viên không trả lời"
+                Log.i(TAG, "Agent call: no answer (cancelled=$agentRingCancelled)")
+                delay(AGENT_NO_ANSWER_MS)
+            } finally {
+                stopRingbackTone()
+                binding.layoutMiddleDetails.setOnClickListener(null)
+                binding.layoutMiddleDetails.isClickable = false
+                binding.tvBigNumber.text = remoteUser
+                binding.tvVerifiedBy.text = "Xác thực bởi nhà mạng"
+                binding.layoutMiddleDetails.visibility = View.GONE
+                binding.viewBackgroundPlaceholder.visibility = View.GONE
+                binding.webviewMiniapp.visibility = View.VISIBLE
+            }
+        }
+    }
+    @Volatile private var agentRingCancelled = false
 
     private fun startAvatarPulse() {
         val ring = binding.viewAvatarPulse

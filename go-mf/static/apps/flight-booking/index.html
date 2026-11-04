@@ -1377,13 +1377,12 @@
       { no: 'SL 225', dep: '11:15', arr: '13:20', dur: '2g 05p', price: 1670000 },
       { no: 'SL 241', dep: '19:45', arr: '21:55', dur: '2g 10p', price: 1570000 }
     ];
-    // Same routes, flight numbers and fares as DCAS (flight_booking.go): every city pair is flown.
-    // The three short hops come last so the older flight numbers stay as they were.
+    // Same routes, flight numbers and fares as DCAS (flight_booking.go). HAN–HPH,
+    // DAD–VDH and HPH–VDH are not flown: the city picker does not offer them.
     const ROUTES = [
       ['HAN', 'DAD', 80], ['HAN', 'DLI', 110], ['HAN', 'VDH', 70],
       ['SGN', 'DAD', 85], ['SGN', 'HPH', 125], ['SGN', 'VDH', 95], ['SGN', 'DLI', 55],
-      ['DAD', 'HPH', 80], ['DAD', 'DLI', 70], ['HPH', 'DLI', 115], ['VDH', 'DLI', 90],
-      ['HAN', 'HPH', 45], ['DAD', 'VDH', 50], ['HPH', 'VDH', 60]
+      ['DAD', 'HPH', 80], ['DAD', 'DLI', 70], ['HPH', 'DLI', 115], ['VDH', 'DLI', 90]
     ];
     const DEPARTURES = ['06:00', '08:30', '11:15', '19:45'], SPREAD = [0, 291000, 191000, 91000];
     const DAY_PCT = [115, 100, 95, 90, 85, 110, 120]; // Sunday first
@@ -1612,9 +1611,13 @@
       const side = state.citySide, other = side === 'from' ? state.to : state.from;
       const list = AIRPORT_ORDER.map(code => {
         const sel = code === state[side];
-        return '<button role="option" aria-selected="' + sel + '" class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)" data-act="setcity" data-code="' + code + '">' +
+        // A destination is offered only if it is flown from the origin (the other side swaps, always fine).
+        const off = side === 'to' && code !== state.from && code !== other && !flightsFor(state.from, code, 0);
+        return '<button role="option" aria-selected="' + sel + '"' + (off ? ' disabled aria-disabled="true"' : '') +
+          ' class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)' + (off ? ';opacity:.4' : '') + '" data-act="setcity" data-code="' + code + '">' +
           '<span class="info"><span class="times">' + AIRPORTS[code] + (sel ? ' ✓' : '') + '</span><span class="meta">' + code + ' · Sân bay ' + AIRPORT_NAME[code] +
-          (code === other ? ' · đổi chiều · swap' : '') + '</span></span></button>';
+          (code === other ? ' · đổi chiều · swap' : '') +
+          (off ? ' · Không có chuyến bay từ ' + AIRPORTS[state.from] : '') + '</span></span></button>';
       }).join('');
       return {
         main: titleRow('search', side === 'from' ? 'Điểm đi' : 'Điểm đến', side === 'from' ? 'From' : 'To') +
@@ -1919,8 +1922,14 @@
       // Picking the city already on the other side swaps the two.
       setcity: el => {
         const code = el.dataset.code, side = state.citySide, other = side === 'from' ? 'to' : 'from';
+        if (side === 'to' && code !== state.from && !flightsFor(state.from, code, 0)) return; // not flown
         if (code === state[other]) { state[other] = state[side]; state.rot += 180; }
         state[side] = code;
+        // A new origin that does not fly to the current destination: take the first city it flies to.
+        if (side === 'from' && !flightsFor(state.from, state.to, 0)) {
+          const to = AIRPORT_ORDER.find(c => c !== state.from && flightsFor(state.from, c, 0));
+          if (to) { state.to = to; showToast('Đã đổi điểm đến: ' + AIRPORTS[to]); }
+        }
         go('search');
       },
       date: el => setState({ dateIdx: +el.dataset.i }),
@@ -2004,7 +2013,7 @@
         if (!hasBridge()) {
           setState({
             supportBanner: topic === 'agent'
-              ? { vn: 'Tổng đài viên sẽ hỗ trợ bạn ngay', en: 'An agent will assist you shortly' }
+              ? { vn: 'Tổng đài viên hiện không trả lời, vui lòng thử lại sau', en: 'No agent answered, please try again later' }
               : { vn: 'Chúng tôi sẽ gọi lại cho bạn trong 15 phút', en: 'We will call you back within 15 minutes' }
           });
         }

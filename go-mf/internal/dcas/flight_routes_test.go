@@ -22,7 +22,7 @@ func TestFlightSearchNewRoute(t *testing.T) {
 }
 
 func TestFlightSearchRouteWithoutFlights(t *testing.T) {
-	for _, pair := range [][2]string{{"HAN", "HAN"}, {"HAN", "XYZ"}} {
+	for _, pair := range [][2]string{{"HAN", "HPH"}, {"VDH", "DAD"}, {"HPH", "VDH"}, {"HAN", "HAN"}, {"HAN", "XYZ"}} {
 		r := buildFlightBookingReply(FlightBookingRequest{Action: "search", From: pair[0], To: pair[1]}, fixedPNR, newFlightSeatStore())
 		if r.Status != "error" || len(r.Flights) != 0 {
 			t.Errorf("%s→%s should have no flights, got %+v", pair[0], pair[1], r)
@@ -83,20 +83,5 @@ func TestFlightConfirmNewRouteIsRecorded(t *testing.T) {
 	top := prof.Bookings[0]
 	if top.Flight != f.No || top.From != "SGN" || top.To != "VDH" || top.Dep != f.Dep || top.Arr != f.Arr {
 		t.Errorf("history top %+v", top)
-	}
-}
-
-// Every pair of the six cities has flights, both ways.
-func TestFlightEveryCityPairIsFlown(t *testing.T) {
-	for a := range flightAirports {
-		for b := range flightAirports {
-			if a == b {
-				continue
-			}
-			r := buildFlightBookingReply(FlightBookingRequest{Action: "search", From: a, To: b, Adults: 1}, fixedPNR, newFlightSeatStore())
-			if r.Status != "success" || len(r.Flights) != 4 {
-				t.Errorf("%s→%s has no flights: %+v", a, b, r)
-			}
-		}
 	}
 }

@@ -129,7 +129,8 @@ func buildFlightReplyForCaller(req FlightBookingRequest, caller string, pnr func
 	case "support":
 		switch req.Topic {
 		case "agent":
-			resp.Message, resp.MessageEn = "Tổng đài viên sẽ hỗ trợ bạn ngay", "An agent will assist you shortly"
+			// The phone rings the agent on the verified screen and nobody answers (demo).
+			resp.Message, resp.MessageEn = "Tổng đài viên hiện không trả lời, vui lòng thử lại sau", "No agent answered, please try again later"
 		case "callback":
 			resp.Message, resp.MessageEn = "Chúng tôi sẽ gọi lại cho bạn trong 15 phút", "We will call you back within 15 minutes"
 		default:
