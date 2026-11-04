@@ -157,6 +157,8 @@ class CallActivity : AppCompatActivity() {
     private lateinit var sipServer:  String
     private lateinit var localUser:  String
     lateinit var remoteUser: String
+    /** What is shown for the other person: the name saved in the app's phonebook, else the number. */
+    val peerName: String get() = Phonebook.label(this, remoteUser)
     private lateinit var localIp:    String
     private var localPort = 15060
     private var sipPort   = 5060
@@ -676,11 +678,11 @@ class CallActivity : AppCompatActivity() {
     // --- UI Setup ------------------------------------------------------------
 
     private fun setupUI() {
-        binding.tvRemoteUser.text = remoteUser
-        val initial = remoteUser.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        binding.tvRemoteUser.text = peerName
+        val initial = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         binding.tvTopAvatar.text = initial
         binding.tvBigAvatar.text = initial
-        binding.tvBigName.text = remoteUser
+        binding.tvBigName.text = peerName
         startAvatarPulse()
 
         // Setup background placeholder & details defaults
@@ -938,7 +940,7 @@ class CallActivity : AppCompatActivity() {
                         }
                         404 -> {
                             stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ Không tìm thấy $remoteUser"
+                            binding.tvCallStatus.text = "❌ Không tìm thấy $peerName"
                             lifecycleScope.launch {
                                 delay(2000)
                                 resetAudio()
@@ -949,7 +951,7 @@ class CallActivity : AppCompatActivity() {
                         }
                         480 -> {
                             stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ $remoteUser không trực tuyến (Offline)"
+                            binding.tvCallStatus.text = "❌ $peerName không trực tuyến (Offline)"
                             lifecycleScope.launch {
                                 delay(2000)
                                 resetAudio()
@@ -1722,7 +1724,7 @@ class CallActivity : AppCompatActivity() {
                 }
             }
         }
-        com.demo.imsdc.call.CallService.start(this, remoteUser)
+        com.demo.imsdc.call.CallService.start(this, peerName)
     }
 
     private fun endCall() {

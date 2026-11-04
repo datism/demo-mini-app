@@ -809,7 +809,7 @@ class MiniAppManager(val activity: CallActivity) {
         if (code != 180 || !awaitingPeerDecision || ringingToastShown || cseq != pending.peek()) return
         ringingToastShown = true
         activity.runOnUiThread {
-            Toast.makeText(activity, "Đang chờ ${activity.remoteUser} đồng ý…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, "Đang chờ ${activity.peerName} đồng ý…", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1025,9 +1025,9 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Roll back the App slot only. Home ADC and BDC are untouched. */
     private fun rollbackMessage(result: ReInviteOutcome): String = when {
-        result is ReInviteOutcome.Failed && result.code == 603 -> "${activity.remoteUser} đã từ chối mở ứng dụng"
-        result is ReInviteOutcome.Failed && result.code == 487 -> "${activity.remoteUser} không trả lời"
-        result == ReInviteOutcome.Timeout -> "${activity.remoteUser} không trả lời"
+        result is ReInviteOutcome.Failed && result.code == 603 -> "${activity.peerName} đã từ chối mở ứng dụng"
+        result is ReInviteOutcome.Failed && result.code == 487 -> "${activity.peerName} không trả lời"
+        result == ReInviteOutcome.Timeout -> "${activity.peerName} không trả lời"
         else -> "Không mở được ứng dụng, quay về emote"
     }
 
@@ -1196,7 +1196,7 @@ class MiniAppManager(val activity: CallActivity) {
      */
     suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
         rawMsg,
-        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.remoteUser).toString()) },
+        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
         dismiss = { emitShareEvent("cancelled") }
     )
 
@@ -1213,7 +1213,7 @@ class MiniAppManager(val activity: CallActivity) {
                     activity.runOnUiThread {
                         dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
                             .setTitle("Mở ứng dụng")
-                            .setMessage("${activity.remoteUser} muốn mở ${appLabel(appId)}")
+                            .setMessage("${activity.peerName} muốn mở ${appLabel(appId)}")
                             .setCancelable(false)
                             .setNegativeButton("Từ chối") { _, _ -> answerShare(false) }
                             .setPositiveButton("Đồng ý") { _, _ -> answerShare(true) }

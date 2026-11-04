@@ -313,7 +313,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Tab Phone mở / bật tắt Dialpad
+        binding.tabContacts.setOnClickListener {
+            showingContacts = true
+            if (isDialpadVisible) hideDialpad(true)
+            refreshList()
+        }
         binding.tabPhone.setOnClickListener {
+            if (showingContacts) { showingContacts = false; refreshList(); return@setOnClickListener }
             if (!isDialpadVisible) {
                 showDialpad(true)
             } else {
@@ -499,7 +505,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         registerDebugReceiver()
-        displayRecentCalls()
+        refreshList()
         val sm = SipManager.shared
         if (sm != null && sm.isRunning) {
             Log.i(TAG, "Restoring callbacks on active SipManager")
@@ -612,13 +618,13 @@ class MainActivity : AppCompatActivity() {
         // Thêm mock data giống ảnh màn hình
         val now = System.currentTimeMillis()
         if (items.none { it.number == "1001" }) {
-            items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2, displayName = "1001"))
+            items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2)
         }
         if (items.none { it.number == "1002" }) {
-            items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3, displayName = "1002"))
+            items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3)
         }
         if (items.none { it.number == "1003" }) {
-            items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8, displayName = "1003"))
+            items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8)
         }
 
         // Sắp xếp theo thời gian mới nhất lên đầu
@@ -633,11 +639,9 @@ class MainActivity : AppCompatActivity() {
             val timestamp = item.timestamp
             val rawName = item.displayName
             
-            // Map số điện thoại thực tế sang tên hiển thị nếu có
-            val displayName = when {
-                rawName != null -> rawName
-                else -> number
-            }
+            // Tên trong danh bạ của app, nếu có
+            val savedName = Phonebook.nameOf(this, number)
+            val displayName = savedName ?: rawName ?: number
 
             // Create row container (Horizontal LinearLayout)
             val row = android.widget.LinearLayout(this).apply {
@@ -653,6 +657,7 @@ class MainActivity : AppCompatActivity() {
                     binding.tvDialDigits.text = dialDigits
                     showDialpad(true)
                 }
+                setOnLongClickListener { editContactDialog(number, savedName); true }
             }
 
             // 1. Avatar
@@ -728,7 +733,7 @@ class MainActivity : AppCompatActivity() {
             subtitleLayout.addView(imgDirection)
 
             val tvSub = android.widget.TextView(this).apply {
-                text = " VoLTE Vietnam"
+                text = if (savedName != null) " $number" else " VoLTE Vietnam"
                 setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
                 textSize = 12f
                 val lp = android.widget.LinearLayout.LayoutParams(
@@ -766,13 +771,139 @@ class MainActivity : AppCompatActivity() {
                 setBackgroundResource(typedValue.resourceId)
                 isClickable = true
                 isFocusable = true
-                setOnClickListener {
-                    Toast.makeText(this@MainActivity, "Thông tin cuộc gọi: $displayName ($number)", Toast.LENGTH_SHORT).show()
-                }
+                setOnClickListener { editContactDialog(number, savedName) }
             }
             row.addView(infoBtn)
 
             container.addView(row)
         }
+    }
+
+    // ───────────────────────── Danh bạ (trong app) ─────────────────────────
+
+    private var showingContacts = false
+
+    private fun refreshList() {
+        val active = android.graphics.Color.parseColor("#FF22C55E")
+        val idle = android.graphics.Color.parseColor("#FF8E8E93")
+        (binding.tabPhone.getChildAt(1) as? android.widget.TextView)?.setTextColor(if (showingContacts) idle else active)
+        (binding.tabContacts.getChildAt(1) as? android.widget.TextView)?.setTextColor(if (showingContacts) active else idle)
+        if (showingContacts) displayContacts() else displayRecentCalls()
+    }
+
+    private fun displayContacts() {
+        val container = binding.layoutRecentCalls
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        val pad = (12 * density).toInt()
+
+        fun row(title: String, subtitle: String?, initial: String, color: String,
+                onClick: () -> Unit, onLong: (() -> Unit)? = null) {
+            val r = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                val tv = android.util.TypedValue()
+                theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+                setBackgroundResource(tv.resourceId)
+                setPadding(pad, (10 * density).toInt(), pad, (10 * density).toInt())
+                setOnClickListener { onClick() }
+                if (onLong != null) setOnLongClickListener { onLong(); true }
+            }
+            val avatar = android.widget.FrameLayout(this).apply {
+                val size = (44 * density).toInt()
+                layoutParams = android.widget.LinearLayout.LayoutParams(size, size)
+                setBackgroundResource(com.demo.imsdc.R.drawable.circle_avatar_bg)
+                backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(color))
+                addView(android.widget.TextView(this@MainActivity).apply {
+                    text = initial
+                    setTextColor(android.graphics.Color.WHITE)
+                    textSize = 18f
+                    setTypeface(android.graphics.Typeface.DEFAULT_BOLD)
+                    gravity = android.view.Gravity.CENTER
+                }, android.widget.FrameLayout.LayoutParams(-1, -1))
+            }
+            r.addView(avatar)
+            val details = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(pad, 0, pad, 0) }
+            }
+            details.addView(android.widget.TextView(this).apply {
+                text = title
+                setTextColor(android.graphics.Color.parseColor("#FF111111"))
+                textSize = 16f
+                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            })
+            if (subtitle != null) details.addView(android.widget.TextView(this).apply {
+                text = subtitle
+                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
+                textSize = 12f
+            })
+            r.addView(details)
+            container.addView(r)
+        }
+
+        row("Thêm liên hệ", null, "+", "#FF22C55E", onClick = { editContactDialog(null, null) })
+        val contacts = Phonebook.all(this)
+        if (contacts.isEmpty()) {
+            container.addView(android.widget.TextView(this).apply {
+                text = "Chưa có liên hệ nào. Nhấn giữ một cuộc gọi gần đây để lưu số."
+                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
+                textSize = 13f
+                setPadding(pad, pad, pad, pad)
+            })
+        }
+        for ((number, name) in contacts) {
+            row(name, number, name.firstOrNull()?.uppercase() ?: "?", "#FF7C83FF",
+                onClick = {
+                    dialDigits = number
+                    binding.tvDialDigits.text = dialDigits
+                    showDialpad(true)
+                },
+                onLong = {
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle(name)
+                        .setItems(arrayOf("Sửa", "Xóa")) { _, which ->
+                            if (which == 0) editContactDialog(number, name)
+                            else { Phonebook.remove(this, number); refreshList() }
+                        }
+                        .show()
+                })
+        }
+    }
+
+    /** Add (number null) or edit a contact; [number] prefilled from a recent call. */
+    private fun editContactDialog(number: String?, name: String?) {
+        val density = resources.displayMetrics.density
+        val pad = (20 * density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, (8 * density).toInt(), pad, 0)
+        }
+        val etName = android.widget.EditText(this).apply {
+            hint = "Tên"; setText(name ?: ""); setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        val etNumber = android.widget.EditText(this).apply {
+            hint = "Số"; setText(number ?: ""); setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+        box.addView(etName); box.addView(etNumber)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(if (name != null) "Sửa liên hệ" else "Lưu vào danh bạ")
+            .setView(box)
+            .setNegativeButton("Hủy", null)
+            .setPositiveButton("Lưu") { _, _ ->
+                val newName = etName.text.toString().trim()
+                val newNumber = etNumber.text.toString().trim()
+                if (newName.isEmpty() || newNumber.isEmpty()) {
+                    Toast.makeText(this, "Cần nhập tên và số", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (number != null && Phonebook.normalize(number) != Phonebook.normalize(newNumber)) Phonebook.remove(this, number)
+                Phonebook.put(this, newNumber, newName)
+                refreshList()
+            }
+            .show()
+        etName.requestFocus()
     }
 }
