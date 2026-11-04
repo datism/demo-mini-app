@@ -1347,6 +1347,7 @@ class MiniAppManager(val activity: CallActivity) {
      */
     suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
         rawMsg,
+        notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
         ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
         dismiss = { emitShareEvent("cancelled") }
     )
@@ -1360,6 +1361,7 @@ class MiniAppManager(val activity: CallActivity) {
         return try {
             awaitHeldDecision(
                 rawMsg,
+                notice = "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" "),
                 ask = { activity.runOnUiThread { dialog = showAppRequestSheet(appId) } },
                 dismiss = { activity.runOnUiThread { dialog?.dismiss() } }
             )
@@ -1431,14 +1433,19 @@ class MiniAppManager(val activity: CallActivity) {
     private var heldDismiss: (() -> Unit)? = null
 
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
-    private suspend fun awaitHeldDecision(rawMsg: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
+    private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
         val decision = CompletableDeferred<Boolean>()
         heldCancelled = false
         heldDecision = decision
         heldDismiss = dismiss
+        heldNotice = notice
         try {
             activity.sipManager.sendReInviteRinging(rawMsg)
             ask()
+            // The sheet is on the call screen: if the user is elsewhere, a notification asks instead.
+            activity.runOnUiThread {
+                if (!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) onCallScreenHidden()
+            }
             val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
             if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
             if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
@@ -1448,7 +1455,23 @@ class MiniAppManager(val activity: CallActivity) {
         } finally {
             heldDecision = null
             heldDismiss = null
+            heldNotice = null
+            com.demo.imsdc.notification.CallRequestNotification.cancel(activity)
         }
+    }
+
+    /** Text of the request being decided ("muốn mở 🎨 Vẽ"), null when none is. */
+    @Volatile private var heldNotice: String? = null
+
+    /** Call screen hidden (Home, another app): a pending request asks through a notification. */
+    fun onCallScreenHidden() {
+        val notice = heldNotice ?: return
+        com.demo.imsdc.notification.CallRequestNotification.show(activity, activity.peerName, notice, SHARE_DECISION_TIMEOUT_MS)
+    }
+
+    /** Call screen back: its sheet asks again, so the notification goes. */
+    fun onCallScreenShown() {
+        if (heldNotice != null) com.demo.imsdc.notification.CallRequestNotification.cancel(activity)
     }
 
     /** SipManager saw CANCEL for the held Re-INVITE (487 already sent). Closes the sheet; the call goes on. */

@@ -39,6 +39,7 @@ class CallService : Service() {
         when (intent?.action) {
             ACTION_END -> { onUserAction?.invoke(ACTION_END); return START_NOT_STICKY }
             ACTION_STOP_SHARE -> { onUserAction?.invoke(ACTION_STOP_SHARE); return START_NOT_STICKY }
+            ACTION_DECLINE_REQUEST -> { onUserAction?.invoke(ACTION_DECLINE_REQUEST); return START_NOT_STICKY }
             ACTION_UNSHARE -> {
                 // Only the notification changes: calling startForeground again from the background (the share
                 // can end while the user is in another app) may be refused, and the extra type does no harm.
@@ -48,17 +49,27 @@ class CallService : Service() {
         }
         val peer = intent?.getStringExtra(EXTRA_PEER) ?: lastPeer
         val sharing = intent?.getBooleanExtra(EXTRA_SHARING, false) ?: false
+        val camera = intent?.takeIf { it.hasExtra(EXTRA_CAMERA) }?.getBooleanExtra(EXTRA_CAMERA, false) ?: lastCamera
         lastPeer = peer
+        lastCamera = camera
         var type = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         if (sharing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        val ok = try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(peer, sharing), type)
+        // The camera keeps sending while the user is in another app only from a camera-type service, which
+        // Android grants only while the app is in the foreground; refused, the call runs without it.
+        val cameraType = if (camera && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0
+        fun runForeground(t: Int): Boolean = try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(peer, sharing), t)
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Cannot run in the foreground (sharing=$sharing): ${e.message}", e)
+            Log.e(TAG, "Cannot run in the foreground (type=$t, sharing=$sharing): ${e.message}", e)
             false
         }
+        val withCamera = cameraType != 0 && runForeground(type or cameraType)
+        val ok = withCamera || runForeground(type)
+        cameraInBackground = withCamera
         if (sharing) { sharingReady?.complete(ok); sharingReady = null }
         if (!ok && !sharing) { stopSelf(); return START_NOT_STICKY }
         acquireLocks()
@@ -107,6 +118,7 @@ class CallService : Service() {
     }
 
     override fun onDestroy() {
+        cameraInBackground = false
         try { wifiLock?.release() } catch (_: Exception) {}
         try { wakeLock?.release() } catch (_: Exception) {}
         wifiLock = null; wakeLock = null
@@ -116,9 +128,17 @@ class CallService : Service() {
     companion object {
         const val ACTION_END = "com.demo.imsdc.call.END"
         const val ACTION_STOP_SHARE = "com.demo.imsdc.call.STOP_SHARE"
+        /** "Từ chối" on a request notification (the other phone opens an app or shares). */
+        const val ACTION_DECLINE_REQUEST = "com.demo.imsdc.call.DECLINE_REQUEST"
         private const val ACTION_UNSHARE = "com.demo.imsdc.call.UNSHARE"
         private const val EXTRA_PEER = "peer"
         private const val EXTRA_SHARING = "sharing"
+        private const val EXTRA_CAMERA = "camera"
+        private var lastCamera = false
+
+        /** The service holds the camera type: the camera may keep capturing while the call screen is hidden. */
+        @Volatile var cameraInBackground = false
+            private set
         private const val CHANNEL_ID = "ongoing_call"
         private const val NOTIFICATION_ID = 4201
         private var lastPeer = ""
@@ -127,7 +147,7 @@ class CallService : Service() {
         @Volatile var onUserAction: ((String) -> Unit)? = null
 
         /** Call connected (app in the foreground): keep it running in the background. */
-        fun start(context: Context, peer: String) = update(context, peer, sharing = false)
+        fun start(context: Context, peer: String, camera: Boolean) = update(context, peer, sharing = false, camera = camera)
 
         @Volatile private var sharingReady: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
 
@@ -149,8 +169,9 @@ class CallService : Service() {
             }
         }
 
-        private fun update(context: Context, peer: String?, sharing: Boolean) {
+        private fun update(context: Context, peer: String?, sharing: Boolean, camera: Boolean? = null) {
             val i = Intent(context, CallService::class.java).putExtra(EXTRA_SHARING, sharing)
+            if (camera != null) i.putExtra(EXTRA_CAMERA, camera)
             if (peer != null) i.putExtra(EXTRA_PEER, peer)
             try {
                 androidx.core.content.ContextCompat.startForegroundService(context, i)
