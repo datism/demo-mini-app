@@ -178,7 +178,7 @@ object IncomingCallNotificationManager {
         // 7. Build Notification
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_phone_incoming)
-            .setContentTitle("Cuộc gọi đến từ $remoteUser")
+            .setContentTitle("Cuộc gọi đến từ ${com.demo.imsdc.ui.Phonebook.label(appContext, remoteUser)}")
             .setContentText("IMS Data Channel • Đang đổ chuông...")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)

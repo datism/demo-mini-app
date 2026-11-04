@@ -285,9 +285,7 @@ class MiniAppManager(val activity: CallActivity) {
                     activity.binding.localVideoView.bringToFront()
                 }
                 activity.binding.layoutTopBar.bringToFront()
-                if (activity.binding.btnExitMiniapp.visibility == View.VISIBLE) {
-                    activity.binding.btnExitMiniapp.bringToFront()
-                }
+                activity.binding.layoutBottomControls.bringToFront() // holds the Menu button
                 raiseFullScreenOverlays()
                 activity.binding.webviewMiniapp.requestFocus()
 
@@ -588,7 +586,6 @@ class MiniAppManager(val activity: CallActivity) {
         b.layoutCallPill.visibility = if (shown) View.GONE else View.VISIBLE
         if (shown) {
             b.layoutBottomControls.bringToFront()
-            b.btnExitMiniapp.bringToFront()
             b.layoutBottomControls.postDelayed(hideCallControls, CALL_CONTROLS_SHOW_MS)
         } else {
             b.layoutCallPill.bringToFront()
@@ -673,7 +670,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.btnExitMiniapp.visibility = View.GONE
             } else {
                 activity.binding.btnExitMiniapp.visibility = View.VISIBLE
-                activity.binding.btnExitMiniapp.bringToFront()
+                activity.binding.layoutBottomControls.bringToFront()
             }
             activity.dcManager.targetAppId = targetId
 
@@ -688,7 +685,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.localVideoView.bringToFront()
             }
             activity.binding.layoutTopBar.bringToFront()
-            activity.binding.btnExitMiniapp.bringToFront()
+            activity.binding.layoutBottomControls.bringToFront()
             raiseFullScreenOverlays()
 
             // 1. Gửi tin nhắn điều khiển P2P qua ADC (Stream 1000) để bảo đầu kia mở ứng dụng
@@ -790,8 +787,27 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private fun submit(request: AdcRequest) {
-        requests.submit(request)?.let { runRequest(it) }
-            ?: Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $request")
+        requests.submit(request)?.let { runRequest(it) } ?: run {
+            Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $request")
+            // The other phone is still asking its user about the app we opened: withdraw it (CANCEL -> 487).
+            if (awaitingPeerDecision) {
+                val cs = pending.peek()
+                if (cs > 0) activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+            }
+        }
+    }
+
+    /** An app-opening Re-INVITE of ours is waiting for the other phone's user (180 seen or expected). */
+    @Volatile private var awaitingPeerDecision = false
+    @Volatile private var ringingToastShown = false
+
+    /** 180 for one of our Re-INVITEs: if it opens an app, the other phone is asking its user. */
+    fun onReInviteProvisional(code: Int, cseq: Int) {
+        if (code != 180 || !awaitingPeerDecision || ringingToastShown || cseq != pending.peek()) return
+        ringingToastShown = true
+        activity.runOnUiThread {
+            Toast.makeText(activity, "Đang chờ ${activity.peerName} đồng ý…", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun runRequest(request: AdcRequest) {
@@ -837,14 +853,25 @@ class MiniAppManager(val activity: CallActivity) {
                 applyPlan(plan)
                 val offered = localSlots()
                 Log.i(TAG, "Re-INVITE for ${request.target} (attempt $attempt): offer=$offered confirmed=$confirmed")
-                val result = transact()
+                // Opening an app on the other phone waits for its user (180 ... 200 / 603), not only for its stack.
+                val asksPeer = offered.app != null && offered.app != confirmed?.app
+                awaitingPeerDecision = asksPeer; ringingToastShown = false
+                val result = try {
+                    if (asksPeer) transact(SHARE_ANSWER_TIMEOUT_MS, cancelOnTimeout = true) else transact()
+                } finally { awaitingPeerDecision = false }
                 confirmed = confirmedAfter(result, offered, confirmed)
                 val action = outcomeAction(result, attempt, superseded = requests.hasPending)
                 Log.i(TAG, "Re-INVITE for ${request.target}: $result -> $action")
                 when (action) {
                     OutcomeAction.CONFIRM -> applyAnswer((result as ReInviteOutcome.Answered).sdp)
                     OutcomeAction.ROLLBACK -> {
-                        if (localSlots().app != null) rollbackAppSlot("Re-INVITE for ${request.target}: $result")
+                        if (localSlots().app != null) {
+                            if (result is ReInviteOutcome.Failed && result.code == 487 && requests.hasPending) {
+                                // Withdrawn by a newer request of ours: drop the app quietly, the newer one shows its page.
+                                activity.webRtcManager.closeAppADC()
+                                activity.sipManager.appReqApp = null
+                            } else rollbackAppSlot("Re-INVITE for ${request.target}: $result", rollbackMessage(result))
+                        }
                         // Rejected Home offer: the far end has no Home line, so drop the local one too.
                         if (confirmed?.home == null && confirmed != null && localSlots().home != null) {
                             activity.webRtcManager.closeADC()
@@ -994,11 +1021,18 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /** Roll back the App slot only. Home ADC and BDC are untouched. */
-    private fun rollbackAppSlot(reason: String) {
+    private fun rollbackMessage(result: ReInviteOutcome): String = when {
+        result is ReInviteOutcome.Failed && result.code == 603 -> "${activity.peerName} đã từ chối mở ứng dụng"
+        result is ReInviteOutcome.Failed && result.code == 487 -> "${activity.peerName} không trả lời"
+        result == ReInviteOutcome.Timeout -> "${activity.peerName} không trả lời"
+        else -> "Không mở được ứng dụng, quay về emote"
+    }
+
+    private fun rollbackAppSlot(reason: String, message: String = "Không mở được ứng dụng, quay về emote") {
         Log.w(TAG, "Rolling back App ADC: $reason")
         activity.webRtcManager.closeAppADC()
         activity.sipManager.appReqApp = null          // mid 4 -> port 0 locally; appSlotUsed stays true
-        android.widget.Toast.makeText(activity, "Không mở được ứng dụng, quay về emote", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_SHORT).show()
         launchMiniApp(HOME_APP, sendRemoteTrigger = false)
     }
 
@@ -1157,29 +1191,76 @@ class MiniAppManager(val activity: CallActivity) {
      * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
      * CANCEL it has already sent the final response (603 / 487) and returns false.
      */
-    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
+        rawMsg,
+        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
+        dismiss = { emitShareEvent("cancelled") }
+    )
+
+    /**
+     * The other phone opens an app (not the emote app): ask our user before 200 OK. A native dialog, since the
+     * app's page is not loaded yet. Same 180 / 200 / 603 / CANCEL flow as a share request.
+     */
+    suspend fun awaitAppDecision(rawMsg: String, appId: String): Boolean {
+        var dialog: androidx.appcompat.app.AlertDialog? = null
+        return try {
+            awaitHeldDecision(
+                rawMsg,
+                ask = {
+                    activity.runOnUiThread {
+                        dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
+                            .setTitle("Mở ứng dụng")
+                            .setMessage("${activity.peerName} muốn mở ${appLabel(appId)}")
+                            .setCancelable(false)
+                            .setNegativeButton("Từ chối") { _, _ -> answerShare(false) }
+                            .setPositiveButton("Đồng ý") { _, _ -> answerShare(true) }
+                            .show()
+                    }
+                },
+                dismiss = { activity.runOnUiThread { dialog?.dismiss() } }
+            )
+        } finally {
+            activity.runOnUiThread { dialog?.dismiss() }
+        }
+    }
+
+    private fun appLabel(appId: String): String = when (appId) {
+        "sketch-sync-app" -> "Vẽ"
+        SHARE_APP -> "Chia sẻ"
+        "caro" -> "Caro"
+        "whiteboard" -> "Bảng trắng"
+        else -> appId
+    }
+
+    private var heldDismiss: (() -> Unit)? = null
+
+    /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
+    private suspend fun awaitHeldDecision(rawMsg: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
         val decision = CompletableDeferred<Boolean>()
         heldCancelled = false
         heldDecision = decision
+        heldDismiss = dismiss
         try {
             activity.sipManager.sendReInviteRinging(rawMsg)
-            emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.remoteUser).toString())
+            ask()
             val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
             if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
             if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
             activity.sipManager.sendReInviteReject(rawMsg, 603, "Decline")
-            if (accepted == null) emitShareEvent("cancelled") // no answer: close the sheet
+            if (accepted == null) dismiss() // no answer: close the sheet / dialog
             return false
         } finally {
             heldDecision = null
+            heldDismiss = null
         }
     }
 
     /** SipManager saw CANCEL for the held Re-INVITE (487 already sent). Closes the sheet; the call goes on. */
     fun onHeldReInviteCancelled() {
         heldCancelled = true
+        val dismiss = heldDismiss
         heldDecision?.complete(false)
-        emitShareEvent("cancelled")
+        (dismiss ?: { emitShareEvent("cancelled") })()
     }
 
     /**

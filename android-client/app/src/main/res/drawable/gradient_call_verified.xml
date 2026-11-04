@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Certified (carrier-verified) caller: deep blue -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:startColor="#FF1E4FA8"
+        android:centerColor="#FF173F8A"
+        android:endColor="#FF0E2A63"
+        android:angle="270"
+        android:type="linear" />
+</shape>

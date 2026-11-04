@@ -149,7 +149,6 @@
     <div class="title" id="counter">1 / 1</div>
     <button class="icon" id="btnAdd" title="Thêm ảnh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <button class="icon" id="btnDownload" title="Tải về"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 19h14"/></svg></button>
-    <button class="icon" id="btnReset" title="Đặt lại thu phóng"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   </div>
   <div id="zoomtag" hidden></div>
   <div id="dots"></div>
@@ -199,6 +198,7 @@
  * Trong phiên (ADC stream 1000, JSON):
  *   offer{photos:[{id,bytes,thumb}]} · fetch{id} · begin{id,chunks,bytes}
  *   goto{id,seq} · done{id,ok} · skind{kind} · vstart{name,dur} · vpause{paused} · vtime{t}
+ * Ảnh: tối đa 6 trong phiên, vào trước ra trước (mỗi bên tự bỏ ảnh cũ nhất, cùng thứ tự).
  * Byte ảnh: PhotoShareTransport → window.receiveData("PSHARE:<idHash>:<b64>")
  * ═══════════════════════════════════════════════════════════════════ */
 const $ = id => document.getElementById(id);
@@ -305,6 +305,19 @@ window.shareEvent = function (name, arg) {
   }
 };
 
+/* ─────────────── Hàng đợi ảnh: tối đa 6, vào trước ra trước ─────────────── */
+const MAX_PHOTOS = 6;
+// Both phones add photos in the same order, so each trims its own list and they drop the same ones.
+function trimPhotos() {
+  while (state.order.length > MAX_PHOTOS) {
+    const id = state.order.shift(), p = state.photos[id];
+    if (p && p.url && !p.local) URL.revokeObjectURL(p.url);
+    delete state.photos[id];
+    if (fetching === id) fetching = null;
+    if (state.current === id) state.current = null;
+  }
+}
+
 /* ─────────────── Chọn ảnh (bên gửi) ─────────────── */
 function pickPhotos() {
   $('fileInput').click();
@@ -346,12 +359,13 @@ async function thumbB64Of(id) {
   } catch (e) { return ''; }
 }
 $('fileInput').onchange = async () => {
-  const files = Array.from($('fileInput').files || []);
+  let files = Array.from($('fileInput').files || []);
   state.picking = files.length > 0;
   $('fileInput').value = '';
   if (!files.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; } // đóng bộ chọn mà không chọn gì
   if (!B()) { toast('Không tìm thấy AndroidBridge'); return; }
-  toast('Đang xử lý ' + files.length + ' ảnh…');
+  if (files.length > MAX_PHOTOS) { files = files.slice(-MAX_PHOTOS); toast('Tối đa ' + MAX_PHOTOS + ' ảnh — chỉ gửi ' + MAX_PHOTOS + ' ảnh cuối'); }
+  else toast('Đang xử lý ' + files.length + ' ảnh…');
   const offered = [];
   for (let i = 0; i < files.length; i++) {
     const id = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + i;
@@ -366,6 +380,7 @@ $('fileInput').onchange = async () => {
     offered.push({ id, bytes: res.bytes, thumb: await thumbB64Of(id) });
   }
   if (!offered.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
+  trimPhotos();
   sendJson({ t: 'offer', photos: offered.map(o => ({ id: o.id, bytes: o.bytes, thumb: o.thumb })) });
   if ($('viewer').hidden) enterViewer();
   else toast('Đã gửi ' + offered.length + ' ảnh');
@@ -382,8 +397,13 @@ function onOffer(msg) {
     state.photos[ph.id] = { id: ph.id, mimeType: 'image/jpeg', bytes: ph.bytes, ready: false, thumbUrl: thumb };
     state.order.push(ph.id);
   });
-  if ($('viewer').hidden) { enterViewer(); gotoPhoto(msg.photos[0].id, false); }
-  else { renderViewer(); toast(peerLabel() + ' đã thêm ' + msg.photos.length + ' ảnh'); }
+  trimPhotos();
+  const first = (msg.photos || []).map(ph => ph.id).find(id => state.photos[id]);
+  if ($('viewer').hidden) { enterViewer(); if (first) gotoPhoto(first, false); }
+  else {
+    if (!state.current && first) gotoPhoto(first, false); else renderViewer();
+    toast(peerLabel() + ' đã thêm ' + msg.photos.length + ' ảnh');
+  }
   fetchNext();
 }
 let fetching = null;
@@ -461,7 +481,6 @@ function go(dir) {
   if (n >= 0 && n < state.order.length) gotoPhoto(state.order[n], true);
 }
 $('btnLeave').onclick = () => { call('stopShare'); endSession(); };
-$('btnReset').onclick = () => setZoom(1, 0, 0);
 $('btnDownload').onclick = async () => {
   const p = state.photos[state.current]; if (!p || !p.ready || !B() || !B().savePhotoB64) { toast('Không lưu được ảnh'); return; }
   try {

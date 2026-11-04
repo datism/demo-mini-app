@@ -157,6 +157,8 @@ class CallActivity : AppCompatActivity() {
     private lateinit var sipServer:  String
     private lateinit var localUser:  String
     lateinit var remoteUser: String
+    /** What is shown for the other person: the name saved in the app's phonebook, else the number. */
+    val peerName: String get() = CertifiedNumbers.of(remoteUser)?.name ?: Phonebook.label(this, remoteUser)
     private lateinit var localIp:    String
     private var localPort = 15060
     private var sipPort   = 5060
@@ -676,11 +678,12 @@ class CallActivity : AppCompatActivity() {
     // --- UI Setup ------------------------------------------------------------
 
     private fun setupUI() {
-        binding.tvRemoteUser.text = remoteUser
-        val initial = remoteUser.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        binding.tvRemoteUser.text = peerName
+        val initial = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         binding.tvTopAvatar.text = initial
         binding.tvBigAvatar.text = initial
-        binding.tvBigName.text = remoteUser
+        binding.tvBigName.text = peerName
+        CertifiedNumbers.of(remoteUser)?.let { showCertified(it) }
         startAvatarPulse()
 
         // Setup background placeholder & details defaults
@@ -938,7 +941,7 @@ class CallActivity : AppCompatActivity() {
                         }
                         404 -> {
                             stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ Không tìm thấy $remoteUser"
+                            binding.tvCallStatus.text = "❌ Không tìm thấy $peerName"
                             lifecycleScope.launch {
                                 delay(2000)
                                 resetAudio()
@@ -949,7 +952,7 @@ class CallActivity : AppCompatActivity() {
                         }
                         480 -> {
                             stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ $remoteUser không trực tuyến (Offline)"
+                            binding.tvCallStatus.text = "❌ $peerName không trực tuyến (Offline)"
                             lifecycleScope.launch {
                                 delay(2000)
                                 resetAudio()
@@ -1063,6 +1066,8 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
+        sipManager.onReInviteProvisional = { code, cseq -> miniAppManager.onReInviteProvisional(code, cseq) }
+
         sipManager.onReInviteFailed = { code, cseq ->
             lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteFailed(code, cseq) }
         }
@@ -1108,6 +1113,18 @@ class CallActivity : AppCompatActivity() {
                     val shareOpening = photoOpening || videoOpening
                     val shareClosing = photoClosing || videoClosing
                     if (shareOpening && !miniAppManager.awaitShareDecision(rawMsg, if (videoOpening) "video" else "photo")) {
+                        return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
+                    }
+                    // The other phone opens an app on the App line: our user decides first. The emote app (Home
+                    // line), closing an app and re-offers of the same app are answered without asking.
+                    val askedApp = when (val c = com.demo.imsdc.webrtc.diffAppSlot(sipManager.appReqApp, offeredApp)) {
+                        is com.demo.imsdc.webrtc.AppSlotChange.Open -> c.appId
+                        is com.demo.imsdc.webrtc.AppSlotChange.Replace -> c.appId
+                        else -> null
+                    }
+                    if (askedApp != null && !shareOpening && hotlineApp(remoteUser) == null &&
+                        askedApp != MiniAppManager.HOME_APP && !askedApp.contains("operator-menu") &&
+                        !miniAppManager.awaitAppDecision(rawMsg, askedApp)) {
                         return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
                     }
                     if (photoOpening) sipManager.shareStream = true // the answer carries the stream too
@@ -1708,7 +1725,7 @@ class CallActivity : AppCompatActivity() {
                 }
             }
         }
-        com.demo.imsdc.call.CallService.start(this, remoteUser)
+        com.demo.imsdc.call.CallService.start(this, peerName)
     }
 
     private fun endCall() {
@@ -1942,6 +1959,20 @@ class CallActivity : AppCompatActivity() {
     }
 
     // Soft ring that grows and fades behind the big avatar while the call is connecting.
+    /** Carrier-verified number: blue screen, brand icon with a green check, "Đã xác thực" badge. */
+    private fun showCertified(c: CertifiedNumbers.Certified) {
+        binding.viewBackgroundPlaceholder.setBackgroundResource(R.drawable.gradient_call_verified)
+        binding.tvBigAvatar.setBackgroundResource(R.drawable.bg_verified_avatar)
+        binding.tvBigAvatar.text = c.icon
+        binding.tvBigAvatar.textSize = 44f
+        binding.tvTopAvatar.text = c.icon
+        binding.tvVerifiedCheck.visibility = View.VISIBLE
+        binding.tvBigNumber.text = remoteUser
+        binding.tvBigNumber.visibility = View.VISIBLE
+        binding.tvVerifiedBadge.visibility = View.VISIBLE
+        binding.tvVerifiedBy.visibility = View.VISIBLE
+    }
+
     private fun startAvatarPulse() {
         val ring = binding.viewAvatarPulse
         val scaleX = android.animation.ObjectAnimator.ofFloat(ring, View.SCALE_X, 0.85f, 1.35f)
