@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" class="full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -518,6 +518,15 @@
     html.full .popover { bottom: calc(128px + var(--safe-bottom)); }
     html.full #chip { bottom: calc(64px + var(--safe-bottom)); }
 
+    /* Full viewport stage, just like the photo/video sharing viewer.
+       Fit the entire photo without stretching or cropping; unused space is black. */
+    html.photo-view, html.photo-view body, html.photo-view #board { background: #000; }
+    #pill { gap: 4px; padding-inline: 8px; }
+    #pill button.tool {
+      width: clamp(36px, 10vw, 44px);
+      height: clamp(36px, 10vw, 44px);
+      flex: 0 0 clamp(36px, 10vw, 44px);
+    }
     input[type=file] { display: none; }
   </style>
 </head>
@@ -661,13 +670,6 @@
     </svg>
   </button>
 
-  <button class="tool" id="btnSave" title="Lưu bảng vẽ vào Thư viện ảnh">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/>
-      <line x1="12" y1="15" x2="12" y2="3"/>
-    </svg>
-  </button>
 </div>
 
 <!-- Minimized Quick Chip -->
@@ -695,6 +697,7 @@
     penW: 4,
     mode: 'pen',                    // 'pen' | 'eraser'
     photo: null,                    // {id, url, img, ready}
+    remoteDrafts: new Map(),       // In-progress peer strokes, separate from undo history.
     strokes: [],                    // {id, mine, color, w, pts:[[x,y]..]}
     pendingPhoto: null,             // ảnh đang chờ fetch từ xa
     lastBackup: null,               // {kind:'strokes',strokes:[..]} | {kind:'photo',photo:{..}}
@@ -756,6 +759,9 @@
   /* ═══════════════ CANVAS & VẼ ═══════════════ */
   const board = $('board');
   const ctx = board.getContext('2d');
+  let stroking = null;
+  let strokeFlushTimer = null;
+  let sentPointCount = 0;
 
   let zoom = { k: 1, x: 0, y: 0 };
 
@@ -804,7 +810,8 @@
   function redraw() {
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.save();
-    ctx.fillStyle = '#ffffff';
+    document.documentElement.classList.toggle('photo-view', Boolean(state.photo));
+    ctx.fillStyle = state.photo ? '#000000' : '#ffffff';
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.restore();
     const r = viewRect();
@@ -813,10 +820,17 @@
     }
     const highlightId = state.eraserCursor ? state.eraserCursor.hitId : null;
     state.strokes.forEach(st => renderStroke(ctx, st, null, st.id === highlightId));
+    state.remoteDrafts.forEach(st => renderStroke(ctx, st));
+    if (stroking) renderStroke(ctx, stroking);
 
     // Vẽ tâm tẩy trực quan khi đang ở chế độ Eraser
     if (state.eraserCursor) {
       ctx.save();
+      if (r) {
+        ctx.beginPath();
+        ctx.rect(r.x, r.y, r.width, r.height);
+        ctx.clip();
+      }
       ctx.beginPath();
       ctx.arc(state.eraserCursor.x, state.eraserCursor.y, 18, 0, Math.PI * 2);
       ctx.fillStyle = state.eraserCursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(28, 28, 30, 0.10)';
@@ -831,6 +845,7 @@
   function renderStroke(c, st, extra, isHighlighted) {
     if (!st.pts || !st.pts.length) return;
     const r = viewRect();
+    if (state.photo && !r) return; // Wait for the image's real bounds.
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
     const scale = r ? zoom.k : 1;
@@ -838,6 +853,11 @@
     const X = p => fx + p[0] * fw, Y = p => fy + p[1] * fh;
 
     c.save();
+    if (r) {
+      c.beginPath();
+      c.rect(r.x, r.y, r.width, r.height);
+      c.clip(); // Includes pen caps, thick strokes, and strokes received from the peer.
+    }
     const lineW = (st.w || 4) * scale;
     c.strokeStyle = isHighlighted ? '#ff453a' : st.color;
     c.lineWidth = isHighlighted ? lineW + 3 : lineW;
@@ -874,17 +894,127 @@
     const r = viewRect();
     if (!r) return [cx / window.innerWidth, cy / window.innerHeight];
     return [
-      Math.min(1.2, Math.max(-0.2, (cx - r.x) / r.width)),
-      Math.min(1.2, Math.max(-0.2, (cy - r.y) / r.height))
+      Math.min(1, Math.max(0, (cx - r.x) / r.width)),
+      Math.min(1, Math.max(0, (cy - r.y) / r.height))
     ];
+  }
+
+  // Stream only newly collected points, at most every 33 ms (~30 updates/s).
+  // The final full stroke repairs any missed preview update and supports older peers.
+  function flushStrokePoints() {
+    clearTimeout(strokeFlushTimer);
+    strokeFlushTimer = null;
+    if (!stroking) return;
+    while (sentPointCount < stroking.pts.length) {
+      const from = sentPointCount;
+      const pts = stroking.pts.slice(from, from + 64);
+      sentPointCount += pts.length;
+      sendJson({ t: 'stroke.points', id: stroking.id, from, pts });
+    }
+  }
+
+  function scheduleStrokePoints() {
+    if (strokeFlushTimer === null) strokeFlushTimer = setTimeout(flushStrokePoints, 33);
+  }
+
+  function cancelLocalStroke(sync = true) {
+    clearTimeout(strokeFlushTimer);
+    strokeFlushTimer = null;
+    const draft = stroking;
+    stroking = null;
+    sentPointCount = 0;
+    if (draft && sync) sendJson({ t: 'stroke.cancel', id: draft.id });
+  }
+
+  function resetLiveStrokes(sync = false) {
+    cancelLocalStroke(sync);
+    state.remoteDrafts.clear();
+  }
+
+  function validStrokePoints(pts) {
+    return Array.isArray(pts) && pts.length > 0 && pts.every(p =>
+      Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+  }
+
+  function matchesPhoto(msg) {
+    return msg.photoId === undefined || msg.photoId === (state.photo ? state.photo.id : null);
+  }
+
+  function onStrokeStart(msg) {
+    if (!msg.id || !matchesPhoto(msg) || !validStrokePoints(msg.pts)) return;
+    if (state.strokes.some(s => s.id === msg.id) || state.remoteDrafts.has(msg.id)) return;
+    state.remoteDrafts.set(msg.id, { id: msg.id, mine: false, color: msg.color, w: msg.w, pts: msg.pts.slice() });
+    redraw();
+  }
+
+  function onStrokePoints(msg) {
+    const draft = state.remoteDrafts.get(msg.id);
+    if (!draft || !validStrokePoints(msg.pts) || !Number.isInteger(msg.from) || msg.from < 0) return;
+    // Ignore duplicate points and wait for the final stroke if a preview chunk is missing.
+    if (msg.from > draft.pts.length) return;
+    draft.pts.push(...msg.pts.slice(Math.max(0, draft.pts.length - msg.from)));
+    redraw();
+  }
+
+  function onStrokeComplete(msg) {
+    state.remoteDrafts.delete(msg.id);
+    if (!matchesPhoto(msg) || !validStrokePoints(msg.pts)) { redraw(); return; }
+    const stroke = { id: msg.id || newId(), mine: false, color: msg.color, w: msg.w, pts: msg.pts };
+    const index = state.strokes.findIndex(s => s.id === stroke.id);
+    if (index < 0) state.strokes.push(stroke);
+    else state.strokes[index] = stroke;
+    redraw();
+    updateToolbar();
+  }
+
+  function canDrawAt(x, y) {
+    if (!state.photo) return true;
+    const r = viewRect();
+    return Boolean(r && x >= r.x && x <= r.x + r.width &&
+      y >= r.y && y <= r.y + r.height);
+  }
+
+  // End the stroke exactly where the segment exits the photo, without drawing
+  // a line along the border or joining across an excursion outside the image.
+  function photoExitPoint(last, x, y) {
+    const r = viewRect();
+    if (!r) return last;
+    const end = [(x - r.x) / r.width, (y - r.y) / r.height];
+    const dx = end[0] - last[0], dy = end[1] - last[1];
+    let t = 1;
+    if (end[0] < 0) t = Math.min(t, -last[0] / dx);
+    if (end[0] > 1) t = Math.min(t, (1 - last[0]) / dx);
+    if (end[1] < 0) t = Math.min(t, -last[1] / dy);
+    if (end[1] > 1) t = Math.min(t, (1 - last[1]) / dy);
+    return [Math.max(0, Math.min(1, last[0] + t * dx)),
+      Math.max(0, Math.min(1, last[1] + t * dy))];
   }
 
   /* ═══════════════ CHẠM: 1 ngón vẽ/tẩy — 2 ngón zoom/pan — chạm đôi reset ═══════════════ */
   (function () {
-    let stroking = null;
     const pointers = new Map();
     let gesture = null;
     let lastTap = 0;
+
+    function commitStroke() {
+      if (!stroking) return;
+      // A remote/local photo replacement invalidates an unfinished stroke.
+      if (stroking.photoId !== (state.photo ? state.photo.id : null)) {
+        cancelLocalStroke(); redraw(); return;
+      }
+      flushStrokePoints();
+      const stroke = stroking;
+      stroking = null;
+      sentPointCount = 0;
+      if (stroke.pts.length) {
+        state.strokes.push(stroke);
+        sendJson({ t: 'stroke', id: stroke.id, photoId: stroke.photoId, color: stroke.color, w: stroke.w, pts: stroke.pts });
+        buzz(6);
+        collapsePill();
+        updateToolbar();
+        redraw();
+      }
+    }
 
     board.addEventListener('pointerdown', e => {
       e.preventDefault();
@@ -894,7 +1024,7 @@
 
       // 2 ngón: Chuyển sang thu phóng / kéo ảnh
       if (pointers.size === 2 && state.photo) {
-        stroking = null;
+        cancelLocalStroke();
         state.eraserCursor = null;
         const [a, b] = [...pointers.values()];
         gesture = {
@@ -916,6 +1046,7 @@
         return;
       }
       lastTap = now;
+      if (!canDrawAt(e.clientX, e.clientY)) return;
 
       if (state.mode === 'eraser') {
         const hit = hitStroke(e.clientX, e.clientY);
@@ -932,10 +1063,16 @@
       stroking = {
         id: newId(),
         mine: true,
+        photoId: state.photo ? state.photo.id : null,
+        pointerId: e.pointerId,
         color: state.color,
         w: state.penW,
         pts: [normPoint(e.clientX, e.clientY)]
       };
+      sentPointCount = 1;
+      redraw(); // Paint the first dot immediately, before sending anything.
+      sendJson({ t: 'stroke.start', id: stroking.id, photoId: stroking.photoId,
+        color: stroking.color, w: stroking.w, pts: stroking.pts.slice() });
     });
 
     board.addEventListener('pointermove', e => {
@@ -969,14 +1106,27 @@
         return;
       }
 
-      if (!stroking) return;
+      if (!stroking || stroking.pointerId !== e.pointerId) return;
+      if (stroking.photoId !== (state.photo ? state.photo.id : null)) {
+        cancelLocalStroke();
+        redraw();
+        return;
+      }
+      if (!canDrawAt(e.clientX, e.clientY)) {
+        if (viewRect()) stroking.pts.push(photoExitPoint(stroking.pts[stroking.pts.length - 1], e.clientX, e.clientY));
+        commitStroke();
+        return;
+      }
       const p = normPoint(e.clientX, e.clientY);
       const lastP = stroking.pts[stroking.pts.length - 1];
-      if (Math.hypot(p[0] - lastP[0], p[1] - lastP[1]) < 0.0035) return;
+      const r = viewRect();
+      const dx = (p[0] - lastP[0]) * (r ? r.width : window.innerWidth);
+      const dy = (p[1] - lastP[1]) * (r ? r.height : window.innerHeight);
+      if (Math.hypot(dx, dy) < 0.75) return;
       if (stroking.pts.length === 2) collapsePill(); // Ẩn pill ngay khi bắt đầu kéo nét thực sự
       stroking.pts.push(p);
       redraw();
-      renderStroke(ctx, stroking);
+      scheduleStrokePoints();
     });
 
     function finish(e) {
@@ -992,16 +1142,10 @@
         }
         return;
       }
-      if (!stroking) return;
-      if (stroking.pts.length) {
-        state.strokes.push(stroking);
-        sendJson({ t: 'stroke', id: stroking.id, color: stroking.color, w: stroking.w, pts: stroking.pts });
-        buzz(6);
-        collapsePill();
-        updateToolbar();
-        redraw();
+      if (stroking && stroking.pointerId === e.pointerId) {
+        if (e.type === 'pointercancel') { cancelLocalStroke(); redraw(); }
+        else commitStroke();
       }
-      stroking = null;
     }
     board.addEventListener('pointerup', finish);
     board.addEventListener('pointercancel', finish);
@@ -1018,6 +1162,7 @@
   }
 
   function hitStroke(cx, cy) {
+    if (!canDrawAt(cx, cy)) return null;
     const r = viewRect();
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
@@ -1174,6 +1319,7 @@
 
   function doClear() {
     if (!state.strokes.length) { toast('Không còn nét để xóa'); return; }
+    resetLiveStrokes(true);
     const backup = state.strokes.map(s => ({ ...s }));
     state.lastBackup = { kind: 'strokes', strokes: backup };
     state.strokes = [];
@@ -1187,6 +1333,7 @@
   function doPhotoClear() {
     clearArmed = true;
     if (!state.photo) { toast('Chưa có ảnh nền để gỡ'); return; }
+    resetLiveStrokes(true);
     state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
     state.photo = null;
     state.pendingPhoto = null;
@@ -1295,6 +1442,7 @@
   }
 
   function setPhotoState(p) {
+    if ((state.photo ? state.photo.id : null) !== (p ? p.id : null)) resetLiveStrokes(true);
     if (!p) {
       state.photo = null;
       zoom = { k: 1, x: 0, y: 0 };
@@ -1308,6 +1456,7 @@
       URL.revokeObjectURL(state.photo.url);
     }
     state.photo = p;
+    setBoardFullScreen(true);
     if (!p.img) {
       p.img = new Image();
       p.img.onload = () => redraw();
@@ -1372,32 +1521,6 @@
     if (live) sendJson({ t: 'ping' });
   }, 1500);
 
-  /* ═══════════════ LƯU BẢNG VẼ (photo + nét composite) ═══════════════ */
-  $('btnSave').onclick = () => {
-    closePopovers();
-    const w = window.innerWidth, h = window.innerHeight;
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    const c = document.createElement('canvas');
-    c.width = Math.round(w * dpr);
-    c.height = Math.round(h * dpr);
-    const oc = c.getContext('2d');
-    oc.setTransform(dpr, 0, 0, dpr, 0, 0);
-    oc.fillStyle = '#ffffff';
-    oc.fillRect(0, 0, w, h);
-    const r = viewRect();
-    if (r && state.photo && state.photo.img) oc.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
-    state.strokes.forEach(st => renderStroke(oc, st));
-
-    const dataUrl = c.toDataURL('image/jpeg', 0.92);
-    if (window.AndroidBridge && typeof window.AndroidBridge.saveCanvasToGallery === 'function') {
-      const res = JSON.parse(window.AndroidBridge.saveCanvasToGallery(JSON.stringify({ data: dataUrl.split(',')[1] })) || '{}');
-      toast(res.ok ? 'Đã lưu vào Thư viện ảnh' : 'Lỗi lưu: ' + (res.error || '?'));
-      buzz(10);
-    } else {
-      toast('Thiết bị chưa hỗ trợ lưu ảnh');
-    }
-  };
-
   /* ═══════════════ ĐIỂM VÀO DUY NHẤT: nhận message ═══════════════ */
   window.receiveData = function (dataStr) {
     state.peerActiveAt = Date.now();
@@ -1415,6 +1538,7 @@
         return;
       }
       if (msg.type === 'clear') {
+        resetLiveStrokes();
         state.photo = null; state.pendingPhoto = null; state.lastBackup = null;
         state.strokes = []; zoom = { k: 1, x: 0, y: 0 };
         updateZoomUI(); redraw(); updateToolbar();
@@ -1431,16 +1555,20 @@
           if (msg.ok) toast('Đã đồng bộ xong ảnh nền');
           break;
 
-        case 'stroke':
-          state.strokes.push({ id: msg.id || newId(), mine: false, color: msg.color, w: msg.w, pts: msg.pts });
-          redraw(); updateToolbar();
+        case 'stroke.start': onStrokeStart(msg); break;
+        case 'stroke.points': onStrokePoints(msg); break;
+        case 'stroke.cancel':
+          state.remoteDrafts.delete(msg.id);
+          redraw();
           break;
+        case 'stroke': onStrokeComplete(msg); break;
         case 'erase': removeStroke(msg.id, false); break;
 
         case 'ping': sendJson({ t: 'pong' }); break;
         case 'pong': break;
 
         case 'clear':
+          resetLiveStrokes();
           if (msg.backup === null) {
             if (state.lastBackup && state.lastBackup.kind === 'strokes') {
               state.strokes = state.lastBackup.strokes.map(s => ({ ...s }));
@@ -1459,6 +1587,7 @@
           break;
 
         case 'photo.clear':
+          resetLiveStrokes();
           if (msg.backup === null) {
             if (state.lastBackup && state.lastBackup.kind === 'photo') {
               restorePhoto(state.lastBackup.photo);
@@ -1515,9 +1644,22 @@
     }
   });
 
+  let boardActive = true;
+  function resumeBoard() {
+    if (!boardActive) return;
+    setBoardFullScreen(true);
+    sizeBoard();
+  }
+  window.addEventListener('focus', resumeBoard);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) resumeBoard();
+  });
   window.addEventListener('resize', sizeBoard);
 
   window.cleanUpImsDcObjects = function () {
+    boardActive = false;
+    resetLiveStrokes();
+    clearTimeout(pillIdle);
     setBoardFullScreen(false);
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:')) URL.revokeObjectURL(state.photo.url);
     state.photo = null; state.pendingPhoto = null; state.strokes = []; state.lastBackup = null;
