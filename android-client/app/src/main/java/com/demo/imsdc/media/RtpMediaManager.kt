@@ -547,8 +547,8 @@ class RtpMediaManager(
                             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                             .build()
                     )
-                    // Room for 500 ms so write() never blocks below the 200 ms cap applied in the loop.
-                    .setBufferSizeInBytes(Math.max(minBufSize, 8000))
+                    // Headroom for Wi-Fi jitter bursts (non-blocking writes drop what does not fit).
+                    .setBufferSizeInBytes(Math.max(minBufSize * 2, 1600))
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
                 audioTrack?.play()
@@ -562,10 +562,10 @@ class RtpMediaManager(
             val packetBuf = ByteArray(2048)
             val pcmOutput = ShortArray(2048)
             // The two phones' audio clocks differ slightly. When the far end records faster than this
-            // phone plays, the surplus used to queue up (blocking write, then the socket buffer) and the
-            // voice fell further behind the video the longer the call ran. Cap what waits to be played.
-            val maxQueuedFrames = 8000 * 200 / 1000
-            var framesWritten = 0L
+            // phone plays, a blocking write() let the surplus queue up in the socket buffer and the voice
+            // fell further behind the longer the call ran. Write without blocking: once the track's buffer
+            // is full the rest of the packet is dropped, so the delay stays bounded by that buffer.
+            // (Don't cap below the buffer size instead: a stream track only starts once its buffer is full.)
             var lateDropped = 0
 
             while (isRunning && socket != null && !socket.isClosed) {
@@ -598,15 +598,12 @@ class RtpMediaManager(
 
                     val track = audioTrack
                     if (track != null) {
-                        val queued = framesWritten - (track.playbackHeadPosition.toLong() and 0xFFFFFFFFL)
-                        if (queued > maxQueuedFrames) {
+                        val w = track.write(pcmOutput, 0, decodeSamples, AudioTrack.WRITE_NON_BLOCKING)
+                        if (w in 0 until decodeSamples) {
                             lateDropped++
                             if (lateDropped == 1 || lateDropped % 50 == 0) {
-                                Log.w(TAG, "Audio playout ${queued * 1000 / 8000} ms behind, dropped $lateDropped late packets")
+                                Log.w(TAG, "Audio playout buffer full, dropped late audio $lateDropped times")
                             }
-                        } else {
-                            val w = track.write(pcmOutput, 0, decodeSamples)
-                            if (w > 0) framesWritten += w
                         }
                     }
                     audioPacketsReceived++
