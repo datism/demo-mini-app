@@ -62,12 +62,12 @@ func main() {
 			case appId == "tic-tac-toe-app":
 				log.Printf("[DCAR] Serving caro package for AppID alias: %s", appId)
 				zipBytes, err = repo.DownloadZipPackage("caro")
-			case appId == "0003210000000038" || strings.EqualFold(appId, "tuyaapp") || strings.EqualFold(appId, "sketch-sync-app"):
+			case appId == "0003210000000038" || strings.EqualFold(appId, "tuyaapp"):
 				log.Printf("[DCAR] Serving official GSMA TuYaApp_1.0.9.zip for AppID: %s", appId)
 				zipBytes, err = os.ReadFile("./static/assets/TuYaApp_1.0.9.zip")
 				if err != nil {
 					log.Printf("[DCAR] Failed to read ./static/assets/TuYaApp_1.0.9.zip: %v, falling back to repo package", err)
-					zipBytes, err = repo.DownloadZipPackage("sketch-sync-app")
+					zipBytes, err = repo.DownloadZipPackage("tuyaapp")
 				}
 			case appId == "0003210000000001" || strings.EqualFold(appId, "operator-menu"):
 				log.Printf("[DCAR] Serving zip package for Operator Menu AppID: %s", appId)
@@ -121,7 +121,7 @@ func main() {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(meta)
 				return
-			case appId == "0003210000000038" || strings.EqualFold(appId, "tuyaapp") || strings.EqualFold(appId, "sketch-sync-app"):
+			case appId == "0003210000000038" || strings.EqualFold(appId, "tuyaapp"):
 				meta := map[string]interface{}{
 					"appId": appId, "appName": "TuYaApp", "version": "1.0.9",
 					"connectionPolicy": "P2P",

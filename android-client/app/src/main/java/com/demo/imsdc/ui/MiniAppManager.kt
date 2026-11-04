@@ -651,7 +651,7 @@ class MiniAppManager(val activity: CallActivity) {
             }
 
             if (targetId == "sketch-sync-app") {
-                activity.binding.tvCallStatus.text = "🎨 Bảng vẽ TuYaApp (GSMA Standard)"
+                activity.binding.tvCallStatus.text = "🎨 Bảng vẽ (Vẽ & ảnh)"
             } else if (targetId == CallActivity.HOME_APP) {
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
             } else if (targetId == "smart-menu") {

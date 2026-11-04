@@ -1,7 +1,7 @@
 {
   "appId": "sketch-sync-app",
-  "appName": "TuYaApp",
-  "version": "1.0.9",
+  "appName": "Bảng vẽ",
+  "version": "2.1.0",
   "qosHint": {
     "latencyMs": 50,
     "packetLossRate": 0.01
