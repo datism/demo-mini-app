@@ -42,6 +42,36 @@ object IncomingCallNotificationManager {
     private var isRinging = false
     private var declineReceiver: BroadcastReceiver? = null
     private var pendingInviteRaw: String? = null
+    /** The ringing call's notification, built but posted only while the app is in the background. */
+    private var pendingNotification: android.app.Notification? = null
+
+    /** A screen of this app is visible (not the home screen, another app, or the screen off / locked). */
+    private fun appInForeground(): Boolean {
+        val info = android.app.ActivityManager.RunningAppProcessInfo()
+        android.app.ActivityManager.getMyMemoryState(info)
+        return info.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+
+    /** The call screen went away while ringing (Home, another app): show the call as a notification. */
+    @Synchronized
+    fun onCallScreenHidden(context: Context) {
+        val n = pendingNotification ?: return
+        try {
+            (context.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, n)
+            Log.i(TAG, "Call screen hidden while ringing: incoming-call notification posted")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to post notification: ${e.message}")
+        }
+    }
+
+    /** The call screen is back while ringing: it shows the call, so the notification goes (the ringtone stays). */
+    @Synchronized
+    fun onCallScreenShown(context: Context) {
+        if (pendingNotification == null) return
+        try {
+            (context.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
+        } catch (_: Exception) {}
+    }
 
     /**
      * Khởi tạo NotificationChannel cho cuộc gọi đến
@@ -191,9 +221,15 @@ object IncomingCallNotificationManager {
             .addAction(R.drawable.ic_phone_decline, "Từ chối", declinePendingIntent)
             .build()
 
-        val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, notification)
-        Log.i(TAG, "✅ Full-Screen Notification posted for incoming call")
+        pendingNotification = notification
+        // The app on screen opens the call screen itself (below): no heads-up over it.
+        if (appInForeground()) {
+            Log.i(TAG, "App in the foreground: incoming call shown in the app, no notification")
+        } else {
+            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, notification)
+            Log.i(TAG, "✅ Full-Screen Notification posted for incoming call")
+        }
 
         // 7. Thử khởi chạy trực tiếp Activity nếu hệ điều hành cho phép
         try {
@@ -233,6 +269,7 @@ object IncomingCallNotificationManager {
         lastAnswerPendingIntent = null
 
         pendingInviteRaw = null
+        pendingNotification = null
     }
 
     private fun acquireWakeLock(context: Context) {

@@ -92,6 +92,8 @@ class CallActivity : AppCompatActivity() {
         const val EXTRA_AUTO_ANSWER      = "auto_answer"
         /** Tap on the ongoing-call notification: just bring the call back, change nothing. */
         const val EXTRA_FROM_ONGOING     = "from_ongoing"
+        /** From a request notification: true = "Đồng ý" (accept what the other phone asked). */
+        const val EXTRA_REQUEST_ANSWER   = "request_answer"
 
         fun launch(
             activity: androidx.appcompat.app.AppCompatActivity,
@@ -465,6 +467,7 @@ class CallActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         if (intent == null) return
+        if (intent.getBooleanExtra(EXTRA_REQUEST_ANSWER, false)) miniAppManager.answerShare(true) // nothing pending: ignored
         if (intent.getBooleanExtra(EXTRA_FROM_ONGOING, false)) return
         configureWindowAndLockScreen()
         setIntent(intent)
@@ -810,6 +813,9 @@ class CallActivity : AppCompatActivity() {
         // A tap (not a drag) on my camera tile folds it into a camera button; tapping the button opens it again.
         binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
         binding.btnCameraRestore.setOnClickListener { miniAppManager.onCameraButtonTapped() }
+        // Vẽ / Chia sẻ: the other person's tile folds the same way.
+        binding.viewRemoteTileTouch.setOnClickListener { miniAppManager.onRemoteTileTapped() }
+        binding.btnRemoteRestore.setOnClickListener { miniAppManager.onRemoteButtonTapped() }
         // Full screen: the call pill shows (or hides) the call buttons.
         binding.layoutCallPill.setOnClickListener { miniAppManager.toggleCallControls() }
 
@@ -1410,6 +1416,7 @@ class CallActivity : AppCompatActivity() {
                     val enableVideo = (hotlineApp(remoteUser) == null)
                     isVideoEnabled = enableVideo
                     webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                    startOngoingCallService()
                 }
 
                 // 2. T?o placeholder DC d? SDP c m=application
@@ -1540,6 +1547,7 @@ class CallActivity : AppCompatActivity() {
                         val enableVideo = (hotlineApp(remoteUser) == null)
                         isVideoEnabled = enableVideo
                         webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                        startOngoingCallService()
                     }
                     val localOffer = webRtcManager.createOffer()
 
@@ -1588,6 +1596,7 @@ class CallActivity : AppCompatActivity() {
                         val enableVideo = (hotlineApp(remoteUser) == null)
                         isVideoEnabled = enableVideo
                         webRtcManager.startLocalCapture(binding.localVideoView, enableVideo)
+                        startOngoingCallService()
                     }
 
                     Log.i(TAG, "B: Creating SDP Answer...")
@@ -1715,8 +1724,17 @@ class CallActivity : AppCompatActivity() {
 
     // --- End Call ------------------------------------------------------------
 
-    /** Keeps the call (mic, network) alive while the user is on the home screen or in another app. */
+    /** The call service was started for this call (it must start while the app is in the foreground). */
+    private var callServiceStarted = false
+
+    /**
+     * Keeps the call (mic, camera, network) alive while the user is on the home screen or in another app.
+     * Started as soon as the call is placed or answered, while the app is on screen: Android refuses a mic or
+     * camera service started from the background (e.g. a call that connects after the caller pressed Home).
+     */
     private fun startOngoingCallService() {
+        if (callServiceStarted) return
+        callServiceStarted = true
         if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(
                 this, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             // Without it the service still runs; the notification is just not shown.
@@ -1727,10 +1745,11 @@ class CallActivity : AppCompatActivity() {
                 when (action) {
                     com.demo.imsdc.call.CallService.ACTION_END -> endCall()
                     com.demo.imsdc.call.CallService.ACTION_STOP_SHARE -> miniAppManager.stopScreenFromNotification()
+                    com.demo.imsdc.call.CallService.ACTION_DECLINE_REQUEST -> miniAppManager.answerShare(false)
                 }
             }
         }
-        com.demo.imsdc.call.CallService.start(this, peerName)
+        com.demo.imsdc.call.CallService.start(this, peerName, camera = isVideoEnabled)
     }
 
     private fun endCall() {
@@ -1738,6 +1757,7 @@ class CallActivity : AppCompatActivity() {
         isEndingCall = true
         agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
+        callServiceStarted = false
         sipManager.markCallEnding()
         Log.i(TAG, "Ending call...")
         IncomingCallNotificationManager.dismiss(this)
@@ -1764,9 +1784,15 @@ class CallActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         activeInstance = this
+        // Back on screen: the call screen shows the ringing call or the pending request itself.
+        IncomingCallNotificationManager.onCallScreenShown(this)
+        if (::miniAppManager.isInitialized) miniAppManager.onCallScreenShown()
         if (isVideoEnabled && isCallActiveUiShown) {
-            Log.i(TAG, "onStart: resuming camera capture (app returning to foreground)")
-            webRtcManager.resumeLocalCapture()
+            if (cameraPausedInBackground) {
+                Log.i(TAG, "onStart: resuming camera capture (app returning to foreground)")
+                webRtcManager.resumeLocalCapture()
+                cameraPausedInBackground = false
+            }
             rtpMediaManager?.updateLocalVideoTrack(webRtcManager.localVideoTrack)
             val surface = binding.remoteVideoView.holder.surface
             if (surface != null && surface.isValid) {
@@ -1775,11 +1801,25 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    /** onStop paused my camera (no camera-type call service); onStart resumes it. */
+    private var cameraPausedInBackground = false
+
     override fun onStop() {
         super.onStop()
+        if (!isChangingConfigurations) {
+            // Hidden (Home, another app, screen off): the ringing call and a pending request ask by notification.
+            IncomingCallNotificationManager.onCallScreenHidden(this)
+            if (::miniAppManager.isInitialized) miniAppManager.onCallScreenHidden()
+        }
         if (isVideoEnabled && isCallActiveUiShown) {
-            Log.i(TAG, "onStop: pausing camera capture (app going to background)")
-            webRtcManager.pauseLocalCapture()
+            if (com.demo.imsdc.call.CallService.cameraInBackground) {
+                // The call service holds the camera type: keep sending my video (the preview just isn't drawn).
+                Log.i(TAG, "onStop: camera keeps running in the background")
+            } else {
+                Log.i(TAG, "onStop: pausing camera capture (app going to background)")
+                webRtcManager.pauseLocalCapture()
+                cameraPausedInBackground = true
+            }
         }
     }
 

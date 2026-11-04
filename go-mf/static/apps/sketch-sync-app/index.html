@@ -1327,10 +1327,10 @@
     } catch (e) { toast('Lỗi khi gửi ảnh sang Android: ' + (e && e.message || e)); return; }
     if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); return; }
 
-    if (state.strokes.length) toast('Nét cũ đã khớp theo khung ảnh mới');
+    if (state.strokes.length) toast('Bảng đã làm mới cho ảnh mới');
 
     const url = window.AndroidBridge ? window.AndroidBridge.mediaUrl(id, false) : '';
-    setPhotoState({ id: id, ready: true, url: url, img: null });
+    setPhotoState({ id: id, ready: true, url: url, img: null }, { fresh: true });
     showProgress('Đang đồng bộ ảnh');
     const thumb = await thumbB64Of(id);
     sendJson({ t: 'photo', id: id, bytes: res.bytes, thumb: thumb });
@@ -1350,7 +1350,14 @@
     } catch (e) { return ''; }
   }
 
-  function setPhotoState(p) {
+  // opts.fresh: a new image was picked here or arrived from the other phone; both phones wipe the
+  // board for it (no undo back into the old picture's drawing). Undo of "Xóa ảnh nền" keeps strokes.
+  function setPhotoState(p, opts) {
+    if (opts && opts.fresh && p && (state.photo ? state.photo.id : null) !== p.id) {
+      resetLiveStrokes();
+      state.strokes = [];
+      state.lastBackup = null;
+    }
     if ((state.photo ? state.photo.id : null) !== (p ? p.id : null)) resetLiveStrokes(true);
     if (!p) {
       state.photo = null;
@@ -1384,8 +1391,8 @@
     let thumbUrl = '';
     if (msg.thumb) thumbUrl = msg.thumb.startsWith('data:') ? msg.thumb : 'data:image/jpeg;base64,' + msg.thumb;
     state.pendingPhoto = { id: msg.id, bytes: msg.bytes };
-    setPhotoState({ id: msg.id, ready: false, url: thumbUrl, img: null });
-    toast('Đối phương chèn ảnh nền...');
+    setPhotoState({ id: msg.id, ready: false, url: thumbUrl, img: null }, { fresh: true });
+    toast('Đối phương chèn ảnh nền mới · bảng đã làm mới');
     showProgress('Đang tải ảnh HD');
     sendJson({ t: 'fetch', id: msg.id });
   }

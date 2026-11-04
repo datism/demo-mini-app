@@ -362,6 +362,7 @@ class MiniAppManager(val activity: CallActivity) {
         b.webviewMiniapp.layoutParams = lp
         b.layoutTopBar.visibility = if (full || fullScreen) View.INVISIBLE else View.VISIBLE
         applyFullScreenChrome(appId, fullScreen)
+        applyRemoteFold()
     }
 
     private val TILE_GAP_DP = 6
@@ -376,6 +377,10 @@ class MiniAppManager(val activity: CallActivity) {
     private val FULLSCREEN_SELF_TOP_DP = 12
     /** How long the call buttons stay up after a tap in full screen. */
     private val CALL_CONTROLS_SHOW_MS = 3500L
+    /** Gap between my camera and the other person's tile (Vẽ, Chia sẻ). */
+    private val REMOTE_TILE_GAP_DP = 8
+    /** A SurfaceView hidden this long gets a new surface, so its new layer applies. */
+    private val SURFACE_RECREATE_MS = 80L
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
@@ -431,6 +436,7 @@ class MiniAppManager(val activity: CallActivity) {
                 remoteLp.topMargin = if (fullScreen) topMargin else b.layoutTopBar.bottom + dp(TILE_GAP_DP)
                 remote.layoutParams = remoteLp
             }
+            setRemoteOverlay(false)
             if (fullScreen || b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
         } else {
             localLp.width = dp(90)
@@ -438,6 +444,9 @@ class MiniAppManager(val activity: CallActivity) {
             localLp.setMargins(dp(16), if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16), dp(16), dp(16))
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
+            // Vẽ / Chia sẻ: the other person is a small tile under my camera (applyRemoteFold places it).
+            if (remoteTileApp(activity.currentAppId)) return
+            setRemoteOverlay(false)
 
             remoteLp.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
             remoteLp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
@@ -513,12 +522,103 @@ class MiniAppManager(val activity: CallActivity) {
         val appId = activity.currentAppId
         if (!cameraWanted(appId) || b.webviewMiniapp.visibility != View.VISIBLE) {
             b.btnCameraRestore.visibility = View.GONE
+            applyRemoteFold()
             return
         }
         val folded = cameraFolded && appId != "caro"
         b.localVideoView.visibility = if (folded) View.GONE else View.VISIBLE
         b.btnCameraRestore.visibility = if (folded) View.VISIBLE else View.GONE
         if (folded) b.btnCameraRestore.bringToFront() else b.localVideoView.bringToFront()
+        applyRemoteFold() // its tile sits under my camera (or under the folded button)
+    }
+
+    // ───────────────────────── The other person's tile (Vẽ, Chia sẻ) ─────────────────────────
+    // These pages cover the call video, so the other person shows as a small tile under my camera. A tap
+    // folds it into a round button with their initial; a tap on the button opens it again. Like my camera,
+    // the choice is kept for the rest of the call.
+
+    private fun remoteTileApp(appId: String) = appId == "sketch-sync-app" || appId == SHARE_APP
+
+    private var remoteFolded = false
+    /** The remote SurfaceView is a media overlay (drawn over the page) rather than the call background. */
+    private var remoteOverlay = false
+    /** applyRemoteFold hid the remote video (folded tile); given back when another page shows. */
+    private var remoteHiddenByFold = false
+
+    fun onRemoteTileTapped() { remoteFolded = true; applyRemoteFold() }
+    fun onRemoteButtonTapped() { remoteFolded = false; applyRemoteFold() }
+
+    /**
+     * Moves the remote video between the call background and a media overlay over the page. The layer of a
+     * SurfaceView only changes with a new surface, so it is hidden for a few frames (CallActivity's surface
+     * callbacks re-attach the decoder), then [after] sets its visibility again. True when it changed.
+     */
+    private fun setRemoteOverlay(on: Boolean, after: (() -> Unit)? = null): Boolean {
+        if (remoteOverlay == on) return false
+        remoteOverlay = on
+        val remote = activity.binding.remoteVideoView
+        val wasVisible = remote.visibility == View.VISIBLE
+        remote.visibility = View.GONE
+        remote.setZOrderMediaOverlay(on)
+        remote.postDelayed({
+            if (after != null) after()
+            else if (wasVisible && contentSurface == null) remote.visibility = View.VISIBLE
+        }, SURFACE_RECREATE_MS)
+        return true
+    }
+
+    /** Shows the other person as a tile or a folded button in Vẽ / Chia sẻ; hides both elsewhere. */
+    private fun applyRemoteFold() {
+        val b = activity.binding
+        val remote = b.remoteVideoView
+        val appId = activity.currentAppId
+        val show = remoteTileApp(appId) && cameraWanted(appId) && contentSurface == null &&
+            b.webviewMiniapp.visibility == View.VISIBLE
+        if (!show) {
+            b.viewRemoteTileTouch.visibility = View.GONE
+            b.btnRemoteRestore.visibility = View.GONE
+            if (remoteHiddenByFold && contentSurface == null) remote.visibility = View.VISIBLE
+            remoteHiddenByFold = false
+            return
+        }
+        val fullScreen = isFullScreen(appId)
+        val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+        val parent = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+        // Under my camera: the tile (or its folded button) at the top left, then a small gap.
+        val selfTop = if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16)
+        val top = selfTop + (if (cameraFolded) dp(44) else dp(125)) + dp(REMOTE_TILE_GAP_DP)
+        for (v in listOf(b.viewRemoteTileTouch, b.btnRemoteRestore)) {
+            val lp = v.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+            lp.topToBottom = if (fullScreen) unset else b.layoutTopBar.id
+            lp.topToTop = if (fullScreen) parent else unset
+            lp.startToStart = parent
+            lp.setMargins(dp(16), top, 0, 0)
+            v.layoutParams = lp
+        }
+        // The video itself lives in the full-screen layer under the call UI: place it by margins.
+        fun placeRemote() {
+            val lp = remote.layoutParams as android.widget.FrameLayout.LayoutParams
+            lp.width = dp(90)
+            lp.height = dp(125)
+            lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            lp.leftMargin = dp(16)
+            lp.topMargin = (if (fullScreen) 0 else b.layoutTopBar.bottom) + top
+            remote.layoutParams = lp
+        }
+        if (fullScreen || b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
+
+        val name = activity.peerName
+        b.btnRemoteRestore.text = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        b.btnRemoteRestore.contentDescription = "Hiện video của $name"
+        fun showState() {
+            if (!remoteTileApp(activity.currentAppId) || contentSurface != null) return
+            remote.visibility = if (remoteFolded) View.GONE else View.VISIBLE
+            remoteHiddenByFold = remoteFolded
+            b.viewRemoteTileTouch.visibility = if (remoteFolded) View.GONE else View.VISIBLE
+            b.btnRemoteRestore.visibility = if (remoteFolded) View.VISIBLE else View.GONE
+            if (remoteFolded) b.btnRemoteRestore.bringToFront() else b.viewRemoteTileTouch.bringToFront()
+        }
+        if (!setRemoteOverlay(true) { showState() }) showState()
     }
 
     private fun applyFullScreenChrome(appId: String, on: Boolean) {
@@ -1247,6 +1347,7 @@ class MiniAppManager(val activity: CallActivity) {
      */
     suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
         rawMsg,
+        notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
         ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
         dismiss = { emitShareEvent("cancelled") }
     )
@@ -1256,26 +1357,69 @@ class MiniAppManager(val activity: CallActivity) {
      * app's page is not loaded yet. Same 180 / 200 / 603 / CANCEL flow as a share request.
      */
     suspend fun awaitAppDecision(rawMsg: String, appId: String): Boolean {
-        var dialog: androidx.appcompat.app.AlertDialog? = null
+        var dialog: android.app.Dialog? = null
         return try {
             awaitHeldDecision(
                 rawMsg,
-                ask = {
-                    activity.runOnUiThread {
-                        dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
-                            .setTitle("Mở ứng dụng")
-                            .setMessage("${activity.peerName} muốn mở ${appLabel(appId)}")
-                            .setCancelable(false)
-                            .setNegativeButton("Từ chối") { _, _ -> answerShare(false) }
-                            .setPositiveButton("Đồng ý") { _, _ -> answerShare(true) }
-                            .show()
-                    }
-                },
+                notice = "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" "),
+                ask = { activity.runOnUiThread { dialog = showAppRequestSheet(appId) } },
                 dismiss = { activity.runOnUiThread { dialog?.dismiss() } }
             )
         } finally {
             activity.runOnUiThread { dialog?.dismiss() }
         }
+    }
+
+    /** Dark bottom sheet in the call screen's style; the buttons answer [answerShare]. Caller is on the UI thread. */
+    private fun showAppRequestSheet(appId: String): android.app.Dialog {
+        val sheet = android.app.Dialog(activity)
+        sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        sheet.setContentView(R.layout.sheet_app_request)
+        sheet.setCancelable(false)
+        sheet.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.BOTTOM)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.45f)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+        }
+        val root = sheet.findViewById<View>(R.id.sheet_root)
+        root.setOnApplyWindowInsetsListener { v, insets ->
+            @Suppress("DEPRECATION") val nav = insets.systemWindowInsetBottom
+            val base = (20 * activity.resources.displayMetrics.density).toInt()
+            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, base + nav)
+            insets
+        }
+        val name = activity.peerName
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_avatar).text =
+            name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_name).text = name
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_app).text =
+            "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" ")
+        val note = sheet.findViewById<android.widget.TextView>(R.id.tv_req_note)
+        var left = (SHARE_DECISION_TIMEOUT_MS / 1000).toInt()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                note.text = "Đang trong cuộc gọi · ${left}s"
+                if (left-- > 0) handler.postDelayed(this, 1000)
+            }
+        }
+        tick.run()
+        sheet.setOnDismissListener { handler.removeCallbacks(tick) }
+        sheet.findViewById<View>(R.id.btn_req_decline).setOnClickListener { answerShare(false); sheet.dismiss() }
+        sheet.findViewById<View>(R.id.btn_req_accept).setOnClickListener { answerShare(true); sheet.dismiss() }
+        sheet.show()
+        return sheet
+    }
+
+    /** Same emoji as the operator menu tray. */
+    private fun appEmoji(appId: String): String? = when (appId) {
+        "sketch-sync-app" -> "🎨"
+        SHARE_APP -> "📲"
+        "caro" -> "♟️"
+        else -> null
     }
 
     private fun appLabel(appId: String): String = when (appId) {
@@ -1289,14 +1433,19 @@ class MiniAppManager(val activity: CallActivity) {
     private var heldDismiss: (() -> Unit)? = null
 
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
-    private suspend fun awaitHeldDecision(rawMsg: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
+    private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
         val decision = CompletableDeferred<Boolean>()
         heldCancelled = false
         heldDecision = decision
         heldDismiss = dismiss
+        heldNotice = notice
         try {
             activity.sipManager.sendReInviteRinging(rawMsg)
             ask()
+            // The sheet is on the call screen: if the user is elsewhere, a notification asks instead.
+            activity.runOnUiThread {
+                if (!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) onCallScreenHidden()
+            }
             val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
             if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
             if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
@@ -1306,7 +1455,23 @@ class MiniAppManager(val activity: CallActivity) {
         } finally {
             heldDecision = null
             heldDismiss = null
+            heldNotice = null
+            com.demo.imsdc.notification.CallRequestNotification.cancel(activity)
         }
+    }
+
+    /** Text of the request being decided ("muốn mở 🎨 Vẽ"), null when none is. */
+    @Volatile private var heldNotice: String? = null
+
+    /** Call screen hidden (Home, another app): a pending request asks through a notification. */
+    fun onCallScreenHidden() {
+        val notice = heldNotice ?: return
+        com.demo.imsdc.notification.CallRequestNotification.show(activity, activity.peerName, notice, SHARE_DECISION_TIMEOUT_MS)
+    }
+
+    /** Call screen back: its sheet asks again, so the notification goes. */
+    fun onCallScreenShown() {
+        if (heldNotice != null) com.demo.imsdc.notification.CallRequestNotification.cancel(activity)
     }
 
     /** SipManager saw CANCEL for the held Re-INVITE (487 already sent). Closes the sheet; the call goes on. */
@@ -1381,6 +1546,7 @@ class MiniAppManager(val activity: CallActivity) {
                     view, 1, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                 )
                 contentSurface = view
+                applyRemoteFold() // no tile or button over the shared video
             }
             val holder = sv.holder
             if (holder.surface.isValid) use(holder.surface)
@@ -1521,6 +1687,7 @@ class MiniAppManager(val activity: CallActivity) {
             contentSurface = null
             if (remoteHiddenForContent) activity.binding.remoteVideoView.visibility = View.VISIBLE
             remoteHiddenForContent = false
+            applyRemoteFold()
         }
     }
 
