@@ -463,16 +463,16 @@ class MiniAppManager(val activity: CallActivity) {
 
     private fun isFullScreen(appId: String): Boolean =
         CallActivity.hotlineApp(activity.remoteUser) == null &&
-            (appId == "caro" || (appId == SHARE_APP && fullScreenRequested))
+            (appId == "caro" || (appId in FULLSCREEN_ON_REQUEST && fullScreenRequested))
 
     private fun exitButtonWanted(appId: String): Boolean =
         !(appId == "smart-menu" || appId == CallActivity.HOME_APP || appId == "operator-menu" ||
             CallActivity.hotlineApp(activity.remoteUser) != null)
 
-    /** Page: enter (true) or leave (false) full screen. Only the Content Sharing page asks. */
+    /** Page: enter (true) or leave (false) full screen. Content Sharing and the drawing board ask. */
     fun setFullScreen(on: Boolean) {
         activity.runOnUiThread {
-            if (activity.currentAppId != SHARE_APP || fullScreenRequested == on) return@runOnUiThread
+            if (activity.currentAppId !in FULLSCREEN_ON_REQUEST || fullScreenRequested == on) return@runOnUiThread
             fullScreenRequested = on
             applyWebViewBounds(activity.currentAppId)
         }
@@ -775,6 +775,8 @@ class MiniAppManager(val activity: CallActivity) {
         private const val SHARE_DECISION_TIMEOUT_MS = 30_000L
         /** App id of the Content Sharing page. */
         const val SHARE_APP = "photo-share"
+        /** Pages that go full screen when they ask (AndroidBridge.setFullScreen). */
+        private val FULLSCREEN_ON_REQUEST = setOf(SHARE_APP, "sketch-sync-app")
     }
 
     /** One slot change. [sync]: re-offer the current local slots after a rejection; a sync is never re-synced. */
