@@ -51,7 +51,7 @@
       cursor: crosshair;
     }
 
-    /* ── Top HUD: Status Pill + Zoom Reset Pill ── */
+    /* ── Top HUD: Connection Status ── */
     #topBar {
       position: fixed;
       top: calc(12px + var(--safe-top));
@@ -108,34 +108,6 @@
       font-size: 11.5px;
     }
 
-    #zoomBadge {
-      pointer-events: auto;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 6px 11px;
-      border-radius: 999px;
-      font-size: 11.5px;
-      font-weight: 600;
-      color: var(--text-main);
-      background: var(--glass-bg);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid var(--glass-border);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-      opacity: 0;
-      transform: translateY(-8px) scale(0.9);
-      pointer-events: none;
-      transition: opacity 0.22s, transform 0.22s var(--spring);
-      cursor: pointer;
-    }
-    #zoomBadge.show {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-      pointer-events: auto;
-    }
-    #zoomBadge:active { transform: scale(0.92); }
-    #zoomBadge svg { width: 13px; height: 13px; opacity: 0.8; }
 
     /* ── Toast & Transfer Progress ── */
     #hudAlerts {
@@ -542,13 +514,6 @@
     <span>Bảng vẽ 5G</span>
     <span id="peerLbl"></span>
   </div>
-  <button id="zoomBadge" title="Chạm để đặt lại thu phóng">
-    <span id="zoomPct">100%</span>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-      <path d="M3 3v5h5"/>
-    </svg>
-  </button>
 </div>
 
 <!-- Alerts & Transfer Progress -->
@@ -702,10 +667,12 @@
     pendingPhoto: null,             // ảnh đang chờ fetch từ xa
     lastBackup: null,               // {kind:'strokes',strokes:[..]} | {kind:'photo',photo:{..}}
     peerActiveAt: 0,                // presence: thời điểm msg cuối từ đối phương
-    eraserCursor: null,             // {x, y, hitId} hiển thị vòng tròn tẩy trực quan
+    eraserCursors: new Map(),       // One cursor per erasing finger.
   };
   let seq = 0;
-  const newId = () => 's' + Date.now().toString(36) + (seq++).toString(36);
+  const strokeClientId = window.crypto && typeof window.crypto.randomUUID === 'function'
+    ? window.crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const newId = () => 's' + strokeClientId + '_' + (seq++).toString(36);
   const myStrokes = () => state.strokes.filter(s => s.mine);
 
   /* ─────────────── Bridge helpers ─────────────── */
@@ -759,28 +726,20 @@
   /* ═══════════════ CANVAS & VẼ ═══════════════ */
   const board = $('board');
   const ctx = board.getContext('2d');
-  let stroking = null;
+  const localDrafts = new Map(); // pointerId -> independent in-progress stroke.
+  const pointerTools = new Map();
+  const ignoredStrokeIds = new Set();
   let strokeFlushTimer = null;
-  let sentPointCount = 0;
+  let paintFrame = null;
 
-  let zoom = { k: 1, x: 0, y: 0 };
-
-  function updateZoomUI() {
-    const badge = $('zoomBadge');
-    if (zoom.k > 1.03 && state.photo) {
-      $('zoomPct').textContent = Math.round(zoom.k * 100) + '%';
-      badge.classList.add('show');
-    } else {
-      badge.classList.remove('show');
-    }
+  // Multiple fingers and incoming peer packets share one paint per display frame.
+  function redraw() {
+    if (paintFrame !== null) return;
+    paintFrame = requestAnimationFrame(() => {
+      paintFrame = null;
+      paintBoard();
+    });
   }
-
-  $('zoomBadge').onclick = () => {
-    zoom = { k: 1, x: 0, y: 0 };
-    updateZoomUI();
-    redraw();
-    buzz(8);
-  };
 
   function sizeBoard() {
     const dpr = window.devicePixelRatio || 1;
@@ -801,13 +760,9 @@
     return { x: (window.innerWidth - w) / 2, y: (window.innerHeight - h) / 2, width: w, height: h };
   }
 
-  function viewRect() {
-    const r = baseRect();
-    if (!r) return null;
-    return { x: r.x + zoom.x, y: r.y + zoom.y, width: r.width * zoom.k, height: r.height * zoom.k };
-  }
+  function viewRect() { return baseRect(); } // Always fit the image to the screen.
 
-  function redraw() {
+  function paintBoard() {
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.save();
     document.documentElement.classList.toggle('photo-view', Boolean(state.photo));
@@ -818,13 +773,13 @@
     if (r && state.photo && state.photo.img) {
       ctx.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
     }
-    const highlightId = state.eraserCursor ? state.eraserCursor.hitId : null;
-    state.strokes.forEach(st => renderStroke(ctx, st, null, st.id === highlightId));
+    const highlighted = new Set(Array.from(state.eraserCursors.values(), c => c.hitId));
+    state.strokes.forEach(st => renderStroke(ctx, st, null, highlighted.has(st.id)));
     state.remoteDrafts.forEach(st => renderStroke(ctx, st));
-    if (stroking) renderStroke(ctx, stroking);
+    localDrafts.forEach(st => renderStroke(ctx, st));
 
     // Vẽ tâm tẩy trực quan khi đang ở chế độ Eraser
-    if (state.eraserCursor) {
+    state.eraserCursors.forEach(cursor => {
       ctx.save();
       if (r) {
         ctx.beginPath();
@@ -832,14 +787,14 @@
         ctx.clip();
       }
       ctx.beginPath();
-      ctx.arc(state.eraserCursor.x, state.eraserCursor.y, 18, 0, Math.PI * 2);
-      ctx.fillStyle = state.eraserCursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(28, 28, 30, 0.10)';
+      ctx.arc(cursor.x, cursor.y, 18, 0, Math.PI * 2);
+      ctx.fillStyle = cursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(28, 28, 30, 0.10)';
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = state.eraserCursor.hitId ? '#ff453a' : 'rgba(28, 28, 30, 0.65)';
+      ctx.strokeStyle = cursor.hitId ? '#ff453a' : 'rgba(28, 28, 30, 0.65)';
       ctx.stroke();
       ctx.restore();
-    }
+    });
   }
 
   function renderStroke(c, st, extra, isHighlighted) {
@@ -848,7 +803,7 @@
     if (state.photo && !r) return; // Wait for the image's real bounds.
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
-    const scale = r ? zoom.k : 1;
+    const scale = 1;
     const pts = extra ? st.pts.concat([extra]) : st.pts;
     const X = p => fx + p[0] * fw, Y = p => fy + p[1] * fh;
 
@@ -899,36 +854,45 @@
     ];
   }
 
-  // Stream only newly collected points, at most every 33 ms (~30 updates/s).
-  // The final full stroke repairs any missed preview update and supports older peers.
+  // Batch deltas for every active finger; the final full stroke repairs previews.
+  function flushDraft(stroke) {
+    while (stroke.sentPointCount < stroke.pts.length) {
+      const from = stroke.sentPointCount;
+      const pts = stroke.pts.slice(from, from + 64);
+      stroke.sentPointCount += pts.length;
+      sendJson({ t: 'stroke.points', id: stroke.id, from, pts });
+    }
+  }
+
   function flushStrokePoints() {
     clearTimeout(strokeFlushTimer);
     strokeFlushTimer = null;
-    if (!stroking) return;
-    while (sentPointCount < stroking.pts.length) {
-      const from = sentPointCount;
-      const pts = stroking.pts.slice(from, from + 64);
-      sentPointCount += pts.length;
-      sendJson({ t: 'stroke.points', id: stroking.id, from, pts });
-    }
+    localDrafts.forEach(flushDraft);
   }
 
   function scheduleStrokePoints() {
     if (strokeFlushTimer === null) strokeFlushTimer = setTimeout(flushStrokePoints, 33);
   }
 
-  function cancelLocalStroke(sync = true) {
+  function stopIdleFlush() {
+    if (localDrafts.size) return;
     clearTimeout(strokeFlushTimer);
     strokeFlushTimer = null;
-    const draft = stroking;
-    stroking = null;
-    sentPointCount = 0;
+  }
+
+  function cancelLocalStroke(pointerId, sync = true) {
+    const draft = localDrafts.get(pointerId);
+    localDrafts.delete(pointerId);
+    stopIdleFlush();
     if (draft && sync) sendJson({ t: 'stroke.cancel', id: draft.id });
   }
 
   function resetLiveStrokes(sync = false) {
-    cancelLocalStroke(sync);
+    Array.from(localDrafts.keys()).forEach(id => cancelLocalStroke(id, sync));
+    state.remoteDrafts.forEach(st => ignoredStrokeIds.add(st.id));
     state.remoteDrafts.clear();
+    state.eraserCursors.clear();
+    pointerTools.clear();
   }
 
   function validStrokePoints(pts) {
@@ -941,10 +905,11 @@
   }
 
   function onStrokeStart(msg) {
-    if (!msg.id || !matchesPhoto(msg) || !validStrokePoints(msg.pts)) return;
+    if (!msg.id || ignoredStrokeIds.has(msg.id) || !matchesPhoto(msg) || !validStrokePoints(msg.pts)) return;
     if (state.strokes.some(s => s.id === msg.id) || state.remoteDrafts.has(msg.id)) return;
     state.remoteDrafts.set(msg.id, { id: msg.id, mine: false, color: msg.color, w: msg.w, pts: msg.pts.slice() });
     redraw();
+    updateToolbar();
   }
 
   function onStrokePoints(msg) {
@@ -958,6 +923,7 @@
 
   function onStrokeComplete(msg) {
     state.remoteDrafts.delete(msg.id);
+    if (ignoredStrokeIds.has(msg.id)) { redraw(); return; }
     if (!matchesPhoto(msg) || !validStrokePoints(msg.pts)) { redraw(); return; }
     const stroke = { id: msg.id || newId(), mine: false, color: msg.color, w: msg.w, pts: msg.pts };
     const index = state.strokes.findIndex(s => s.id === stroke.id);
@@ -990,167 +956,112 @@
       Math.max(0, Math.min(1, last[1] + t * dy))];
   }
 
-  /* ═══════════════ CHẠM: 1 ngón vẽ/tẩy — 2 ngón zoom/pan — chạm đôi reset ═══════════════ */
-  (function () {
-    const pointers = new Map();
-    let gesture = null;
-    let lastTap = 0;
-
-    function commitStroke() {
-      if (!stroking) return;
-      // A remote/local photo replacement invalidates an unfinished stroke.
-      if (stroking.photoId !== (state.photo ? state.photo.id : null)) {
-        cancelLocalStroke(); redraw(); return;
-      }
-      flushStrokePoints();
-      const stroke = stroking;
-      stroking = null;
-      sentPointCount = 0;
-      if (stroke.pts.length) {
-        state.strokes.push(stroke);
-        sendJson({ t: 'stroke', id: stroke.id, photoId: stroke.photoId, color: stroke.color, w: stroke.w, pts: stroke.pts });
-        buzz(6);
-        collapsePill();
-        updateToolbar();
-        redraw();
-      }
+  /* Each finger owns its own stroke. Two fingers draw two lines; no gestures. */
+  function commitStroke(pointerId) {
+    const stroke = localDrafts.get(pointerId);
+    if (!stroke) return;
+    if (stroke.photoId !== (state.photo ? state.photo.id : null)) {
+      cancelLocalStroke(pointerId); redraw(); return;
     }
+    flushDraft(stroke);
+    localDrafts.delete(pointerId);
+    stopIdleFlush();
+    state.strokes.push(stroke);
+    sendJson({ t: 'stroke', id: stroke.id, photoId: stroke.photoId,
+      color: stroke.color, w: stroke.w, pts: stroke.pts });
+    updateToolbar();
+    redraw();
+  }
 
-    board.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      closePopovers();
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      try { board.setPointerCapture(e.pointerId); } catch (_) {}
+  function eraseAt(pointerId, x, y) {
+    if (!canDrawAt(x, y)) { state.eraserCursors.delete(pointerId); redraw(); return; }
+    const hit = hitStroke(x, y);
+    state.eraserCursors.set(pointerId, { x, y, hitId: hit ? hit.id : null });
+    if (hit) removeStroke(hit.id, true);
+    redraw();
+  }
 
-      // 2 ngón: Chuyển sang thu phóng / kéo ảnh
-      if (pointers.size === 2 && state.photo) {
-        cancelLocalStroke();
-        state.eraserCursor = null;
-        const [a, b] = [...pointers.values()];
-        gesture = {
-          mid0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-          dist0: Math.hypot(a.x - b.x, a.y - b.y),
-          k0: zoom.k, x0: zoom.x, y0: zoom.y,
-        };
-        redraw();
-        return;
-      }
-      if (pointers.size > 1) return;
-
-      const now = Date.now();
-      if (now - lastTap < 280 && state.photo && zoom.k > 1.03) {
-        zoom = { k: 1, x: 0, y: 0 };
-        updateZoomUI();
-        redraw();
-        lastTap = 0;
-        return;
-      }
-      lastTap = now;
-      if (!canDrawAt(e.clientX, e.clientY)) return;
-
-      if (state.mode === 'eraser') {
-        const hit = hitStroke(e.clientX, e.clientY);
-        state.eraserCursor = { x: e.clientX, y: e.clientY, hitId: hit ? hit.id : null };
-        if (hit) {
-          removeStroke(hit.id, true);
-          state.eraserCursor.hitId = null;
-          buzz(10);
-        }
-        redraw();
-        return;
-      }
-
-      stroking = {
-        id: newId(),
-        mine: true,
-        photoId: state.photo ? state.photo.id : null,
-        pointerId: e.pointerId,
-        color: state.color,
-        w: state.penW,
-        pts: [normPoint(e.clientX, e.clientY)]
-      };
-      sentPointCount = 1;
-      redraw(); // Paint the first dot immediately, before sending anything.
-      sendJson({ t: 'stroke.start', id: stroking.id, photoId: stroking.photoId,
-        color: stroking.color, w: stroking.w, pts: stroking.pts.slice() });
-    });
-
-    board.addEventListener('pointermove', e => {
-      if (!pointers.has(e.pointerId)) return;
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-      if (gesture && pointers.size === 2) {
-        const [a, b] = [...pointers.values()];
-        const br = baseRect();
-        if (!br || gesture.dist0 < 10) return;
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        zoom.k = Math.min(6, Math.max(1, gesture.k0 * d / gesture.dist0));
-        zoom.x = mid.x - br.x - ((gesture.mid0.x - (br.x + gesture.x0)) / gesture.k0) * zoom.k;
-        zoom.y = mid.y - br.y - ((gesture.mid0.y - (br.y + gesture.y0)) / gesture.k0) * zoom.k;
-        updateZoomUI();
-        redraw();
-        return;
-      }
-
-      // Chế độ tẩy: cho phép kéo ngón tay qua nhiều nét để xóa liên tục (Scrubbing Eraser)
-      if (state.mode === 'eraser' && pointers.size === 1) {
-        const hit = hitStroke(e.clientX, e.clientY);
-        state.eraserCursor = { x: e.clientX, y: e.clientY, hitId: hit ? hit.id : null };
-        if (hit) {
-          removeStroke(hit.id, true);
-          state.eraserCursor.hitId = null;
-          buzz(8);
-        }
-        redraw();
-        return;
-      }
-
-      if (!stroking || stroking.pointerId !== e.pointerId) return;
-      if (stroking.photoId !== (state.photo ? state.photo.id : null)) {
-        cancelLocalStroke();
-        redraw();
-        return;
-      }
-      if (!canDrawAt(e.clientX, e.clientY)) {
-        if (viewRect()) stroking.pts.push(photoExitPoint(stroking.pts[stroking.pts.length - 1], e.clientX, e.clientY));
-        commitStroke();
-        return;
-      }
-      const p = normPoint(e.clientX, e.clientY);
-      const lastP = stroking.pts[stroking.pts.length - 1];
-      const r = viewRect();
-      const dx = (p[0] - lastP[0]) * (r ? r.width : window.innerWidth);
-      const dy = (p[1] - lastP[1]) * (r ? r.height : window.innerHeight);
-      if (Math.hypot(dx, dy) < 0.75) return;
-      if (stroking.pts.length === 2) collapsePill(); // Ẩn pill ngay khi bắt đầu kéo nét thực sự
-      stroking.pts.push(p);
-      redraw();
-      scheduleStrokePoints();
-    });
-
-    function finish(e) {
-      pointers.delete(e.pointerId);
-      if (pointers.size < 2) gesture = null;
-
-      if (state.mode === 'eraser') {
-        if (state.eraserCursor) {
-          const hit = hitStroke(e.clientX, e.clientY);
-          if (hit) { removeStroke(hit.id, true); buzz(12); }
-          state.eraserCursor = null;
-          redraw();
-        }
-        return;
-      }
-      if (stroking && stroking.pointerId === e.pointerId) {
-        if (e.type === 'pointercancel') { cancelLocalStroke(); redraw(); }
-        else commitStroke();
-      }
+  function appendStrokePoint(pointerId, x, y, force = false) {
+    const stroke = localDrafts.get(pointerId);
+    if (!stroke || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (stroke.photoId !== (state.photo ? state.photo.id : null)) {
+      cancelLocalStroke(pointerId); redraw(); return;
     }
-    board.addEventListener('pointerup', finish);
-    board.addEventListener('pointercancel', finish);
-    board.addEventListener('lostpointercapture', finish);
-  })();
+    const last = stroke.pts[stroke.pts.length - 1];
+    if (!canDrawAt(x, y)) {
+      if (viewRect()) stroke.pts.push(photoExitPoint(last, x, y));
+      commitStroke(pointerId); // Only this finger stops at the photo border.
+      return;
+    }
+    const pt = normPoint(x, y), r = viewRect();
+    const distance = Math.hypot((pt[0] - last[0]) * (r ? r.width : window.innerWidth),
+      (pt[1] - last[1]) * (r ? r.height : window.innerHeight));
+    if (distance < (force ? 0.01 : 0.5)) return;
+    stroke.pts.push(pt);
+    redraw();
+    scheduleStrokePoints();
+  }
+
+  board.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    closePopovers();
+    if (pointerTools.has(e.pointerId) || !canDrawAt(e.clientX, e.clientY)) return;
+    pointerTools.set(e.pointerId, state.mode);
+    try { board.setPointerCapture(e.pointerId); } catch (_) {}
+    collapsePill();
+    if (state.mode === 'eraser') { eraseAt(e.pointerId, e.clientX, e.clientY); return; }
+    const stroke = {
+      id: newId(), mine: true, photoId: state.photo ? state.photo.id : null,
+      color: state.color, w: state.penW,
+      pts: [normPoint(e.clientX, e.clientY)], sentPointCount: 1,
+    };
+    localDrafts.set(e.pointerId, stroke);
+    redraw();
+    sendJson({ t: 'stroke.start', id: stroke.id, photoId: stroke.photoId,
+      color: stroke.color, w: stroke.w, pts: stroke.pts.slice() });
+    updateToolbar();
+  });
+
+  board.addEventListener('pointermove', e => {
+    const tool = pointerTools.get(e.pointerId);
+    if (!tool) return;
+    e.preventDefault();
+    // Coalesced samples preserve fast curves between display frames.
+    let samples = [];
+    try { if (typeof e.getCoalescedEvents === 'function') samples = e.getCoalescedEvents(); } catch (_) {}
+    for (const point of samples) {
+      if (tool === 'eraser') eraseAt(e.pointerId, point.clientX, point.clientY);
+      else appendStrokePoint(e.pointerId, point.clientX, point.clientY);
+    }
+    if (tool === 'eraser') eraseAt(e.pointerId, e.clientX, e.clientY);
+    else appendStrokePoint(e.pointerId, e.clientX, e.clientY);
+  });
+
+  function finishPointer(e) {
+    const tool = pointerTools.get(e.pointerId);
+    if (!tool) return;
+    if (e.type === 'pointerup') {
+      if (tool === 'eraser') eraseAt(e.pointerId, e.clientX, e.clientY);
+      else {
+        appendStrokePoint(e.pointerId, e.clientX, e.clientY, true);
+        commitStroke(e.pointerId); // Capture the final release point too.
+      }
+    } else cancelLocalStroke(e.pointerId);
+    pointerTools.delete(e.pointerId);
+    state.eraserCursors.delete(e.pointerId);
+    stopIdleFlush();
+    redraw();
+    updateToolbar();
+  }
+  board.addEventListener('pointerup', finishPointer);
+  board.addEventListener('pointercancel', finishPointer);
+  board.addEventListener('lostpointercapture', finishPointer);
+
+  // The canvas owns touch input; native pinch/double-tap/page scrolling is disabled.
+  board.addEventListener('wheel', e => e.preventDefault(), { passive: false });
+  board.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
 
   /** Khoảng cách từ điểm P tới đoạn thẳng AB (giúp tẩy nhạy cả với nét vẩy nhanh). */
   function distToSegment(px, py, ax, ay, bx, by) {
@@ -1166,7 +1077,7 @@
     const r = viewRect();
     const fx = r ? r.x : 0, fy = r ? r.y : 0;
     const fw = r ? r.width : window.innerWidth, fh = r ? r.height : window.innerHeight;
-    const scale = r ? zoom.k : 1;
+    const scale = 1;
     let best = null, bestD = Infinity;
 
     for (const st of state.strokes) {
@@ -1201,7 +1112,7 @@
   function updateToolbar() {
     $('btnUndo').disabled = myStrokes().length === 0 && !state.lastBackup;
     $('photoDot').classList.toggle('on', Boolean(state.photo));
-    $('actClearStrokes').disabled = state.strokes.length === 0;
+    $('actClearStrokes').disabled = state.strokes.length === 0 && localDrafts.size === 0 && state.remoteDrafts.size === 0;
     $('actClearPhoto').disabled = !state.photo;
     $('stylePreviewDot').style.background = state.color;
     $('chipColorRing').style.borderColor = state.color;
@@ -1318,7 +1229,7 @@
   };
 
   function doClear() {
-    if (!state.strokes.length) { toast('Không còn nét để xóa'); return; }
+    if (!state.strokes.length && !localDrafts.size && !state.remoteDrafts.size) { toast('Không còn nét để xóa'); return; }
     resetLiveStrokes(true);
     const backup = state.strokes.map(s => ({ ...s }));
     state.lastBackup = { kind: 'strokes', strokes: backup };
@@ -1337,8 +1248,6 @@
     state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
     state.photo = null;
     state.pendingPhoto = null;
-    zoom = { k: 1, x: 0, y: 0 };
-    updateZoomUI();
     redraw();
     updateToolbar();
     sendJson({ t: 'photo.clear', backup: { id: state.lastBackup.photo.id } });
@@ -1445,8 +1354,6 @@
     if ((state.photo ? state.photo.id : null) !== (p ? p.id : null)) resetLiveStrokes(true);
     if (!p) {
       state.photo = null;
-      zoom = { k: 1, x: 0, y: 0 };
-      updateZoomUI();
       updateToolbar();
       redraw();
       return;
@@ -1462,8 +1369,6 @@
       p.img.onload = () => redraw();
     }
     if (p.url) p.img.src = p.url;
-    zoom = { k: 1, x: 0, y: 0 };
-    updateZoomUI();
     updateToolbar();
     redraw();
   }
@@ -1504,7 +1409,7 @@
     setPhotoState({ id: pending.id, ready: true, url: url, img: null });
     hideProgress();
     sendJson({ t: 'done', id: pending.id, ok: true });
-    toast('Đã nhận ảnh nền — dùng 2 ngón để thu phóng');
+    toast('Đã nhận ảnh nền — có thể vẽ bằng nhiều ngón');
     buzz([12, 30, 12]);
   }
   function hash16(s) {
@@ -1540,8 +1445,8 @@
       if (msg.type === 'clear') {
         resetLiveStrokes();
         state.photo = null; state.pendingPhoto = null; state.lastBackup = null;
-        state.strokes = []; zoom = { k: 1, x: 0, y: 0 };
-        updateZoomUI(); redraw(); updateToolbar();
+        state.strokes = [];
+        redraw(); updateToolbar();
         return;
       }
       if (msg.action === 'LAUNCH_APP' || msg.service) return;
@@ -1558,7 +1463,9 @@
         case 'stroke.start': onStrokeStart(msg); break;
         case 'stroke.points': onStrokePoints(msg); break;
         case 'stroke.cancel':
+          ignoredStrokeIds.add(msg.id);
           state.remoteDrafts.delete(msg.id);
+          updateToolbar();
           redraw();
           break;
         case 'stroke': onStrokeComplete(msg); break;
@@ -1597,8 +1504,6 @@
             state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
             state.photo = null;
             state.pendingPhoto = null;
-            zoom = { k: 1, x: 0, y: 0 };
-            updateZoomUI();
             redraw();
             toast('Đối phương đã gỡ ảnh nền');
           }
@@ -1659,6 +1564,8 @@
   window.cleanUpImsDcObjects = function () {
     boardActive = false;
     resetLiveStrokes();
+    if (paintFrame !== null) cancelAnimationFrame(paintFrame);
+    paintFrame = null;
     clearTimeout(pillIdle);
     setBoardFullScreen(false);
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:')) URL.revokeObjectURL(state.photo.url);
