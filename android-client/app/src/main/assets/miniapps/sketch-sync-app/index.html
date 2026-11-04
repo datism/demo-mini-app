@@ -34,15 +34,18 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: transparent;
+      background: #ffffff;
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, sans-serif;
       color: var(--text-main);
     }
 
-    /* Nền trong suốt — video cuộc gọi hiện xuyên qua phần không có ảnh nền */
+    /* Opaque whiteboard covering the entire app viewport. */
     #board {
-      position: absolute;
+      position: fixed;
       inset: 0;
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
       display: block;
       touch-action: none;
       cursor: crosshair;
@@ -500,6 +503,21 @@
       pointer-events: none;
     }
 
+    /* Match the content-sharing app's native full-screen overlays. */
+    html.full #topBar {
+      left: calc(116px + env(safe-area-inset-left, 0px));
+      right: calc(14px + env(safe-area-inset-right, 0px));
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    html.full .hud-spacer { display: none; }
+    html.full .status-pill { max-width: 100%; flex-wrap: wrap; }
+    html.full #hudAlerts { top: calc(112px + var(--safe-top)); }
+    html.full #pill { bottom: calc(60px + var(--safe-bottom)); }
+    html.full .popover { bottom: calc(128px + var(--safe-bottom)); }
+    html.full #chip { bottom: calc(64px + var(--safe-bottom)); }
+
     input[type=file] { display: none; }
   </style>
 </head>
@@ -785,6 +803,10 @@
 
   function redraw() {
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.restore();
     const r = viewRect();
     if (r && state.photo && state.photo.img) {
       ctx.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
@@ -797,10 +819,10 @@
       ctx.save();
       ctx.beginPath();
       ctx.arc(state.eraserCursor.x, state.eraserCursor.y, 18, 0, Math.PI * 2);
-      ctx.fillStyle = state.eraserCursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(255, 255, 255, 0.15)';
+      ctx.fillStyle = state.eraserCursor.hitId ? 'rgba(255, 69, 58, 0.28)' : 'rgba(28, 28, 30, 0.10)';
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = state.eraserCursor.hitId ? '#ff453a' : 'rgba(255, 255, 255, 0.75)';
+      ctx.strokeStyle = state.eraserCursor.hitId ? '#ff453a' : 'rgba(28, 28, 30, 0.65)';
       ctx.stroke();
       ctx.restore();
     }
@@ -1360,7 +1382,7 @@
     c.height = Math.round(h * dpr);
     const oc = c.getContext('2d');
     oc.setTransform(dpr, 0, 0, dpr, 0, 0);
-    oc.fillStyle = '#0d1117';
+    oc.fillStyle = '#ffffff';
     oc.fillRect(0, 0, w, h);
     const r = viewRect();
     if (r && state.photo && state.photo.img) oc.drawImage(state.photo.img, r.x, r.y, r.width, r.height);
@@ -1471,7 +1493,18 @@
   }
 
   /* ─────────────── Bridge qua GSMA _dsbridge / lifecycle ─────────────── */
+  // Use the same native full-screen contract as the content-sharing app.
+  function setBoardFullScreen(full) {
+    document.documentElement.classList.toggle('full', full);
+    const bridge = window.AndroidBridge;
+    if (bridge && typeof bridge.setFullScreen === 'function') {
+      try { bridge.setFullScreen(full); }
+      catch (err) { console.warn('[SK] setFullScreen failed', err); }
+    }
+  }
+
   window.addEventListener('load', () => {
+    setBoardFullScreen(true);
     sizeBoard();
     expandPill();
     updateToolbar();
@@ -1485,6 +1518,7 @@
   window.addEventListener('resize', sizeBoard);
 
   window.cleanUpImsDcObjects = function () {
+    setBoardFullScreen(false);
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:')) URL.revokeObjectURL(state.photo.url);
     state.photo = null; state.pendingPhoto = null; state.strokes = []; state.lastBackup = null;
   };
