@@ -87,6 +87,8 @@ class CallActivity : AppCompatActivity() {
         const val EXTRA_INCOMING_CALL_ID = "incoming_call_id"
         const val EXTRA_INCOMING_RAW_SDP = "incoming_raw_sdp"
         const val EXTRA_AUTO_ANSWER      = "auto_answer"
+        /** Tap on the ongoing-call notification: just bring the call back, change nothing. */
+        const val EXTRA_FROM_ONGOING     = "from_ongoing"
 
         fun launch(
             activity: androidx.appcompat.app.AppCompatActivity,
@@ -190,6 +192,26 @@ class CallActivity : AppCompatActivity() {
             false
         }
     }
+    /** Content Sharing: the system's "start recording/casting" consent; [onResult] gets null when refused. */
+    private var screenCaptureCallback: ((android.content.Intent?) -> Unit)? = null
+    private val screenCapture = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        screenCaptureCallback?.invoke(if (r.resultCode == RESULT_OK) r.data else null)
+        screenCaptureCallback = null
+    }
+    fun launchScreenCapture(onResult: (android.content.Intent?) -> Unit) {
+        screenCaptureCallback = onResult
+        try {
+            val pm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+            screenCapture.launch(pm.createScreenCaptureIntent())
+        } catch (e: Exception) {
+            Log.e(TAG, "Cannot ask for screen capture: ${e.message}", e)
+            screenCaptureCallback = null
+            onResult(null)
+        }
+    }
+
     private var videoPickerCallback: ((android.net.Uri?) -> Unit)? = null
     private val videoPicker = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
@@ -438,6 +460,7 @@ class CallActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         if (intent == null) return
+        if (intent.getBooleanExtra(EXTRA_FROM_ONGOING, false)) return
         configureWindowAndLockScreen()
         setIntent(intent)
         val autoAnswer = intent.getBooleanExtra(EXTRA_AUTO_ANSWER, false)
@@ -1303,6 +1326,7 @@ class CallActivity : AppCompatActivity() {
             override fun answerShare(accept: Boolean) = miniAppManager.answerShare(accept)
             override fun stopShare() = miniAppManager.stopShare()
             override fun pickVideo() = miniAppManager.pickVideo()
+            override fun startScreen() = miniAppManager.startScreen()
             override fun pauseVideo(paused: Boolean) = miniAppManager.pauseVideo(paused)
             override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
@@ -1591,6 +1615,7 @@ class CallActivity : AppCompatActivity() {
 
             if (!isCallActiveUiShown) {
                 isCallActiveUiShown = true
+                startOngoingCallService()
                 val hotlineAppId = hotlineApp(remoteUser)
                 if (hotlineAppId != null) {
                     binding.localVideoView.visibility = View.GONE
@@ -1668,9 +1693,28 @@ class CallActivity : AppCompatActivity() {
 
     // --- End Call ------------------------------------------------------------
 
+    /** Keeps the call (mic, network) alive while the user is on the home screen or in another app. */
+    private fun startOngoingCallService() {
+        if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // Without it the service still runs; the notification is just not shown.
+            androidx.core.app.ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 102)
+        }
+        com.demo.imsdc.call.CallService.onUserAction = { action ->
+            runOnUiThread {
+                when (action) {
+                    com.demo.imsdc.call.CallService.ACTION_END -> endCall()
+                    com.demo.imsdc.call.CallService.ACTION_STOP_SHARE -> miniAppManager.stopScreenFromNotification()
+                }
+            }
+        }
+        com.demo.imsdc.call.CallService.start(this, remoteUser)
+    }
+
     private fun endCall() {
         if (isEndingCall) return
         isEndingCall = true
+        com.demo.imsdc.call.CallService.stop(this)
         sipManager.markCallEnding()
         Log.i(TAG, "Ending call...")
         IncomingCallNotificationManager.dismiss(this)
@@ -1718,6 +1762,7 @@ class CallActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        com.demo.imsdc.call.CallService.stop(this)
         isEndingCall = true
         if (activeInstance === this) {
             activeInstance = null

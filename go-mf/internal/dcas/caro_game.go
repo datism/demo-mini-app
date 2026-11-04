@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const CaroBoardSize = 9
+const CaroBoardSize = 15
 const CaroWinCount = 5
 
 // Caro error texts sent to the client (shown as a toast).

@@ -43,6 +43,7 @@ class AndroidBridgeInterface(
         fun answerShare(accept: Boolean)
         fun stopShare()
         fun pickVideo()
+        fun startScreen()
         fun pauseVideo(paused: Boolean)
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
@@ -71,6 +72,10 @@ class AndroidBridgeInterface(
     /** Page, sender: open the gallery for the video to stream (after the other person accepted). */
     @JavascriptInterface
     fun pickVideo() { shareHandler?.pickVideo() }
+
+    /** Page, sender: share this phone's screen (after the other person accepted); asks the system for consent. */
+    @JavascriptInterface
+    fun startScreen() { shareHandler?.startScreen() }
 
     /** Page, sender: pause (true) or resume (false) the stream for both people. */
     @JavascriptInterface
