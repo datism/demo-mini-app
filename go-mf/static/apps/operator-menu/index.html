@@ -1,200 +1,503 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>New Calling Services</title>
   <style>
-    /* Messenger-style app tray: one compact row at the bottom, the call video stays visible above. */
-    html, body {
+    :root {
+      --glass-bg: rgba(20, 22, 28, 0.72);
+      --glass-bg-heavy: rgba(18, 20, 26, 0.88);
+      --glass-border: rgba(255, 255, 255, 0.14);
+      --glass-highlight: rgba(255, 255, 255, 0.1);
+      --text-main: #f5f7fa;
+      --text-muted: rgba(235, 235, 245, 0.58);
+      --accent: #0a84ff;
+      --success: #30d158;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --spring: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    * {
       margin: 0;
       padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
       height: 100%;
       background: transparent;
       overflow: hidden;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text-main);
     }
+
     body {
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
       align-items: center;
-      padding: 0 12px 10px;
-      box-sizing: border-box;
-    }
-    .tray {
+      padding: 0 14px calc(14px + var(--safe-bottom));
       position: relative;
-      width: 100%;
-      max-width: 420px;
-      background: rgba(20, 20, 24, 0.55);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 26px;
-      padding: 14px 6px 10px;
-      box-sizing: border-box;
-      transition: opacity .2s ease, transform .25s cubic-bezier(.2, .8, .2, 1);
     }
-    .tray.hidden {
-      opacity: 0;
-      transform: translateY(16px) scale(.96);
+
+    /* Vùng chạm phía trên để thu gọn khay nhanh khi đang xem video */
+    #backdropDismiss {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: transparent;
+    }
+    #backdropDismiss.off {
       pointer-events: none;
     }
+
+    /* ── Main App Tray ── */
+    .tray {
+      position: relative;
+      z-index: 20;
+      width: 100%;
+      max-width: 390px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(26px) saturate(190%);
+      -webkit-backdrop-filter: blur(26px) saturate(190%);
+      border: 1px solid var(--glass-border);
+      border-radius: 30px;
+      padding: 8px 16px 18px;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45), inset 0 1px 0 var(--glass-highlight);
+      transform-origin: bottom center;
+      transition: opacity 0.24s ease, transform 0.32s var(--spring);
+      touch-action: none;
+    }
+
+    .tray.hidden {
+      opacity: 0;
+      transform: translateY(28px) scale(0.92);
+      pointer-events: none;
+    }
+
+    /* Thanh kéo (Grabber Handle) ở đỉnh khay */
     .handle {
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 64px;
-      height: 14px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 20px;
       border: 0;
-      padding: 0;
       background: transparent;
       cursor: pointer;
     }
     .handle::after {
       content: "";
-      position: absolute;
-      top: 5px;
-      left: 50%;
-      width: 32px;
-      height: 4px;
-      margin-left: -16px;
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.35);
+      width: 38px;
+      height: 4.5px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.28);
+      transition: width 0.2s var(--spring), background 0.2s;
     }
-    .row {
+    .handle:active::after {
+      width: 48px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    /* Header nhỏ: tên dịch vụ + trạng thái 5G */
+    .tray-header {
       display: flex;
-      gap: 4px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 4px 14px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      color: var(--text-muted);
+    }
+    .brand-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    .btn-minimize {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
       justify-content: center;
-      overflow-x: auto;
-      scroll-snap-type: x proximity;
-      scrollbar-width: none;
-      padding: 0 4px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, transform 0.15s;
     }
-    .row::-webkit-scrollbar {
-      display: none;
+    .btn-minimize:active {
+      transform: scale(0.88);
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
     }
+    .btn-minimize svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* ── App Grid / Row ── */
+    .row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      justify-items: center;
+    }
+
     .app {
-      flex: 0 0 auto;
-      width: 60px;
+      position: relative;
+      width: 100%;
+      max-width: 96px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       border: 0;
-      padding: 0;
-      background: none;
-      color: #fff;
+      padding: 8px 4px;
+      border-radius: 20px;
+      background: transparent;
+      color: var(--text-main);
       cursor: pointer;
-      scroll-snap-align: start;
+      transition: background 0.2s;
     }
+    .app:active {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Squircle Icon Container */
     .app .ic {
-      width: 52px;
-      height: 52px;
-      border-radius: 50%;
+      position: relative;
+      width: 60px;
+      height: 60px;
+      border-radius: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 25px;
-      background: rgba(255, 255, 255, 0.14);
-      transition: transform .12s ease, background .12s ease;
-    }
-    .app:active .ic {
-      transform: scale(.9);
-      background: rgba(255, 255, 255, 0.28);
-    }
-    .app .lbl {
-      font-size: 11.5px;
-      font-weight: 500;
-      line-height: 1.1;
-      color: rgba(255, 255, 255, 0.92);
-      white-space: nowrap;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, .4);
-    }
-    .app.soon {
-      opacity: .45;
-    }
-    .chip {
-      position: absolute;
-      bottom: 10px;
-      right: 16px;
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(20, 20, 24, 0.55);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      font-size: 22px;
       color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35);
+      transition: transform 0.2s var(--spring), box-shadow 0.2s, filter 0.2s;
+    }
+    .app .ic svg {
+      width: 28px;
+      height: 28px;
+      stroke-width: 2;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+      transition: transform 0.2s var(--spring), opacity 0.2s;
+    }
+
+    /* Màu sắc định danh từng Mini-App */
+    .app.sketch .ic {
+      background: linear-gradient(145deg, #ff5e3a 0%, #ff2a68 100%);
+      box-shadow: 0 8px 20px rgba(255, 59, 48, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    }
+    .app.photo .ic {
+      background: linear-gradient(145deg, #0a84ff 0%, #5e5ce6 100%);
+      box-shadow: 0 8px 20px rgba(10, 132, 255, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    }
+    .app.caro .ic {
+      background: linear-gradient(145deg, #30d158 0%, #00b09b 100%);
+      box-shadow: 0 8px 20px rgba(48, 209, 88, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    }
+
+    .app:active .ic {
+      transform: scale(0.88);
+      filter: brightness(1.1);
+    }
+
+    /* Trạng thái đang khởi chạy ứng dụng */
+    .app.loading .ic svg {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    .app.loading .ic::after {
+      content: "";
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2.5px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .app .lbl {
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.15;
+      color: var(--text-main);
+      letter-spacing: 0.1px;
+    }
+    .app .sub-lbl {
+      font-size: 10.5px;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-top: -4px;
+    }
+
+    .app.soon {
+      opacity: 0.42;
+      pointer-events: none;
+    }
+
+    /* ── Floating Launcher Chip (Khi thu gọn khay) ── */
+    .chip {
+      position: fixed;
+      bottom: calc(16px + var(--safe-bottom));
+      right: 16px;
+      z-index: 25;
+      height: 48px;
+      padding: 0 16px 0 13px;
+      border-radius: 999px;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(22px) saturate(180%);
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42), inset 0 1px 0 var(--glass-highlight);
       cursor: pointer;
-      transition: opacity .2s ease, transform .2s ease;
+      transition: opacity 0.22s ease, transform 0.28s var(--spring);
+    }
+    .chip svg {
+      width: 20px;
+      height: 20px;
+      color: #58a6ff;
+    }
+    .chip:active {
+      transform: scale(0.92);
     }
     .chip.hidden {
       opacity: 0;
-      transform: scale(.6);
+      transform: translateY(16px) scale(0.65);
       pointer-events: none;
     }
+
+    /* ── Toast Alert ── */
     .toast {
       position: fixed;
-      bottom: 128px;
+      bottom: calc(178px + var(--safe-bottom));
       left: 50%;
-      transform: translateX(-50%) translateY(10px);
-      background: rgba(20, 20, 24, 0.85);
-      padding: 8px 16px;
-      border-radius: 18px;
-      color: #fff;
-      font-size: 13px;
+      z-index: 50;
+      transform: translateX(-50%) translateY(12px) scale(0.94);
+      background: var(--glass-bg-heavy);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+      padding: 9px 16px;
+      border-radius: 999px;
+      color: var(--text-main);
+      font-size: 12.5px;
       font-weight: 500;
       opacity: 0;
       pointer-events: none;
-      transition: all .25s ease;
+      transition: opacity 0.24s ease, transform 0.26s var(--spring);
       white-space: nowrap;
+      max-width: 90vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .toast.show {
-      transform: translateX(-50%) translateY(0);
+      transform: translateX(-50%) translateY(0) scale(1);
       opacity: 1;
     }
   </style>
 </head>
 <body>
-  <div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
-    <button class="handle" onclick="setOpen(false)" aria-label="Thu gọn"></button>
-    <div class="row">
-      <button class="app" onclick="launchApp('sketch-sync-app')"><span class="ic">🎨</span><span class="lbl">Vẽ</span></button>
-      <button class="app" onclick="launchApp('photo-share')"><span class="ic">📷</span><span class="lbl">Ảnh</span></button>
-      <button class="app" onclick="launchApp('caro')"><span class="ic">♟️</span><span class="lbl">Caro</span></button>
+
+<!-- Chạm ra ngoài vùng khay để thu gọn nhanh -->
+<div id="backdropDismiss" onclick="setOpen(false)"></div>
+
+<!-- Khay dịch vụ 5G New Calling -->
+<div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
+  <button class="handle" onclick="setOpen(false)" aria-label="Thu gọn khay ứng dụng"></button>
+
+  <div class="tray-header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>Dịch vụ 5G Tương tác</span>
     </div>
+    <button class="btn-minimize" onclick="setOpen(false)" title="Thu gọn" aria-label="Thu gọn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
   </div>
-  <button class="chip hidden" id="chip" onclick="setOpen(true)" aria-label="Mở ứng dụng">✨</button>
 
-  <div id="toast" class="toast"></div>
+  <div class="row">
+    <!-- 1. Bảng vẽ -->
+    <button class="app sketch" onclick="launchApp('sketch-sync-app', this)">
+        <span class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+            <path d="M2 2l7.586 7.586"/>
+            <circle cx="11" cy="11" r="2"/>
+          </svg>
+        </span>
+      <span class="lbl">Bảng vẽ</span>
+      <span class="sub-lbl">Vẽ chung</span>
+    </button>
 
-  <script>
-    function launchApp(appId) {
-      if (window.AndroidBridge && window.AndroidBridge.startMiniApp) {
-        window.AndroidBridge.startMiniApp(appId);
-      } else {
-        showToast("Không tìm thấy kết nối AndroidBridge!");
+    <!-- 2. Chia sẻ Ảnh -->
+    <button class="app photo" onclick="launchApp('photo-share', this)">
+        <span class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3" ry="3"/>
+            <circle cx="8.5" cy="8.5" r="1.75"/>
+            <path d="m21 15-5-5L5 21"/>
+          </svg>
+        </span>
+      <span class="lbl">Ảnh HD</span>
+      <span class="sub-lbl">Chia sẻ nhanh</span>
+    </button>
+
+    <!-- 3. Cờ Caro -->
+    <button class="app caro" onclick="launchApp('caro', this)">
+        <span class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2.5"/>
+            <path d="M3 9h18"/>
+            <path d="M3 15h18"/>
+            <path d="M9 3v18"/>
+            <path d="M15 3v18"/>
+          </svg>
+        </span>
+      <span class="lbl">Cờ Caro</span>
+      <span class="sub-lbl">Giải trí 2 người</span>
+    </button>
+  </div>
+</div>
+
+<!-- Nút mở lại khay khi đang thu gọn -->
+<button class="chip hidden" id="chip" onclick="setOpen(true)" aria-label="Mở ứng dụng 5G">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+    <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+    <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+    <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+  </svg>
+  <span>Tiện ích 5G</span>
+</button>
+
+<div id="toast" class="toast"></div>
+
+<script>
+  'use strict';
+
+  const tray = document.getElementById('tray');
+  const chip = document.getElementById('chip');
+  const backdrop = document.getElementById('backdropDismiss');
+  let autoHideTimer = null;
+
+  function buzz(ms) {
+    try { if (navigator.vibrate) navigator.vibrate(ms || 10); } catch (e) {}
+  }
+
+  function resetAutoHide() {
+    clearTimeout(autoHideTimer);
+    autoHideTimer = setTimeout(() => {
+      if (!tray.classList.contains('hidden')) setOpen(false);
+    }, 10000);
+  }
+
+  function launchApp(appId, btnEl) {
+    buzz(12);
+    resetAutoHide();
+
+    if (btnEl) {
+      btnEl.classList.add('loading');
+      setTimeout(() => btnEl.classList.remove('loading'), 900);
+    }
+
+    if (window.AndroidBridge && typeof window.AndroidBridge.startMiniApp === 'function') {
+      window.AndroidBridge.startMiniApp(appId);
+    } else {
+      showToast('Không tìm thấy kết nối AndroidBridge!');
+    }
+  }
+
+  function setOpen(open) {
+    buzz(6);
+    tray.classList.toggle('hidden', !open);
+    chip.classList.toggle('hidden', open);
+    backdrop.classList.toggle('off', !open);
+    if (open) {
+      resetAutoHide();
+    } else {
+      clearTimeout(autoHideTimer);
+    }
+  }
+
+  /* ── Hỗ trợ cử chỉ vuốt xuống (Swipe Down) trên khay để đóng mượt mà ── */
+  (function enableSwipeDown() {
+    let startY = null;
+    let currentDY = 0;
+
+    tray.addEventListener('pointerdown', e => {
+      resetAutoHide();
+      startY = e.clientY;
+      currentDY = 0;
+      tray.style.transition = 'none';
+    });
+
+    tray.addEventListener('pointermove', e => {
+      if (startY === null) return;
+      const dy = e.clientY - startY;
+      if (dy > 0) {
+        currentDY = dy;
+        tray.style.transform = `translateY(${Math.min(dy * 0.75, 120)}px)`;
       }
+    });
+
+    function endSwipe() {
+      if (startY === null) return;
+      tray.style.transition = '';
+      tray.style.transform = '';
+      if (currentDY > 48) {
+        setOpen(false);
+      }
+      startY = null;
+      currentDY = 0;
     }
 
-    function setOpen(open) {
-      document.getElementById('tray').classList.toggle('hidden', !open);
-      document.getElementById('chip').classList.toggle('hidden', open);
-    }
+    tray.addEventListener('pointerup', endSwipe);
+    tray.addEventListener('pointercancel', endSwipe);
+  })();
 
-    let toastTimeout;
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      toast.innerText = msg;
-      toast.classList.add('show');
-      clearTimeout(toastTimeout);
-      toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
-    }
-  </script>
+  let toastTimeout;
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.innerText = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  /* Khởi tạo bộ đếm tự ẩn khi mở lần đầu */
+  resetAutoHide();
+</script>
 </body>
 </html>
