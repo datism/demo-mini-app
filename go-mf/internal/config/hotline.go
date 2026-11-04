@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Hotline numbers are answered by the network (P2A): IMS-AS acts as the UAS
 // and the phone auto-launches the mapped mini-app.
@@ -32,4 +35,15 @@ func normalizeHotline(user string) string {
 		user = user[:i]
 	}
 	return strings.TrimPrefix(user, "+84")
+}
+
+// hotlineRingDelay: how long a certified hotline rings (180) before the network answers it,
+// so the caller sees the verified-caller screen first. 198 answers at once.
+var hotlineRingDelay = map[string]time.Duration{
+	HotlineAirline: 5 * time.Second,
+}
+
+// HotlineRingDelay returns how long user rings before it is answered (0 = answer at once).
+func HotlineRingDelay(user string) time.Duration {
+	return hotlineRingDelay[normalizeHotline(user)]
 }

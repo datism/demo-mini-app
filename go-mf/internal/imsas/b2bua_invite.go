@@ -972,6 +972,32 @@ func (b *B2BUA) processMediaInstruction(session *CallSession, instruction *sba.M
 			rewrittenSDP = ExcludeADCFromSDP(rewrittenSDP)
 			log.Printf("[IMS-AS] Originating MTSI Interworking (AC.7.9.4): stripped BDC/ADC from caller 200 OK SDP answer")
 		}
+		if delay := config.HotlineRingDelay(session.Callee); delay > 0 {
+			// Certified hotline: ring first (180), answer after the delay unless the caller cancelled.
+			// 180 and 200 carry the same To tag (one dialog).
+			to := session.OrigMsg.GetHeader("To")
+			if !strings.Contains(to, ";tag=") {
+				to += ";tag=" + generateSIPTag()
+			}
+			headers["To"] = to
+			b.sendUDP(b.BuildSIPResponse(session.OrigMsg, 180, "Ringing", map[string]string{"To": to}, ""), remoteAddr)
+			log.Printf("[IMS-AS] Hotline %s rings for %s before answering", session.Callee, delay)
+			resp := b.BuildSIPResponse(session.OrigMsg, 200, "OK", headers, rewrittenSDP)
+			go func(callID string) {
+				time.Sleep(delay)
+				b.mu.RLock()
+				_, alive := b.sessions[callID]
+				b.mu.RUnlock()
+				if !alive { // CANCEL already released the call: end the INVITE transaction with 487
+					b.sendUDP(b.BuildSIPResponse(session.OrigMsg, 487, "Request Terminated", map[string]string{"To": to}, ""), remoteAddr)
+					log.Printf("[IMS-AS] Hotline call %s cancelled while ringing", callID)
+					return
+				}
+				b.sendUDP(resp, remoteAddr)
+				log.Printf("[IMS-AS] Replied 200 OK for Hotline %s after ringing", session.Callee)
+			}(session.CallID)
+			return
+		}
 		resp := b.BuildSIPResponse(session.OrigMsg, 200, "OK", headers, rewrittenSDP)
 		b.sendUDP(resp, remoteAddr)
 		log.Printf("[IMS-AS] Symmetrically replied 200 OK with rewritten SDP for Hotline 198")

@@ -158,7 +158,7 @@ class CallActivity : AppCompatActivity() {
     private lateinit var localUser:  String
     lateinit var remoteUser: String
     /** What is shown for the other person: the name saved in the app's phonebook, else the number. */
-    val peerName: String get() = Phonebook.label(this, remoteUser)
+    val peerName: String get() = CertifiedNumbers.of(remoteUser)?.name ?: Phonebook.label(this, remoteUser)
     private lateinit var localIp:    String
     private var localPort = 15060
     private var sipPort   = 5060
@@ -683,6 +683,7 @@ class CallActivity : AppCompatActivity() {
         binding.tvTopAvatar.text = initial
         binding.tvBigAvatar.text = initial
         binding.tvBigName.text = peerName
+        CertifiedNumbers.of(remoteUser)?.let { showCertified(it) }
         startAvatarPulse()
 
         // Setup background placeholder & details defaults
@@ -1958,6 +1959,20 @@ class CallActivity : AppCompatActivity() {
     }
 
     // Soft ring that grows and fades behind the big avatar while the call is connecting.
+    /** Carrier-verified number: blue screen, brand icon with a green check, "Đã xác thực" badge. */
+    private fun showCertified(c: CertifiedNumbers.Certified) {
+        binding.viewBackgroundPlaceholder.setBackgroundResource(R.drawable.gradient_call_verified)
+        binding.tvBigAvatar.setBackgroundResource(R.drawable.bg_verified_avatar)
+        binding.tvBigAvatar.text = c.icon
+        binding.tvBigAvatar.textSize = 44f
+        binding.tvTopAvatar.text = c.icon
+        binding.tvVerifiedCheck.visibility = View.VISIBLE
+        binding.tvBigNumber.text = remoteUser
+        binding.tvBigNumber.visibility = View.VISIBLE
+        binding.tvVerifiedBadge.visibility = View.VISIBLE
+        binding.tvVerifiedBy.visibility = View.VISIBLE
+    }
+
     private fun startAvatarPulse() {
         val ring = binding.viewAvatarPulse
         val scaleX = android.animation.ObjectAnimator.ofFloat(ring, View.SCALE_X, 0.85f, 1.35f)
