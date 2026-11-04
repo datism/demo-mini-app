@@ -1063,6 +1063,8 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
+        sipManager.onReInviteProvisional = { code, cseq -> miniAppManager.onReInviteProvisional(code, cseq) }
+
         sipManager.onReInviteFailed = { code, cseq ->
             lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onReInviteFailed(code, cseq) }
         }
@@ -1108,6 +1110,18 @@ class CallActivity : AppCompatActivity() {
                     val shareOpening = photoOpening || videoOpening
                     val shareClosing = photoClosing || videoClosing
                     if (shareOpening && !miniAppManager.awaitShareDecision(rawMsg, if (videoOpening) "video" else "photo")) {
+                        return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
+                    }
+                    // The other phone opens an app on the App line: our user decides first. The emote app (Home
+                    // line), closing an app and re-offers of the same app are answered without asking.
+                    val askedApp = when (val c = com.demo.imsdc.webrtc.diffAppSlot(sipManager.appReqApp, offeredApp)) {
+                        is com.demo.imsdc.webrtc.AppSlotChange.Open -> c.appId
+                        is com.demo.imsdc.webrtc.AppSlotChange.Replace -> c.appId
+                        else -> null
+                    }
+                    if (askedApp != null && !shareOpening && hotlineApp(remoteUser) == null &&
+                        askedApp != MiniAppManager.HOME_APP && !askedApp.contains("operator-menu") &&
+                        !miniAppManager.awaitAppDecision(rawMsg, askedApp)) {
                         return@withContext true // 603 / 487 already sent; nothing changes, the call goes on
                     }
                     if (photoOpening) sipManager.shareStream = true // the answer carries the stream too
