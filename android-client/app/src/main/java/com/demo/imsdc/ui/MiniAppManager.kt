@@ -285,9 +285,7 @@ class MiniAppManager(val activity: CallActivity) {
                     activity.binding.localVideoView.bringToFront()
                 }
                 activity.binding.layoutTopBar.bringToFront()
-                if (activity.binding.btnExitMiniapp.visibility == View.VISIBLE) {
-                    activity.binding.btnExitMiniapp.bringToFront()
-                }
+                activity.binding.layoutBottomControls.bringToFront() // holds the Menu button
                 raiseFullScreenOverlays()
                 activity.binding.webviewMiniapp.requestFocus()
 
@@ -588,7 +586,6 @@ class MiniAppManager(val activity: CallActivity) {
         b.layoutCallPill.visibility = if (shown) View.GONE else View.VISIBLE
         if (shown) {
             b.layoutBottomControls.bringToFront()
-            b.btnExitMiniapp.bringToFront()
             b.layoutBottomControls.postDelayed(hideCallControls, CALL_CONTROLS_SHOW_MS)
         } else {
             b.layoutCallPill.bringToFront()
@@ -673,7 +670,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.btnExitMiniapp.visibility = View.GONE
             } else {
                 activity.binding.btnExitMiniapp.visibility = View.VISIBLE
-                activity.binding.btnExitMiniapp.bringToFront()
+                activity.binding.layoutBottomControls.bringToFront()
             }
             activity.dcManager.targetAppId = targetId
 
@@ -688,7 +685,7 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.localVideoView.bringToFront()
             }
             activity.binding.layoutTopBar.bringToFront()
-            activity.binding.btnExitMiniapp.bringToFront()
+            activity.binding.layoutBottomControls.bringToFront()
             raiseFullScreenOverlays()
 
             // 1. Gửi tin nhắn điều khiển P2P qua ADC (Stream 1000) để bảo đầu kia mở ứng dụng
