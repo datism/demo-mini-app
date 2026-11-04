@@ -1260,6 +1260,8 @@ class CallActivity : AppCompatActivity() {
             dcManager.handleAdcMessage(data)
         }
 
+        dcManager.onAppReady = { appId, source -> miniAppManager.onAppReady(appId, source) }
+
         dcManager.onHtmlReceived = { _ ->
             Log.i(TAG, "Mini-app HTML received")
             lifecycleScope.launch(Dispatchers.Main) {
@@ -2012,7 +2014,9 @@ class CallActivity : AppCompatActivity() {
             agentMediaPlayer?.release()
             agentMediaPlayer = null
 
-            val afd = assets.openFd("miniapps/smart-menu/agent_greeting.mp3")
+            // From the smart-menu package downloaded from the DCAR (no pages are bundled in the APK).
+            val greeting = java.io.File(cacheDir, "miniapps/smart-menu/agent_greeting.mp3")
+            if (!greeting.exists()) { Log.w(TAG, "agent_greeting.mp3 not downloaded yet, skipping"); return }
             agentMediaPlayer = android.media.MediaPlayer().apply {
                 setAudioAttributes(
                     android.media.AudioAttributes.Builder()
@@ -2020,8 +2024,7 @@ class CallActivity : AppCompatActivity() {
                         .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
                         .build()
                 )
-                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                afd.close()
+                setDataSource(greeting.absolutePath)
                 prepare()
                 start()
                 setOnCompletionListener {

@@ -1,7 +1,0 @@
-{
-  "appId": "0003210000000001",
-  "qosHint": {
-    "latencyMs": 200,
-    "packetLossRate": 0.05
-  }
-}

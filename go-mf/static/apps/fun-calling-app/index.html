@@ -67,24 +67,30 @@
       height: 36px;
       font-size: 18px;
     }
-    /* Any emoji from the phone's keyboard: recent ones, the ＋ button and its input box */
-    #emote-recent { display: contents; }
+    /* ＋ and the emoji panel: Android's emoji, drawn by the phone's emoji font; nothing to type */
     .emote-list button.plus { font-size: 20px; font-weight: 600; }
-    .emote-pick {
-      position: absolute;
-      right: 46px;
-      width: 150px;
-      height: 36px;
-      border-radius: 18px;
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      background: rgba(20, 20, 24, 0.75);
-      color: #fff;
-      font-size: 18px;
-      padding: 0 12px;
-      outline: none;
+    .emoji-sheet { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-end; }
+    .emoji-sheet.hidden { display: none; }
+    .emoji-panel {
+      width: 100%; height: 58vh; background: rgba(28, 28, 32, 0.97); border-radius: 18px 18px 0 0;
+      display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom, 0px);
     }
-    .emote-pick::placeholder { color: rgba(255, 255, 255, 0.7); font-size: 13px; }
-    .emote-pick.hidden { display: none; }
+    .emoji-head { display: flex; align-items: center; padding: 6px 8px 0; }
+    .emoji-tabs { flex: 1; display: flex; overflow-x: auto; gap: 2px; scrollbar-width: none; }
+    .emoji-tabs::-webkit-scrollbar { display: none; }
+    .emoji-tabs button, .emoji-close {
+      flex: 0 0 auto; width: 40px; height: 40px; border: 0; border-radius: 10px;
+      background: transparent; font-size: 22px; padding: 0; opacity: .55; color: #fff;
+    }
+    .emoji-tabs button.on { opacity: 1; background: rgba(255, 255, 255, 0.12); }
+    .emoji-close { opacity: .8; font-size: 18px; }
+    .emoji-title { color: rgba(255, 255, 255, 0.6); font: 500 12px sans-serif; padding: 6px 14px 2px; }
+    .emoji-grid {
+      flex: 1; overflow-y: auto; padding: 4px 8px 10px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); align-content: start;
+    }
+    .emoji-grid button { height: 44px; border: 0; background: transparent; font-size: 28px; padding: 0; border-radius: 10px; }
+    .emoji-grid button:active { background: rgba(255, 255, 255, 0.15); }
     .emote-list.hidden {
       opacity: 0;
       transform: translateY(-8px) scaleY(.6);
@@ -264,16 +270,20 @@
   <div class="emote">
     <button class="emote-toggle" id="emote-toggle" onclick="toggleEmotes()" aria-label="Biểu cảm">❤️</button>
     <div class="emote-list hidden" id="emote-list">
-      <button onclick="sendSticker('heart')" title="Trái tim">❤️</button>
-      <button onclick="sendSticker('like')" title="Thích">👍</button>
-      <button onclick="sendSticker('smile')" title="Mặt cười">😊</button>
-      <button onclick="sendSticker('angry')" title="Tức giận">😡</button>
-      <button onclick="sendSticker('wave')" title="Vẫy chào">👋</button>
-      <div id="emote-recent"></div>
+      <div id="emote-recent" style="display:contents"></div>
       <button class="plus" id="emote-plus" onclick="openPicker()" title="Emoji khác">＋</button>
     </div>
-    <input class="emote-pick hidden" id="emote-pick" type="text" inputmode="text" autocomplete="off"
-      placeholder="Chọn emoji trên bàn phím" aria-label="Chọn emoji">
+  </div>
+
+  <div class="emoji-sheet hidden" id="emoji-sheet" onclick="if (event.target === this) closePicker()">
+    <div class="emoji-panel" role="dialog" aria-label="Chọn emoji">
+      <div class="emoji-head">
+        <div class="emoji-tabs" id="emoji-tabs"></div>
+        <button class="emoji-close" onclick="closePicker()" aria-label="Đóng">✕</button>
+      </div>
+      <div class="emoji-title" id="emoji-title"></div>
+      <div class="emoji-grid" id="emoji-grid"></div>
+    </div>
   </div>
 
   <div class="tray" id="tray" role="toolbar" aria-label="5G New Calling">
@@ -293,11 +303,20 @@
       if (closed) closePicker();
     }
 
-    /* ── Any emoji from the phone's keyboard ── */
+    /* ── Emotes: the 4 most recent, and ＋ for every standard emoji ── */
+    // Unicode 14 emoji, fully qualified, no skin-tone variants, grouped like the keyboard's emoji tab.
+    // Only characters: each phone draws them with its own (Android) emoji font.
+    const EMOJI_GROUPS = [["😀", "Mặt cười", "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 🫠 😉 😊 😇 🥰 😍 🤩 😘 😗 ☺️ 😚 😙 🥲 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🫢 🫣 🤫 🤔 🫡 🤐 🤨 😐 😑 😶 🫥 😶‍🌫️ 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 😵‍💫 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 🫤 😟 🙁 ☹️ 😮 😯 😲 😳 🥺 🥹 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 ☠️ 💩 🤡 👹 👺 👻 👽 👾 🤖 😺 😸 😹 😻 😼 😽 🙀 😿 😾 🙈 🙉 🙊 💋 💌 💘 💝 💖 💗 💓 💞 💕 💟 ❣️ 💔 ❤️‍🔥 ❤️‍🩹 ❤️ 🧡 💛 💚 💙 💜 🤎 🖤 🤍 💯 💢 💥 💫 💦 💨 🕳️ 💣 💬 👁️‍🗨️ 🗨️ 🗯️ 💭 💤"], ["👋", "Người", "👋 🤚 🖐️ ✋ 🖖 🫱 🫲 🫳 🫴 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 🖕 👇 ☝️ 🫵 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ✍️ 💅 🤳 💪 🦾 🦿 🦵 🦶 👂 🦻 👃 🧠 🫀 🫁 🦷 🦴 👀 👁️ 👅 👄 🫦 👶 🧒 👦 👧 🧑 👱 👨 🧔 🧔‍♂️ 🧔‍♀️ 👨‍🦰 👨‍🦱 👨‍🦳 👨‍🦲 👩 👩‍🦰 🧑‍🦰 👩‍🦱 🧑‍🦱 👩‍🦳 🧑‍🦳 👩‍🦲 🧑‍🦲 👱‍♀️ 👱‍♂️ 🧓 👴 👵 🙍 🙍‍♂️ 🙍‍♀️ 🙎 🙎‍♂️ 🙎‍♀️ 🙅 🙅‍♂️ 🙅‍♀️ 🙆 🙆‍♂️ 🙆‍♀️ 💁 💁‍♂️ 💁‍♀️ 🙋 🙋‍♂️ 🙋‍♀️ 🧏 🧏‍♂️ 🧏‍♀️ 🙇 🙇‍♂️ 🙇‍♀️ 🤦 🤦‍♂️ 🤦‍♀️ 🤷 🤷‍♂️ 🤷‍♀️ 🧑‍⚕️ 👨‍⚕️ 👩‍⚕️ 🧑‍🎓 👨‍🎓 👩‍🎓 🧑‍🏫 👨‍🏫 👩‍🏫 🧑‍⚖️ 👨‍⚖️ 👩‍⚖️ 🧑‍🌾 👨‍🌾 👩‍🌾 🧑‍🍳 👨‍🍳 👩‍🍳 🧑‍🔧 👨‍🔧 👩‍🔧 🧑‍🏭 👨‍🏭 👩‍🏭 🧑‍💼 👨‍💼 👩‍💼 🧑‍🔬 👨‍🔬 👩‍🔬 🧑‍💻 👨‍💻 👩‍💻 🧑‍🎤 👨‍🎤 👩‍🎤 🧑‍🎨 👨‍🎨 👩‍🎨 🧑‍✈️ 👨‍✈️ 👩‍✈️ 🧑‍🚀 👨‍🚀 👩‍🚀 🧑‍🚒 👨‍🚒 👩‍🚒 👮 👮‍♂️ 👮‍♀️ 🕵️ 🕵️‍♂️ 🕵️‍♀️ 💂 💂‍♂️ 💂‍♀️ 🥷 👷 👷‍♂️ 👷‍♀️ 🫅 🤴 👸 👳 👳‍♂️ 👳‍♀️ 👲 🧕 🤵 🤵‍♂️ 🤵‍♀️ 👰 👰‍♂️ 👰‍♀️ 🤰 🫃 🫄 🤱 👩‍🍼 👨‍🍼 🧑‍🍼 👼 🎅 🤶 🧑‍🎄 🦸 🦸‍♂️ 🦸‍♀️ 🦹 🦹‍♂️ 🦹‍♀️ 🧙 🧙‍♂️ 🧙‍♀️ 🧚 🧚‍♂️ 🧚‍♀️ 🧛 🧛‍♂️ 🧛‍♀️ 🧜 🧜‍♂️ 🧜‍♀️ 🧝 🧝‍♂️ 🧝‍♀️ 🧞 🧞‍♂️ 🧞‍♀️ 🧟 🧟‍♂️ 🧟‍♀️ 🧌 💆 💆‍♂️ 💆‍♀️ 💇 💇‍♂️ 💇‍♀️ 🚶 🚶‍♂️ 🚶‍♀️ 🧍 🧍‍♂️ 🧍‍♀️ 🧎 🧎‍♂️ 🧎‍♀️ 🧑‍🦯 👨‍🦯 👩‍🦯 🧑‍🦼 👨‍🦼 👩‍🦼 🧑‍🦽 👨‍🦽 👩‍🦽 🏃 🏃‍♂️ 🏃‍♀️ 💃 🕺 🕴️ 👯 👯‍♂️ 👯‍♀️ 🧖 🧖‍♂️ 🧖‍♀️ 🧗 🧗‍♂️ 🧗‍♀️ 🤺 🏇 ⛷️ 🏂 🏌️ 🏌️‍♂️ 🏌️‍♀️ 🏄 🏄‍♂️ 🏄‍♀️ 🚣 🚣‍♂️ 🚣‍♀️ 🏊 🏊‍♂️ 🏊‍♀️ ⛹️ ⛹️‍♂️ ⛹️‍♀️ 🏋️ 🏋️‍♂️ 🏋️‍♀️ 🚴 🚴‍♂️ 🚴‍♀️ 🚵 🚵‍♂️ 🚵‍♀️ 🤸 🤸‍♂️ 🤸‍♀️ 🤼 🤼‍♂️ 🤼‍♀️ 🤽 🤽‍♂️ 🤽‍♀️ 🤾 🤾‍♂️ 🤾‍♀️ 🤹 🤹‍♂️ 🤹‍♀️ 🧘 🧘‍♂️ 🧘‍♀️ 🛀 🛌 🧑‍🤝‍🧑 👭 👫 👬 💏 👩‍❤️‍💋‍👨 👨‍❤️‍💋‍👨 👩‍❤️‍💋‍👩 💑 👩‍❤️‍👨 👨‍❤️‍👨 👩‍❤️‍👩 👪 👨‍👩‍👦 👨‍👩‍👧 👨‍👩‍👧‍👦 👨‍👩‍👦‍👦 👨‍👩‍👧‍👧 👨‍👨‍👦 👨‍👨‍👧 👨‍👨‍👧‍👦 👨‍👨‍👦‍👦 👨‍👨‍👧‍👧 👩‍👩‍👦 👩‍👩‍👧 👩‍👩‍👧‍👦 👩‍👩‍👦‍👦 👩‍👩‍👧‍👧 👨‍👦 👨‍👦‍👦 👨‍👧 👨‍👧‍👦 👨‍👧‍👧 👩‍👦 👩‍👦‍👦 👩‍👧 👩‍👧‍👦 👩‍👧‍👧 🗣️ 👤 👥 🫂 👣"], ["🐶", "Con vật", "🐵 🐒 🦍 🦧 🐶 🐕 🦮 🐕‍🦺 🐩 🐺 🦊 🦝 🐱 🐈 🐈‍⬛ 🦁 🐯 🐅 🐆 🐴 🐎 🦄 🦓 🦌 🦬 🐮 🐂 🐃 🐄 🐷 🐖 🐗 🐽 🐏 🐑 🐐 🐪 🐫 🦙 🦒 🐘 🦣 🦏 🦛 🐭 🐁 🐀 🐹 🐰 🐇 🐿️ 🦫 🦔 🦇 🐻 🐻‍❄️ 🐨 🐼 🦥 🦦 🦨 🦘 🦡 🐾 🦃 🐔 🐓 🐣 🐤 🐥 🐦 🐧 🕊️ 🦅 🦆 🦢 🦉 🦤 🪶 🦩 🦚 🦜 🐸 🐊 🐢 🦎 🐍 🐲 🐉 🦕 🦖 🐳 🐋 🐬 🦭 🐟 🐠 🐡 🦈 🐙 🐚 🪸 🐌 🦋 🐛 🐜 🐝 🪲 🐞 🦗 🪳 🕷️ 🕸️ 🦂 🦟 🪰 🪱 🦠 💐 🌸 💮 🪷 🏵️ 🌹 🥀 🌺 🌻 🌼 🌷 🌱 🪴 🌲 🌳 🌴 🌵 🌾 🌿 ☘️ 🍀 🍁 🍂 🍃 🪹 🪺"], ["🍔", "Đồ ăn", "🍇 🍈 🍉 🍊 🍋 🍌 🍍 🥭 🍎 🍏 🍐 🍑 🍒 🍓 🫐 🥝 🍅 🫒 🥥 🥑 🍆 🥔 🥕 🌽 🌶️ 🫑 🥒 🥬 🥦 🧄 🧅 🍄 🥜 🫘 🌰 🍞 🥐 🥖 🫓 🥨 🥯 🥞 🧇 🧀 🍖 🍗 🥩 🥓 🍔 🍟 🍕 🌭 🥪 🌮 🌯 🫔 🥙 🧆 🥚 🍳 🥘 🍲 🫕 🥣 🥗 🍿 🧈 🧂 🥫 🍱 🍘 🍙 🍚 🍛 🍜 🍝 🍠 🍢 🍣 🍤 🍥 🥮 🍡 🥟 🥠 🥡 🦀 🦞 🦐 🦑 🦪 🍦 🍧 🍨 🍩 🍪 🎂 🍰 🧁 🥧 🍫 🍬 🍭 🍮 🍯 🍼 🥛 ☕ 🫖 🍵 🍶 🍾 🍷 🍸 🍹 🍺 🍻 🥂 🥃 🫗 🥤 🧋 🧃 🧉 🧊 🥢 🍽️ 🍴 🥄 🔪 🫙 🏺"], ["✈️", "Du lịch", "🌍 🌎 🌏 🌐 🗺️ 🗾 🧭 🏔️ ⛰️ 🌋 🗻 🏕️ 🏖️ 🏜️ 🏝️ 🏞️ 🏟️ 🏛️ 🏗️ 🧱 🪨 🪵 🛖 🏘️ 🏚️ 🏠 🏡 🏢 🏣 🏤 🏥 🏦 🏨 🏩 🏪 🏫 🏬 🏭 🏯 🏰 💒 🗼 🗽 ⛪ 🕌 🛕 🕍 ⛩️ 🕋 ⛲ ⛺ 🌁 🌃 🏙️ 🌄 🌅 🌆 🌇 🌉 ♨️ 🎠 🛝 🎡 🎢 💈 🎪 🚂 🚃 🚄 🚅 🚆 🚇 🚈 🚉 🚊 🚝 🚞 🚋 🚌 🚍 🚎 🚐 🚑 🚒 🚓 🚔 🚕 🚖 🚗 🚘 🚙 🛻 🚚 🚛 🚜 🏎️ 🏍️ 🛵 🦽 🦼 🛺 🚲 🛴 🛹 🛼 🚏 🛣️ 🛤️ 🛢️ ⛽ 🛞 🚨 🚥 🚦 🛑 🚧 ⚓ 🛟 ⛵ 🛶 🚤 🛳️ ⛴️ 🛥️ 🚢 ✈️ 🛩️ 🛫 🛬 🪂 💺 🚁 🚟 🚠 🚡 🛰️ 🚀 🛸 🛎️ 🧳 ⌛ ⏳ ⌚ ⏰ ⏱️ ⏲️ 🕰️ 🕛 🕧 🕐 🕜 🕑 🕝 🕒 🕞 🕓 🕟 🕔 🕠 🕕 🕡 🕖 🕢 🕗 🕣 🕘 🕤 🕙 🕥 🕚 🕦 🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘 🌙 🌚 🌛 🌜 🌡️ ☀️ 🌝 🌞 🪐 ⭐ 🌟 🌠 🌌 ☁️ ⛅ ⛈️ 🌤️ 🌥️ 🌦️ 🌧️ 🌨️ 🌩️ 🌪️ 🌫️ 🌬️ 🌀 🌈 🌂 ☂️ ☔ ⛱️ ⚡ ❄️ ☃️ ⛄ ☄️ 🔥 💧 🌊"], ["⚽", "Hoạt động", "🎃 🎄 🎆 🎇 🧨 ✨ 🎈 🎉 🎊 🎋 🎍 🎎 🎏 🎐 🎑 🧧 🎀 🎁 🎗️ 🎟️ 🎫 🎖️ 🏆 🏅 🥇 🥈 🥉 ⚽ ⚾ 🥎 🏀 🏐 🏈 🏉 🎾 🥏 🎳 🏏 🏑 🏒 🥍 🏓 🏸 🥊 🥋 🥅 ⛳ ⛸️ 🎣 🤿 🎽 🎿 🛷 🥌 🎯 🪀 🪁 🎱 🔮 🪄 🧿 🪬 🎮 🕹️ 🎰 🎲 🧩 🧸 🪅 🪩 🪆 ♠️ ♥️ ♦️ ♣️ ♟️ 🃏 🀄 🎴 🎭 🖼️ 🎨 🧵 🪡 🧶 🪢"], ["💡", "Đồ vật", "👓 🕶️ 🥽 🥼 🦺 👔 👕 👖 🧣 🧤 🧥 🧦 👗 👘 🥻 🩱 🩲 🩳 👙 👚 👛 👜 👝 🛍️ 🎒 🩴 👞 👟 🥾 🥿 👠 👡 🩰 👢 👑 👒 🎩 🎓 🧢 🪖 ⛑️ 📿 💄 💍 💎 🔇 🔈 🔉 🔊 📢 📣 📯 🔔 🔕 🎼 🎵 🎶 🎙️ 🎚️ 🎛️ 🎤 🎧 📻 🎷 🪗 🎸 🎹 🎺 🎻 🪕 🥁 🪘 📱 📲 ☎️ 📞 📟 📠 🔋 🪫 🔌 💻 🖥️ 🖨️ ⌨️ 🖱️ 🖲️ 💽 💾 💿 📀 🧮 🎥 🎞️ 📽️ 🎬 📺 📷 📸 📹 📼 🔍 🔎 🕯️ 💡 🔦 🏮 🪔 📔 📕 📖 📗 📘 📙 📚 📓 📒 📃 📜 📄 📰 🗞️ 📑 🔖 🏷️ 💰 🪙 💴 💵 💶 💷 💸 💳 🧾 💹 ✉️ 📧 📨 📩 📤 📥 📦 📫 📪 📬 📭 📮 🗳️ ✏️ ✒️ 🖋️ 🖊️ 🖌️ 🖍️ 📝 💼 📁 📂 🗂️ 📅 📆 🗒️ 🗓️ 📇 📈 📉 📊 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🗃️ 🗄️ 🗑️ 🔒 🔓 🔏 🔐 🔑 🗝️ 🔨 🪓 ⛏️ ⚒️ 🛠️ 🗡️ ⚔️ 🔫 🪃 🏹 🛡️ 🪚 🔧 🪛 🔩 ⚙️ 🗜️ ⚖️ 🦯 🔗 ⛓️ 🪝 🧰 🧲 🪜 ⚗️ 🧪 🧫 🧬 🔬 🔭 📡 💉 🩸 💊 🩹 🩼 🩺 🩻 🚪 🛗 🪞 🪟 🛏️ 🛋️ 🪑 🚽 🪠 🚿 🛁 🪤 🪒 🧴 🧷 🧹 🧺 🧻 🪣 🧼 🫧 🪥 🧽 🧯 🛒 🚬 ⚰️ 🪦 ⚱️ 🗿 🪧 🪪"], ["❤️", "Ký hiệu", "🏧 🚮 🚰 ♿ 🚹 🚺 🚻 🚼 🚾 🛂 🛃 🛄 🛅 ⚠️ 🚸 ⛔ 🚫 🚳 🚭 🚯 🚱 🚷 📵 🔞 ☢️ ☣️ ⬆️ ↗️ ➡️ ↘️ ⬇️ ↙️ ⬅️ ↖️ ↕️ ↔️ ↩️ ↪️ ⤴️ ⤵️ 🔃 🔄 🔙 🔚 🔛 🔜 🔝 🛐 ⚛️ 🕉️ ✡️ ☸️ ☯️ ✝️ ☦️ ☪️ ☮️ 🕎 🔯 ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ ⛎ 🔀 🔁 🔂 ▶️ ⏩ ⏭️ ⏯️ ◀️ ⏪ ⏮️ 🔼 ⏫ 🔽 ⏬ ⏸️ ⏹️ ⏺️ ⏏️ 🎦 🔅 🔆 📶 📳 📴 ♀️ ♂️ ⚧️ ✖️ ➕ ➖ ➗ 🟰 ♾️ ‼️ ⁉️ ❓ ❔ ❕ ❗ 〰️ 💱 💲 ⚕️ ♻️ ⚜️ 🔱 📛 🔰 ⭕ ✅ ☑️ ✔️ ❌ ❎ ➰ ➿ 〽️ ✳️ ✴️ ❇️ ©️ ®️ ™️ #️⃣ *️⃣ 0️⃣ 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣ 8️⃣ 9️⃣ 🔟 🔠 🔡 🔢 🔣 🔤 🅰️ 🆎 🅱️ 🆑 🆒 🆓 ℹ️ 🆔 Ⓜ️ 🆕 🆖 🅾️ 🆗 🅿️ 🆘 🆙 🆚 🈁 🈂️ 🈷️ 🈶 🈯 🉐 🈹 🈚 🈲 🉑 🈸 🈴 🈳 ㊗️ ㊙️ 🈺 🈵 🔴 🟠 🟡 🟢 🔵 🟣 🟤 ⚫ ⚪ 🟥 🟧 🟨 🟩 🟦 🟪 🟫 ⬛ ⬜ ◼️ ◻️ ◾ ◽ ▪️ ▫️ 🔶 🔷 🔸 🔹 🔺 🔻 💠 🔘 🔳 🔲"], ["🏁", "Cờ", "🏁 🚩 🎌 🏴 🏳️ 🏳️‍🌈 🏳️‍⚧️ 🏴‍☠️ 🇦🇨 🇦🇩 🇦🇪 🇦🇫 🇦🇬 🇦🇮 🇦🇱 🇦🇲 🇦🇴 🇦🇶 🇦🇷 🇦🇸 🇦🇹 🇦🇺 🇦🇼 🇦🇽 🇦🇿 🇧🇦 🇧🇧 🇧🇩 🇧🇪 🇧🇫 🇧🇬 🇧🇭 🇧🇮 🇧🇯 🇧🇱 🇧🇲 🇧🇳 🇧🇴 🇧🇶 🇧🇷 🇧🇸 🇧🇹 🇧🇻 🇧🇼 🇧🇾 🇧🇿 🇨🇦 🇨🇨 🇨🇩 🇨🇫 🇨🇬 🇨🇭 🇨🇮 🇨🇰 🇨🇱 🇨🇲 🇨🇳 🇨🇴 🇨🇵 🇨🇷 🇨🇺 🇨🇻 🇨🇼 🇨🇽 🇨🇾 🇨🇿 🇩🇪 🇩🇬 🇩🇯 🇩🇰 🇩🇲 🇩🇴 🇩🇿 🇪🇦 🇪🇨 🇪🇪 🇪🇬 🇪🇭 🇪🇷 🇪🇸 🇪🇹 🇪🇺 🇫🇮 🇫🇯 🇫🇰 🇫🇲 🇫🇴 🇫🇷 🇬🇦 🇬🇧 🇬🇩 🇬🇪 🇬🇫 🇬🇬 🇬🇭 🇬🇮 🇬🇱 🇬🇲 🇬🇳 🇬🇵 🇬🇶 🇬🇷 🇬🇸 🇬🇹 🇬🇺 🇬🇼 🇬🇾 🇭🇰 🇭🇲 🇭🇳 🇭🇷 🇭🇹 🇭🇺 🇮🇨 🇮🇩 🇮🇪 🇮🇱 🇮🇲 🇮🇳 🇮🇴 🇮🇶 🇮🇷 🇮🇸 🇮🇹 🇯🇪 🇯🇲 🇯🇴 🇯🇵 🇰🇪 🇰🇬 🇰🇭 🇰🇮 🇰🇲 🇰🇳 🇰🇵 🇰🇷 🇰🇼 🇰🇾 🇰🇿 🇱🇦 🇱🇧 🇱🇨 🇱🇮 🇱🇰 🇱🇷 🇱🇸 🇱🇹 🇱🇺 🇱🇻 🇱🇾 🇲🇦 🇲🇨 🇲🇩 🇲🇪 🇲🇫 🇲🇬 🇲🇭 🇲🇰 🇲🇱 🇲🇲 🇲🇳 🇲🇴 🇲🇵 🇲🇶 🇲🇷 🇲🇸 🇲🇹 🇲🇺 🇲🇻 🇲🇼 🇲🇽 🇲🇾 🇲🇿 🇳🇦 🇳🇨 🇳🇪 🇳🇫 🇳🇬 🇳🇮 🇳🇱 🇳🇴 🇳🇵 🇳🇷 🇳🇺 🇳🇿 🇴🇲 🇵🇦 🇵🇪 🇵🇫 🇵🇬 🇵🇭 🇵🇰 🇵🇱 🇵🇲 🇵🇳 🇵🇷 🇵🇸 🇵🇹 🇵🇼 🇵🇾 🇶🇦 🇷🇪 🇷🇴 🇷🇸 🇷🇺 🇷🇼 🇸🇦 🇸🇧 🇸🇨 🇸🇩 🇸🇪 🇸🇬 🇸🇭 🇸🇮 🇸🇯 🇸🇰 🇸🇱 🇸🇲 🇸🇳 🇸🇴 🇸🇷 🇸🇸 🇸🇹 🇸🇻 🇸🇽 🇸🇾 🇸🇿 🇹🇦 🇹🇨 🇹🇩 🇹🇫 🇹🇬 🇹🇭 🇹🇯 🇹🇰 🇹🇱 🇹🇲 🇹🇳 🇹🇴 🇹🇷 🇹🇹 🇹🇻 🇹🇼 🇹🇿 🇺🇦 🇺🇬 🇺🇲 🇺🇳 🇺🇸 🇺🇾 🇺🇿 🇻🇦 🇻🇨 🇻🇪 🇻🇬 🇻🇮 🇻🇳 🇻🇺 🇼🇫 🇼🇸 🇽🇰 🇾🇪 🇾🇹 🇿🇦 🇿🇲 🇿🇼 🏴󠁧󠁢󠁥󠁮󠁧󠁿 🏴󠁧󠁢󠁳󠁣󠁴󠁿 🏴󠁧󠁢󠁷󠁬󠁳󠁿"]].map(([icon, name, list]) => ({ icon, name, list: list.split(' ') }));
     const RECENT_KEY = 'emote.recent', MAX_RECENT = 4;
+    const DEFAULT_RECENT = ['❤️', '👍', '😊', '😡'];
+    // The old five keep their keywords so pages without the panel still show them.
+    const KEYWORD = { '❤️': 'heart', '👍': 'like', '😊': 'smile', '😡': 'angry', '👋': 'wave' };
     function loadRecent() {
-      try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.slice(0, MAX_RECENT) : []; }
-      catch (e) { return []; }
+      try {
+        const a = JSON.parse(localStorage.getItem(RECENT_KEY) || 'null');
+        if (Array.isArray(a) && a.length) return a.filter(x => typeof x === 'string').slice(0, MAX_RECENT);
+      } catch (e) { /* unreadable: defaults */ }
+      return DEFAULT_RECENT.slice();
     }
     function renderRecent() {
       const box = document.getElementById('emote-recent');
@@ -305,50 +324,60 @@
       loadRecent().forEach(e => {
         const b = document.createElement('button');
         b.textContent = e;
-        b.title = e;
-        b.onclick = () => sendCustom(e);
+        b.onclick = () => sendEmote(e);
         box.appendChild(b);
       });
     }
     function rememberRecent(e) {
       const a = [e].concat(loadRecent().filter(x => x !== e)).slice(0, MAX_RECENT);
-      try { localStorage.setItem(RECENT_KEY, JSON.stringify(a)); } catch (err) { /* private mode: no recents */ }
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(a)); } catch (err) { /* private mode */ }
       renderRecent();
     }
-    // First user-perceived character (grapheme), so 👍🏽 or 👨‍👩‍👧 stay whole.
-    function firstGrapheme(text) {
-      if (window.Intl && Intl.Segmenter) {
-        for (const seg of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) return seg.segment;
-        return '';
-      }
-      return Array.from(text)[0] || '';
-    }
-    const isEmoji = g => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(g);
-    function openPicker() {
-      const inp = document.getElementById('emote-pick');
-      const plus = document.getElementById('emote-plus');
-      inp.style.top = (plus.offsetTop + document.getElementById('emote-list').offsetTop) + 'px';
-      inp.value = '';
-      inp.placeholder = 'Chọn emoji trên bàn phím';
-      inp.classList.remove('hidden');
-      inp.focus();
-    }
-    function closePicker() {
-      const inp = document.getElementById('emote-pick');
-      inp.classList.add('hidden');
-      inp.blur();
-    }
-    document.getElementById('emote-pick').addEventListener('input', ev => {
-      const inp = ev.target, g = firstGrapheme(inp.value.trim());
-      if (!g) return;
-      if (!isEmoji(g)) { inp.value = ''; inp.placeholder = 'Chỉ gửi được emoji 🙂'; return; }
-      closePicker();
-      sendCustom(g);
-    });
-    document.getElementById('emote-pick').addEventListener('blur', () => setTimeout(closePicker, 150));
-    function sendCustom(e) {
+    function sendEmote(e) {
       rememberRecent(e);
-      sendSticker('custom', e);
+      if (KEYWORD[e]) sendSticker(KEYWORD[e]); else sendSticker('custom', e);
+    }
+
+    let pickerTab = 0;
+    function openPicker() {
+      const tabs = document.getElementById('emoji-tabs');
+      if (!tabs.childElementCount) {
+        EMOJI_GROUPS.forEach((g, i) => {
+          const b = document.createElement('button');
+          b.textContent = g.icon;
+          b.title = g.name;
+          b.onclick = () => showTab(i);
+          tabs.appendChild(b);
+        });
+      }
+      document.getElementById('emoji-sheet').classList.remove('hidden');
+      showTab(pickerTab);
+    }
+    function showTab(i) {
+      pickerTab = i;
+      const g = EMOJI_GROUPS[i];
+      Array.from(document.getElementById('emoji-tabs').children).forEach((b, k) => b.classList.toggle('on', k === i));
+      document.getElementById('emoji-title').textContent = g.name;
+      const grid = document.getElementById('emoji-grid');
+      grid.textContent = '';
+      grid.scrollTop = 0;
+      const frag = document.createDocumentFragment();
+      g.list.forEach(e => {
+        const b = document.createElement('button');
+        b.textContent = e;
+        frag.appendChild(b);
+      });
+      grid.appendChild(frag);
+    }
+    // One listener for the whole grid.
+    document.getElementById('emoji-grid').addEventListener('click', ev => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      closePicker();
+      sendEmote(b.textContent);
+    });
+    function closePicker() {
+      document.getElementById('emoji-sheet').classList.add('hidden');
     }
     renderRecent();
 
@@ -430,7 +459,9 @@
       if (emojiType === "angry") emojiIcon = "😡";
       if (emojiType === "wave") emojiIcon = "👋";
       // A keyboard emoji from the other phone: shown as text only, never as HTML, and kept short.
-      if (typeof emoji === "string" && emoji.length > 0 && emoji.length <= 16) emojiIcon = emoji;
+      // Only a real emoji is shown; anything else (text from a modified page) falls back to ❤️.
+      if (typeof emoji === "string" && emoji.length > 0 && emoji.length <= 16 &&
+          /^[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Component}\u200d\ufe0f\u20e3]+$/u.test(emoji)) emojiIcon = emoji;
 
       const icon = document.createElement("span");
       icon.className = "emoji-icon";
