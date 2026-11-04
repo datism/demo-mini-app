@@ -44,6 +44,12 @@ class DataChannelManager(
     var onHtmlReceived: ((html: String) -> Unit)? = null
     var onHeartReceived: (() -> Unit)? = null
     var onLaunchAppReceived: ((appId: String) -> Unit)? = null
+    /**
+     * A mini app's package is settled: "304" (the cache is current), "zip" (a new package was installed),
+     * "html" (an inline page was saved as the app's index.html) or "failed". The caller loads the page;
+     * this class never loads the WebView itself, so one launch shows its page once.
+     */
+    var onAppReady: ((appId: String, source: String) -> Unit)? = null
 
     // ─── WebView ref (inject sau khi WebView được tạo) ───────────────────────
     var webView: WebView? = null
@@ -288,9 +294,10 @@ class DataChannelManager(
                 if (headers.startsWith("HTTP/1.1 304")) {
                     // The ETag is only sent when the cached package exists, and launchMiniApp has
                     // already loaded that cache: nothing changed, so do not reload the page.
-                    Log.i(TAG, "Received 304 Not Modified for $respAppId. Cached page is current, not reloading.")
+                    Log.i(TAG, "Received 304 Not Modified for $respAppId: the cached package is current")
                     resetBdcBuffer()
                     completeDownload(respAppId, true)
+                    notifyAppReady(respAppId, "304")
                     return
                 }
                 
@@ -323,12 +330,14 @@ class DataChannelManager(
 
                 if (failed) {
                     completeDownload(respAppId, false)
+                    notifyAppReady(respAppId, "failed")
                     return
                 }
 
                 if (bodyBytes.isEmpty()) {
                     Log.e(TAG, "Body is empty after full reception!")
                     completeDownload(respAppId, false)
+                    notifyAppReady(respAppId, "failed")
                     return
                 }
 
@@ -359,36 +368,29 @@ class DataChannelManager(
                             }
                             zis.closeEntry()
                         }
-                        Log.i(TAG, "Extracted ZIP for $respAppId successfully. Reloading WebView.")
-                        loadCachedMiniApp(respAppId)
+                        Log.i(TAG, "Extracted ZIP for $respAppId successfully")
                         completeDownload(respAppId, true)
+                        notifyAppReady(respAppId, "zip")
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to unzip: ${e.message}")
                         completeDownload(respAppId, false)
+                        notifyAppReady(respAppId, "failed")
                     }
                 } else {
                     val htmlStr = String(bodyBytes, Charsets.UTF_8)
+                    var saved = false
                     try {
-                        val cachedMenuDir = java.io.File(webView?.context?.cacheDir, "miniapps/operator-menu")
-                        cachedMenuDir.mkdirs()
-                        java.io.File(cachedMenuDir, "index.html").writeText(htmlStr, Charsets.UTF_8)
+                        val dir = java.io.File(webView?.context?.cacheDir, "miniapps/$respAppId")
+                        dir.deleteRecursively()
+                        dir.mkdirs()
+                        java.io.File(dir, "index.html").writeText(htmlStr, Charsets.UTF_8)
+                        saved = true
                     } catch (e: Exception) {
-                        Log.w(TAG, "Error saving operator-menu HTML cache: ${e.message}")
+                        Log.w(TAG, "Error saving inline HTML for $respAppId: ${e.message}")
                     }
-
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        Log.i(TAG, "Received inline HTML (length=${htmlStr.length}). Current targetAppId=$targetAppId")
-                        if (targetAppId == "operator-menu" || targetAppId.isBlank()) {
-                            val lvv = localVideoView
-                            if (lvv != null && lvv.parent != null) {
-                                (lvv.parent as? android.view.ViewGroup)?.removeView(lvv)
-                            }
-                            webView?.visibility = android.view.View.VISIBLE
-                            webView?.loadDataWithBaseURL("https://miniapp/", htmlStr, "text/html", "utf-8", null)
-                        }
-                        onHtmlReceived?.invoke(htmlStr)
-                    }
-                    completeDownload(respAppId, true)
+                    Log.i(TAG, "Received inline HTML for $respAppId (length=${htmlStr.length})")
+                    completeDownload(respAppId, saved)
+                    notifyAppReady(respAppId, if (saved) "html" else "failed")
                 }
             }
         }
@@ -400,22 +402,8 @@ class DataChannelManager(
         bdcExpectedBodySize = -1
     }
     
-    private fun loadCachedMiniApp(appId: String) {
-        // A late package for an app the user already left must not reload the page now on screen.
-        if (appId != targetAppId) {
-            Log.i(TAG, "Installed $appId but current app is $targetAppId — not reloading WebView")
-            return
-        }
-        val cachedAppDir = java.io.File(webView?.context?.cacheDir, "miniapps/$appId")
-        val localIndex = java.io.File(cachedAppDir, "index.html")
-        if (localIndex.exists()) {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                Log.i(TAG, "Loading cached mini-app into WebView: https://miniapp/index.html")
-                webView?.visibility = android.view.View.VISIBLE
-                webView?.loadUrl("https://miniapp/index.html")
-                onHtmlReceived?.invoke("cached")
-            }
-        }
+    private fun notifyAppReady(appId: String, source: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onAppReady?.invoke(appId, source) }
     }
 
     /**

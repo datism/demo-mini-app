@@ -227,31 +227,10 @@ class MiniAppManager(val activity: CallActivity) {
                             Log.e(TAG, "Error serving intercepted file: ${e.message}")
                         }
                     } else {
-                        // Fallback to pre-bundled Android assets
-                        try {
-                            val assetSubPath = if (relPath.isEmpty() || relPath == "index.html") "index.html" else relPath
-                            val assetPath = "miniapps/$appId/$assetSubPath"
-                            val assetStream = activity.assets.open(assetPath)
-                            val mimeType = when {
-                                assetSubPath.endsWith(".html") -> "text/html"
-                                assetSubPath.endsWith(".css") -> "text/css"
-                                assetSubPath.endsWith(".js") -> "application/javascript"
-                                assetSubPath.endsWith(".png") -> "image/png"
-                                assetSubPath.endsWith(".jpg") || assetSubPath.endsWith(".jpeg") -> "image/jpeg"
-                                assetSubPath.endsWith(".ico") -> "image/x-icon"
-                                assetSubPath.endsWith(".svg") -> "image/svg+xml"
-                                assetSubPath.endsWith(".json") -> "application/json"
-                                assetSubPath.endsWith(".mp3") -> "audio/mpeg"
-                                assetSubPath.endsWith(".wav") -> "audio/wav"
-                                assetSubPath.endsWith(".ogg") -> "audio/ogg"
-                                assetSubPath.endsWith(".mp4") -> "video/mp4"
-                                else -> "application/octet-stream"
-                            }
-                            Log.d(TAG, "Serving fallback bundled asset: $assetPath for $url")
-                            return android.webkit.WebResourceResponse(mimeType, "UTF-8", assetStream)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Intercepted file not found: ${file.absolutePath} for $url")
-                        }
+                        // Pages are not bundled in the APK any more: only the DCAR package in the cache counts.
+                        Log.w(TAG, "Intercepted file not found: ${file.absolutePath} for $url")
+                        return android.webkit.WebResourceResponse("text/plain", "UTF-8", 404, "Not Found",
+                            emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
                     }
                 }
                 return super.shouldInterceptRequest(view, request)
@@ -593,18 +572,19 @@ class MiniAppManager(val activity: CallActivity) {
         applyCameraFold()
     }
 
-    fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true) {
-        if (sendRemoteTrigger) {
-            activity.isMiniAppInitiator = true
-        } else {
-            activity.isMiniAppInitiator = false
-        }
-        activity.imsDcSdk.resetLabels()
+    fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true, initiator: Boolean = sendRemoteTrigger) {
         activity.lifecycleScope.launch(Dispatchers.Main) {
             val targetId = when {
                 appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
                 appId.contains("operator-menu") -> "operator-menu"
                 else -> appId
+            }
+            // Opening an app on the App line asks the other phone first: stay on the current page until it
+            // accepts (sendChange shows the page on 200 OK); a decline or no answer leaves nothing to undo.
+            if (sendRemoteTrigger && opensWithPeer(targetId)) {
+                Log.i(TAG, "launchMiniApp $targetId: waiting for ${activity.peerName} to accept before showing it")
+                triggerAppNegotiationReInvite(targetId)
+                return@launch
             }
             // A remote trigger (LAUNCH_APP, Re-INVITE) for the page already on screen must not reload it:
             // a reload resets the page and re-sends its startup messages (e.g. caro's sync_state).
@@ -613,6 +593,9 @@ class MiniAppManager(val activity: CallActivity) {
                 Log.i(TAG, "launchMiniApp targetId=$targetId already shown, not reloading")
                 return@launch
             }
+            // The page on screen changes from here on; until now the current page kept its channels.
+            activity.isMiniAppInitiator = initiator
+            activity.imsDcSdk.resetLabels()
             if (targetId != SHARE_APP) leaveShareForAppSwitch()
             activity.currentAppId = targetId
             // A hotline app lives on the Home slot (mid 3), so its traffic is on the Home channel.
@@ -638,15 +621,8 @@ class MiniAppManager(val activity: CallActivity) {
                 activity.binding.localVideoView.bringToFront()
                 activity.binding.layoutTopBar.bringToFront()
 
-                // Load operator-menu from local cache or bundled assets to load instantly.
-                // BDC remains active throughout the call session to support offline and network fallbacks.
-                activity.binding.webviewMiniapp.loadUrl("https://miniapp/index.html")
-                val cachedMenuDir = java.io.File(activity.cacheDir, "miniapps/operator-menu")
-                val cachedIndex = java.io.File(cachedMenuDir, "index.html")
-                if (!cachedIndex.exists()) {
-                    Log.i(TAG, "operator-menu not cached locally, requesting via BDC")
-                    activity.dcManager.setupBDC()
-                }
+                // From the DCAR (or its cache), shown once the package is settled.
+                beginLoad("operator-menu")
                 return@launch
             }
 
@@ -700,22 +676,11 @@ class MiniAppManager(val activity: CallActivity) {
                 }
             }
 
-            // 2. Load cached app if available, otherwise asset (bundled in APK)
-            val cachedAppDir = java.io.File(activity.cacheDir, "miniapps/$targetId")
-            val localIndex = java.io.File(cachedAppDir, "index.html")
-
-            Log.i(TAG, "Loading mini-app: https://miniapp/index.html (cached=${localIndex.exists()})")
-            activity.binding.webviewMiniapp.loadUrl("https://miniapp/index.html")
-
-            // 3. Khởi chạy qua GSMA SDK Interface (com.ct.ertclib.dc.core)
+            // 2. Khởi chạy qua GSMA SDK Interface (com.ct.ertclib.dc.core)
             activity.imsDcSdk.startMiniApp(activity.callId ?: "call1001", targetId)
 
-            // 4. Send BDC request with ETag
-            val prefs = activity.getSharedPreferences("miniapps_etag", android.content.Context.MODE_PRIVATE)
-            val savedEtag = if (localIndex.exists()) prefs.getString(targetId, "") else ""
-
-            Log.i(TAG, "Sending BDC request for appId=$targetId (If-None-Match: $savedEtag)")
-            activity.dcManager.sendAppRequest(targetId, savedEtag ?: "")
+            // 3. The page comes from the DCAR over the BDC (or the cache on 304), and is loaded once.
+            beginLoad(targetId)
 
             // Initiator triggers SIP Re-INVITE to negotiate ADC and tell callee to launch the app
             if (sendRemoteTrigger && targetId != "operator-menu") {
@@ -725,7 +690,83 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
+    // ───────────────────────── Loading pages from the DCAR ─────────────────────────
+    // Pages are not bundled in the APK: each launch asks the DCAR over the BDC (with the cached ETag) and
+    // shows the page exactly once per launch: on 304 (cache), on the new package, or from the cache when
+    // the network is slow. A later package for the same launch is only installed.
+
+    private var loadToken = 0
+    private var shownToken = -1
+    private var loadTarget: String? = null
+    private var loadTimers: kotlinx.coroutines.Job? = null
+
+    private fun cachedIndex(appId: String) = java.io.File(activity.cacheDir, "miniapps/$appId/index.html")
+
+    private fun beginLoad(appId: String) {
+        val token = ++loadToken
+        loadTarget = appId
+        loadTimers?.cancel()
+        val cached = cachedIndex(appId).exists()
+        showStatusPage("Đang tải ứng dụng…", spinner = true)
+        val etag = if (cached) activity.getSharedPreferences("miniapps_etag", Context.MODE_PRIVATE).getString(appId, "") ?: "" else ""
+        Log.i(TAG, "Requesting $appId from the DCAR (cached=$cached, If-None-Match: $etag)")
+        activity.dcManager.sendAppRequest(appId, etag)
+        loadTimers = activity.lifecycleScope.launch(Dispatchers.Main) {
+            delay(LOAD_CACHE_FALLBACK_MS)
+            if (token != loadToken || shownToken == token) return@launch
+            if (cachedIndex(appId).exists()) { showApp(appId, "timeout-cache"); return@launch }
+            // Nothing cached and no package yet: keep waiting (large packages are slow), then ask again.
+            repeat(LOAD_RETRIES) {
+                delay(LOAD_RETRY_MS)
+                if (token != loadToken || shownToken == token) return@launch
+                Log.w(TAG, "No package for $appId yet, asking the DCAR again")
+                showStatusPage("Mạng chậm, đang thử lại…", spinner = true)
+                activity.dcManager.sendAppRequest(appId, "")
+            }
+            delay(LOAD_RETRY_MS)
+            if (token == loadToken && shownToken != token) showStatusPage("Không tải được ứng dụng. Hãy quay về menu và thử lại.", spinner = false)
+        }
+    }
+
+    /** DataChannelManager settled a package: show it if it belongs to the launch on screen and was not shown yet. */
+    fun onAppReady(appId: String, source: String) {
+        if (appId != loadTarget) { Log.i(TAG, "Package for $appId ($source) installed; $loadTarget is on screen"); return }
+        if (shownToken == loadToken) { Log.i(TAG, "Package for $appId ($source): already shown for this launch, not reloading"); return }
+        if (source == "failed") {
+            if (cachedIndex(appId).exists()) showApp(appId, "failed-cache")
+            else showStatusPage("Không tải được ứng dụng. Hãy quay về menu và thử lại.", spinner = false)
+            return
+        }
+        showApp(appId, source)
+    }
+
+    private fun showApp(appId: String, why: String) {
+        shownToken = loadToken
+        loadTimers?.cancel()
+        Log.i(TAG, "showApp $appId ($why)")
+        activity.binding.webviewMiniapp.visibility = View.VISIBLE
+        activity.binding.webviewMiniapp.loadUrl("https://miniapp/index.html")
+    }
+
+    private fun showStatusPage(text: String, spinner: Boolean) {
+        val safe = android.text.TextUtils.htmlEncode(text)
+        val html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+            <style>html,body{margin:0;height:100%;background:transparent;font-family:sans-serif}
+            .c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;text-shadow:0 1px 3px #0009;font-size:15px;padding:24px;text-align:center}
+            .s{width:34px;height:34px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:r 0.9s linear infinite}
+            @keyframes r{to{transform:rotate(360deg)}}</style></head>
+            <body><div class="c">${if (spinner) "<div class=\"s\"></div>" else ""}<div>$safe</div></div></body></html>"""
+        activity.binding.webviewMiniapp.loadDataWithBaseURL("about:blank", html, "text/html", "utf-8", null)
+    }
+
+    /** Apps on the App line open on this phone only once the other phone accepts. */
+    private fun opensWithPeer(appId: String): Boolean =
+        appId != HOME_APP && appId != "operator-menu" && appId != "smart-menu" && hotlineApp == null
+
     companion object {
+        private const val LOAD_CACHE_FALLBACK_MS = 8_000L
+        private const val LOAD_RETRY_MS = 10_000L
+        private const val LOAD_RETRIES = 2
         const val HOME_APP = CallActivity.HOME_APP
         private const val ANSWER_TIMEOUT_MS = 5000L
         /** A share request waits for a person, not for a stack: the far end rings (180) until its user decides. */
@@ -787,6 +828,11 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private fun submit(request: AdcRequest) {
+        // Tapping the same app again while the other phone is deciding changes nothing.
+        if (awaitingPeerDecision && currentRequest?.target == request.target) {
+            Log.i(TAG, "Already asking the other phone about ${request.target}")
+            return
+        }
         requests.submit(request)?.let { runRequest(it) } ?: run {
             Log.i(TAG, "Re-INVITE in flight, keeping only the latest request: $request")
             // The other phone is still asking its user about the app we opened: withdraw it (CANCEL -> 487).
@@ -810,8 +856,11 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
+    @Volatile private var currentRequest: AdcRequest? = null
+
     private fun runRequest(request: AdcRequest) {
         activity.lifecycleScope.launch(Dispatchers.Main) {
+            currentRequest = request
             try {
                 // Home first (mid 3): go-mf takes an App line only with a Home context. Not for hotlines (no mid 4).
                 if (hotlineApp == null && request.target != HOME_APP && localSlots().home == null) {
@@ -827,6 +876,7 @@ class MiniAppManager(val activity: CallActivity) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send Re-INVITE for ${request.target}: ${e.message}")
             } finally {
+                currentRequest = null
                 requests.complete()?.let { runRequest(it) }
             }
         }
@@ -888,11 +938,13 @@ class MiniAppManager(val activity: CallActivity) {
             val (action, needsSync) = step
             when (action) {
                 OutcomeAction.CONFIRM -> {
-                    // After a glare retry the page may show what an incoming Re-INVITE launched meanwhile.
-                    if (attempt > 1 && showsPage && !request.sync && hotlineApp == null) {
+                    // The other phone accepted: show the page now (an app waits for this), or, after a glare
+                    // retry, replace what an incoming Re-INVITE launched meanwhile.
+                    if (showsPage && !request.sync && hotlineApp == null &&
+                        (attempt > 1 || opensWithPeer(request.target))) {
                         pageToRelaunch(request.target, activity.currentAppId, HOME_APP)?.let {
-                            Log.i(TAG, "Glare retry confirmed ${request.target}: relaunching it over ${activity.currentAppId}")
-                            launchMiniApp(it, sendRemoteTrigger = false)
+                            Log.i(TAG, "${request.target} confirmed by the far end: showing it over ${activity.currentAppId}")
+                            launchMiniApp(it, sendRemoteTrigger = false, initiator = true) // this side asked for it
                         }
                     }
                     return ChangeResult.DONE

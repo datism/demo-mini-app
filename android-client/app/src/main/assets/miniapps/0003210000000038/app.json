@@ -1,9 +1,0 @@
-{
-  "appId": "0003210000000038",
-  "appName": "TuYaApp",
-  "version": "1.0.9",
-  "qosHint": {
-    "latencyMs": 50,
-    "packetLossRate": 0.01
-  }
-}
