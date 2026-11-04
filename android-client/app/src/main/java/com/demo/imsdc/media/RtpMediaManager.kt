@@ -26,6 +26,10 @@ import java.nio.ByteBuffer
 import kotlin.experimental.xor
 
 private const val TAG = "RtpMediaManager"
+// RTP payload limit. 1200 is what WebRTC uses: the packet stays under the MTU of VPNs and mobile
+// links (WireGuard ~1420, IPsec ~1400, some carriers less). Bigger packets were split into IP
+// fragments, and losing any fragment lost the packet, freezing video until the next keyframe.
+private const val MAX_RTP_PAYLOAD = 1200
 
 class RtpMediaManager(
     private val context: Context,
@@ -79,7 +83,13 @@ class RtpMediaManager(
     private var audioRecord: AudioRecord? = null
 
     // Video output surface
-    private var decoderSurface: Surface? = null
+    @Volatile private var decoderSurface: Surface? = null
+
+    // Guards videoDecoder's lifecycle: the receiver thread feeds it while the main thread replaces it.
+    private val decoderLock = Any()
+    // Set when a new decoder is created; the receiver thread then waits for (and asks for) a keyframe.
+    @Volatile private var decoderNeedsKeyframe = false
+    private var lastDecoderRecreateAt = 0L
 
     // Preallocated buffers for YUV rotation and NV12 transformation
     private val rotatedY = ByteBuffer.allocateDirect(307200)
@@ -289,8 +299,10 @@ class RtpMediaManager(
         }
 
         // Start or update Video components
-        if (videoDecoder == null && decoderSurface != null && decoderSurface?.isValid == true && videoSocket != null) {
-            startVideoReceiver()
+        synchronized(decoderLock) {
+            if (videoDecoder == null && decoderSurface?.isValid == true && videoSocket != null) {
+                startVideoReceiver()
+            }
         }
 
         if (videoEncoder == null && this.localVideoTrack != null && videoSocket != null) {
@@ -301,14 +313,10 @@ class RtpMediaManager(
     @Synchronized
     fun onSurfaceDestroyed() {
         Log.i(TAG, "Surface destroyed, releasing video decoder safely")
-        val oldDecoder = videoDecoder
-        videoDecoder = null       // Null first -> feedDecoder() returns immediately
-        decoderSurface = null
-        try {
-            oldDecoder?.stop()
-            oldDecoder?.release()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error releasing decoder on surface destroy: ${e.message}")
+        // The receiver thread may be inside feedDecoder() with this decoder: wait for it.
+        synchronized(decoderLock) {
+            releaseDecoderLocked()
+            decoderSurface = null
         }
         // videoReceiverThread remains alive to receive UDP packets
     }
@@ -316,38 +324,47 @@ class RtpMediaManager(
     @Synchronized
     fun updateDecoderSurface(surface: Surface?) {
         Log.i(TAG, "Updating decoder surface: valid=${surface?.isValid}")
-        if (surface != null && surface.isValid) {
+        if (surface == null || !surface.isValid) return
+        synchronized(decoderLock) {
+            // onStart calls this on every return to the screen. Rebuilding a working decoder
+            // freezes the picture until the next keyframe, so keep it.
+            if (surface === decoderSurface && videoDecoder != null) {
+                Log.i(TAG, "Decoder already renders to this surface, keeping it")
+                return
+            }
             this.decoderSurface = surface
-            if (isRunning && videoSocket != null) {
-                // Safely release dead/old decoder if present
-                val oldDecoder = videoDecoder
-                videoDecoder = null
-                try {
-                    oldDecoder?.stop()
-                    oldDecoder?.release()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error releasing old decoder: ${e.message}")
-                }
-
-                if (videoReceiverThread?.isAlive == true) {
-                    reinitDecoder(surface)
-                } else {
-                    startVideoReceiver()
-                }
+            if (!isRunning || videoSocket == null) return
+            releaseDecoderLocked()
+            if (videoReceiverThread?.isAlive == true) {
+                reinitDecoder(surface)
+            } else {
+                startVideoReceiver()
             }
         }
     }
 
-    private fun reinitDecoder(surface: Surface) {
-        try {
+    /** Caller holds [decoderLock]. stop() and release() are tried separately so a failed stop never leaks the codec. */
+    private fun releaseDecoderLocked() {
+        val old = videoDecoder ?: return
+        videoDecoder = null
+        try { old.stop() } catch (e: Exception) { Log.w(TAG, "Decoder stop failed: ${e.message}") }
+        try { old.release() } catch (e: Exception) { Log.w(TAG, "Decoder release failed: ${e.message}") }
+    }
+
+    /** Caller holds [decoderLock]. A fresh decoder can only start from a keyframe: the receiver asks for one. */
+    private fun reinitDecoder(surface: Surface): Boolean {
+        return try {
             val decoder = MediaCodec.createDecoderByType("video/avc")
             val format = MediaFormat.createVideoFormat("video/avc", 480, 640)
             decoder.configure(format, surface, null, 0)
             decoder.start()
             videoDecoder = decoder
-            Log.i(TAG, "H.264 Video Decoder re-initialized on new surface")
+            decoderNeedsKeyframe = true
+            Log.i(TAG, "H.264 Video Decoder initialized on surface")
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to reinit video decoder: ${e.message}", e)
+            Log.e(TAG, "Failed to init video decoder: ${e.message}", e)
+            false
         }
     }
 
@@ -355,6 +372,12 @@ class RtpMediaManager(
     fun updateLocalVideoTrack(track: VideoTrack?) {
         Log.i(TAG, "Updating local video track: $track")
         if (track != null) {
+            // A new track: unhook the old one, or both would feed the encoder at once.
+            val old = localVideoTrack
+            val sink = videoSink
+            if (old != null && old !== track && sink != null) {
+                try { old.removeSink(sink) } catch (_: Exception) {}
+            }
             this.localVideoTrack = track
             if (isRunning && videoEncoder == null && videoSocket != null) {
                 startVideoSender()
@@ -373,10 +396,10 @@ class RtpMediaManager(
         isRunning = false
         Log.i(TAG, "Stopping RTP Media Manager...")
 
-        // Remove video sink
+        // Remove video sink. A track already disposed throws, which would skip closing the sockets below.
         localVideoTrack?.let { track ->
             videoSink?.let { sink ->
-                track.removeSink(sink)
+                try { track.removeSink(sink) } catch (e: Exception) { Log.w(TAG, "removeSink failed: ${e.message}") }
             }
         }
         videoSink = null
@@ -518,7 +541,8 @@ class RtpMediaManager(
                             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                             .build()
                     )
-                    .setBufferSizeInBytes(Math.max(minBufSize, 640))
+                    // Room for 500 ms so write() never blocks below the 200 ms cap applied in the loop.
+                    .setBufferSizeInBytes(Math.max(minBufSize, 8000))
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
                 audioTrack?.play()
@@ -531,6 +555,12 @@ class RtpMediaManager(
             val socket = audioSocket
             val packetBuf = ByteArray(2048)
             val pcmOutput = ShortArray(2048)
+            // The two phones' audio clocks differ slightly. When the far end records faster than this
+            // phone plays, the surplus used to queue up (blocking write, then the socket buffer) and the
+            // voice fell further behind the video the longer the call ran. Cap what waits to be played.
+            val maxQueuedFrames = 8000 * 200 / 1000
+            var framesWritten = 0L
+            var lateDropped = 0
 
             while (isRunning && socket != null && !socket.isClosed) {
                 try {
@@ -560,7 +590,19 @@ class RtpMediaManager(
                         pcmOutput[i] = alawToLinear(packetBuf[12 + i])
                     }
 
-                    audioTrack?.write(pcmOutput, 0, decodeSamples)
+                    val track = audioTrack
+                    if (track != null) {
+                        val queued = framesWritten - (track.playbackHeadPosition.toLong() and 0xFFFFFFFFL)
+                        if (queued > maxQueuedFrames) {
+                            lateDropped++
+                            if (lateDropped == 1 || lateDropped % 50 == 0) {
+                                Log.w(TAG, "Audio playout ${queued * 1000 / 8000} ms behind, dropped $lateDropped late packets")
+                            }
+                        } else {
+                            val w = track.write(pcmOutput, 0, decodeSamples)
+                            if (w > 0) framesWritten += w
+                        }
+                    }
                     audioPacketsReceived++
                     if (audioPacketsReceived % 100 == 0) {
                         Log.d(TAG, "📊 Audio Packets Received: $audioPacketsReceived")
@@ -708,6 +750,8 @@ class RtpMediaManager(
             
             val i420 = frame.buffer.toI420() ?: return@VideoSink
             val rotation = frame.rotation
+            // An input slot taken but never queued is gone for good; after a few the encoder stops.
+            var pendingInput = -1
 
             try {
                 val outWidth = 480
@@ -750,6 +794,7 @@ class RtpMediaManager(
 
                 val inputBufferIndex = encoder.dequeueInputBuffer(5000)
                 if (inputBufferIndex < 0) return@VideoSink
+                pendingInput = inputBufferIndex
                 // COLOR_FormatYUV420Flexible must be filled through the Image API: chroma layout
                 // (planar I420, semi-planar NV12, padded strides) differs per chip, and copying raw
                 // NV12 into an encoder that expects another layout loses the colour (black-and-white).
@@ -775,6 +820,7 @@ class RtpMediaManager(
                         false
                     }
                     // Always hand the buffer back, or the encoder runs out of input slots.
+                    pendingInput = -1
                     encoder.queueInputBuffer(
                         inputBufferIndex,
                         0,
@@ -806,6 +852,7 @@ class RtpMediaManager(
                     if (inputBuffer != null) {
                         inputBuffer.clear()
                         inputBuffer.put(nv12Bytes)
+                        pendingInput = -1
                         encoder.queueInputBuffer(
                             inputBufferIndex,
                             0,
@@ -818,6 +865,9 @@ class RtpMediaManager(
             } catch (e: Exception) {
                 Log.e(TAG, "VideoSink error: ${e.message}", e)
             } finally {
+                if (pendingInput >= 0) {
+                    try { encoder.queueInputBuffer(pendingInput, 0, 0, frame.timestampNs / 1000, 0) } catch (_: Exception) {}
+                }
                 i420.release()
             }
         }
@@ -858,7 +908,7 @@ class RtpMediaManager(
             val naluHeader = nalu[0]
             val lastOfFrame = endOfFrame && idx == lastNalu
 
-            if (nalu.size <= 1400) {
+            if (nalu.size <= MAX_RTP_PAYLOAD) {
                 // Single NAL unit packet
                 try {
                     val rtpHeader = buildRtpHeader(97, seqNum, timestamp, ssrc, lastOfFrame)
@@ -884,7 +934,7 @@ class RtpMediaManager(
                 pace()
             } else {
                 // Fragmented using FU-A
-                val payloadSize = 1380
+                val payloadSize = MAX_RTP_PAYLOAD - 2 // FU indicator + FU header
                 var sentBytes = 1 // skip original NALU header
                 val totalPayload = nalu.size - 1
 
@@ -1098,16 +1148,8 @@ class RtpMediaManager(
             return
         }
 
-        try {
-            videoDecoder = MediaCodec.createDecoderByType("video/avc")
-            val format = MediaFormat.createVideoFormat("video/avc", 480, 640)
-            videoDecoder?.configure(format, surface, null, 0)
-            videoDecoder?.start()
-            Log.i(TAG, "H.264 Video Decoder initialized successfully on surface.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize video decoder: ${e.message}", e)
-            return
-        }
+        reinitDecoder(surface) // on failure feedDecoder() retries; the thread must still run (it also reads PLIs)
+        if (videoReceiverThread?.isAlive == true) return
 
         videoReceiverThread = Thread {
             val socket = videoSocket
@@ -1236,9 +1278,19 @@ class RtpMediaManager(
             while (isRunning && socket != null && !socket.isClosed) {
                 try {
                     val packet = DatagramPacket(packetBuf, packetBuf.size)
+                    if (decoderNeedsKeyframe) {
+                        // New decoder (surface recreated or codec error): it cannot decode P-frames yet.
+                        decoderNeedsKeyframe = false
+                        waitingForKeyframe = true
+                        lastFuTimestamp = -1L
+                        naluStream.reset()
+                    }
                     try {
                         socket.receive(packet)
                     } catch (_: java.net.SocketTimeoutException) {
+                        // A decoded frame waits in the codec until it is pulled out; show it now
+                        // instead of when the next packet arrives.
+                        drainDecoder()
                         if (held.isNotEmpty() && System.currentTimeMillis() - oldestHeldAt > maxHoldMs) skipGap()
                         requestKeyframeIfFrozen()
                         continue
@@ -1305,10 +1357,10 @@ class RtpMediaManager(
     }
 
     // Returns false when the NALU could not be queued, so the caller can resync on a keyframe.
-    private fun feedDecoder(nalu: ByteArray, ptsMs: Long): Boolean {
-        val decoder = videoDecoder ?: return false
+    private fun feedDecoder(nalu: ByteArray, ptsMs: Long): Boolean = synchronized(decoderLock) {
         val surface = decoderSurface
         if (surface == null || !surface.isValid) return false  // Surface not valid or destroyed
+        val decoder = videoDecoder ?: recreateDecoderLocked(surface) ?: return false
         var queued = false
 
         try {
@@ -1316,38 +1368,62 @@ class RtpMediaManager(
             val inputBufferIndex = decoder.dequeueInputBuffer(10000)
             if (inputBufferIndex < 0) Log.w(TAG, "Decoder input busy, video NALU dropped")
             if (inputBufferIndex >= 0) {
-                val inputBuffer = decoder.getInputBuffer(inputBufferIndex) ?: return false
-                inputBuffer.clear()
-                inputBuffer.put(nalu)
-                decoder.queueInputBuffer(
-                    inputBufferIndex,
-                    0,
-                    nalu.size,
-                    ptsMs * 1000,
-                    0
-                )
-                queued = true
-            }
-
-            // Flush decoded buffers to surface immediately
-            val bufferInfo = MediaCodec.BufferInfo()
-            var outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
-            while (outputBufferIndex >= 0) {
-                decoder.releaseOutputBuffer(outputBufferIndex, true) // True: render to configured surface
-                videoFramesDecoded++
-                if (videoFramesDecoded == 1 || videoFramesDecoded % 30 == 0) {
-                    Log.i(TAG, "🎬 Video Frames Rendered to Surface: $videoFramesDecoded")
+                val inputBuffer = decoder.getInputBuffer(inputBufferIndex)
+                if (inputBuffer == null || inputBuffer.capacity() < nalu.size) {
+                    // Hand the slot back empty, or the decoder runs out of input buffers for good.
+                    decoder.queueInputBuffer(inputBufferIndex, 0, 0, ptsMs * 1000, 0)
+                    Log.w(TAG, "Decoder input buffer too small (${inputBuffer?.capacity()} < ${nalu.size}), NALU dropped")
+                } else {
+                    inputBuffer.clear()
+                    inputBuffer.put(nalu)
+                    decoder.queueInputBuffer(inputBufferIndex, 0, nalu.size, ptsMs * 1000, 0)
+                    queued = true
                 }
-                outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
             }
+            drainDecoderLocked(decoder)
         } catch (e: IllegalStateException) {
-            Log.e(TAG, "feedDecoder codec error (will auto-recover): ${e.message}")
-            videoDecoder = null
-            try { decoder.release() } catch (_: Exception) {}
+            // CodecException is an IllegalStateException: the decoder is dead. Replace it on the
+            // same surface (it used to stay dead, a black picture until the surface was recreated).
+            Log.e(TAG, "feedDecoder codec error, recreating decoder: ${e.message}")
+            if (videoDecoder === decoder) releaseDecoderLocked()
+            recreateDecoderLocked(surface)
+            queued = false
         } catch (e: Exception) {
             Log.e(TAG, "feedDecoder error: ${e.message}", e)
         }
-        return queued
+        queued
+    }
+
+    /** Caller holds [decoderLock]. At most once a second, so a decoder that keeps failing cannot spin. */
+    private fun recreateDecoderLocked(surface: Surface): MediaCodec? {
+        if (!isRunning || !surface.isValid) return null
+        val now = System.currentTimeMillis()
+        if (now - lastDecoderRecreateAt < 1000) return null
+        lastDecoderRecreateAt = now
+        return if (reinitDecoder(surface)) videoDecoder else null
+    }
+
+    private fun drainDecoder(): Unit = synchronized(decoderLock) {
+        val decoder = videoDecoder ?: return
+        try { drainDecoderLocked(decoder) } catch (e: Exception) { Log.w(TAG, "Decoder drain failed: ${e.message}") }
+    }
+
+    /**
+     * Caller holds [decoderLock]. Render each decoded frame now. releaseOutputBuffer(i, true) renders at the
+     * buffer's PTS, and that PTS is the far phone's camera clock: when it reads up to a second ahead of this
+     * phone's clock the display holds every frame back that long, and the decoder stalls on full buffers.
+     */
+    private fun drainDecoderLocked(decoder: MediaCodec) {
+        val bufferInfo = MediaCodec.BufferInfo()
+        var outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
+        while (outputBufferIndex >= 0) {
+            decoder.releaseOutputBuffer(outputBufferIndex, System.nanoTime())
+            videoFramesDecoded++
+            if (videoFramesDecoded == 1 || videoFramesDecoded % 300 == 0) {
+                Log.i(TAG, "🎬 Video Frames Rendered to Surface: $videoFramesDecoded")
+            }
+            outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
+        }
     }
 
     // ─── RELEASE HELPERS ─────────────────────────────────────────────────────
@@ -1371,20 +1447,11 @@ class RtpMediaManager(
     }
 
     private fun releaseVideo() {
-        try {
-            videoEncoder?.stop()
-            videoEncoder?.release()
-        } catch (e: Exception) {
-            // Ignore
-        }
+        val enc = videoEncoder
         videoEncoder = null
+        try { enc?.stop() } catch (_: Exception) {}
+        try { enc?.release() } catch (_: Exception) {}
 
-        try {
-            videoDecoder?.stop()
-            videoDecoder?.release()
-        } catch (e: Exception) {
-            // Ignore
-        }
-        videoDecoder = null
+        synchronized(decoderLock) { releaseDecoderLocked() }
     }
 }
