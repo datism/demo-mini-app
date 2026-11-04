@@ -618,13 +618,13 @@ class MainActivity : AppCompatActivity() {
         // Thêm mock data giống ảnh màn hình
         val now = System.currentTimeMillis()
         if (items.none { it.number == "1001" }) {
-            items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2)
+            items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2))
         }
         if (items.none { it.number == "1002" }) {
-            items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3)
+            items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3))
         }
         if (items.none { it.number == "1003" }) {
-            items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8)
+            items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8))
         }
 
         // Sắp xếp theo thời gian mới nhất lên đầu
