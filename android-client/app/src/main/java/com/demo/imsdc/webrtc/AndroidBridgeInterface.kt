@@ -241,7 +241,9 @@ class AndroidBridgeInterface(
         try {
             val activity = dataChannelManager.webView?.context as? com.demo.imsdc.ui.CallActivity
             activity?.runOnUiThread {
-                activity.playAgentVoiceAudio()
+                // 1900: "Gặp tổng đài viên" rings on the verified screen and times out; 198 plays its greeting.
+                if (activity.currentAppId == "flight-booking") activity.startAgentCall()
+                else activity.playAgentVoiceAudio()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to execute playAgentAudio: ${e.message}", e)
