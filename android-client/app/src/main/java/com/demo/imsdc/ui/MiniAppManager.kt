@@ -1340,7 +1340,7 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    /** Dark bottom sheet in the call screen's style; the buttons answer [answerShare]. Caller is on the UI thread. */
+    /** Dark card in the middle of the screen, in the call screen's style; the buttons answer [answerShare]. Caller is on the UI thread. */
     private fun showAppRequestSheet(appId: String): android.app.Dialog {
         val sheet = android.app.Dialog(activity)
         sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
@@ -1348,18 +1348,13 @@ class MiniAppManager(val activity: CallActivity) {
         sheet.setCancelable(false)
         sheet.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-            setGravity(android.view.Gravity.BOTTOM)
+            // Centred card: the screen width less a 24dp margin each side, at most 400dp on large screens.
+            val screenW = activity.resources.displayMetrics.widthPixels
+            setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.CENTER)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setDimAmount(0.45f)
-            setWindowAnimations(android.R.style.Animation_InputMethod)
-        }
-        val root = sheet.findViewById<View>(R.id.sheet_root)
-        root.setOnApplyWindowInsetsListener { v, insets ->
-            @Suppress("DEPRECATION") val nav = insets.systemWindowInsetBottom
-            val base = (20 * activity.resources.displayMetrics.density).toInt()
-            v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, base + nav)
-            insets
+            setWindowAnimations(android.R.style.Animation_Dialog)
         }
         val name = activity.peerName
         sheet.findViewById<android.widget.TextView>(R.id.tv_req_avatar).text =
