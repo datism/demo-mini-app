@@ -1,7 +1,7 @@
 {
   "appId": "photo-share",
   "appName": "Content Sharing",
-  "version": "2.4.0-hanoi-fixed-share",
+  "version": "2.4.1-hanoi-compact-ui",
   "connectionPolicy": "P2P",
   "qosHint": {
     "latencyMs": 200,

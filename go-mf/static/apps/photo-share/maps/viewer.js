@@ -2,7 +2,10 @@
 window.HanoiViewer = (() => {
   let api, map, config, opening, timer, pending, visible = false, disposed = false, lastError = null;
   const seen = new Set();
-  const status = text => { document.getElementById('mapStatus').textContent = text; };
+  const status = (text, compact = text, level = 'normal') => {
+    document.getElementById('mapStatus').textContent = text;
+    if (window.HanoiMapUi) window.HanoiMapUi.set('map', compact, level);
+  };
   const message = (t, id) => ({ t, version: 1, id });
   async function ensureMap() {
     if (map) { map.resize(); window.HanoiFixedShare.onMapReady(); return; }
@@ -36,7 +39,7 @@ window.HanoiViewer = (() => {
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       map.on('load', () => {
         if (disposed) return;
-        if (!lastError) status('Đã nạp bản đồ chi tiết · ' + config.regionName);
+        if (!lastError) status('Đã nạp bản đồ chi tiết · ' + config.regionName, 'Chọn Vị trí của tôi để bắt đầu');
         window.HanoiFixedShare.onMapReady();
         if (pending) transmit();
       });
@@ -44,15 +47,15 @@ window.HanoiViewer = (() => {
       map.on('error', event => {
         lastError = String(event.error && event.error.message || 'Lỗi không xác định');
         console.error('[HANOI_MAP]', lastError);
-        status('Lỗi bản đồ: ' + lastError.slice(0, 400));
+        status('Lỗi bản đồ: ' + lastError.slice(0, 400), 'Bản đồ chưa tải đủ · Xem chi tiết', 'error');
       });
       map.on('sourcedata', event => {
         if (event.sourceId === 'hanoi' && event.sourceDataType === 'content' && event.tile && !lastError) {
-          status('Bản đồ offline · Phóng to để xem tên đường · ' + config.regionName);
+          status('Bản đồ offline · Phóng to để xem tên đường · ' + config.regionName, 'Chọn Vị trí của tôi để bắt đầu');
         }
       });
-      map.on('webglcontextlost', () => status('Mất ngữ cảnh đồ họa. Đóng rồi mở lại bản đồ hoặc khởi động lại cuộc gọi.'));
-    })().catch(e => { status(e.message); }).finally(() => { opening = null; });
+      map.on('webglcontextlost', () => status('Mất ngữ cảnh đồ họa. Đóng rồi mở lại bản đồ hoặc khởi động lại cuộc gọi.', 'Cần mở lại bản đồ', 'error'));
+    })().catch(e => { status(e.message, 'Chưa mở được bản đồ · Xem chi tiết', 'error'); }).finally(() => { opening = null; });
     return opening;
   }
   function transmit() {
@@ -63,7 +66,7 @@ window.HanoiViewer = (() => {
     if (pending !== request) return;
     if (request.attempt >= 12) {
       clearInterval(timer); timer = null;
-      status('Đã gửi yêu cầu mở bản đồ; chưa nhận xác nhận từ máy kia. Có thể bấm lại để thử.');
+      status('Đã gửi yêu cầu mở bản đồ; chưa nhận xác nhận từ máy kia. Có thể bấm lại để thử.', 'Chưa xác nhận mở bản đồ ở máy kia', 'warning');
       pending = null;
     }
   }
@@ -95,11 +98,12 @@ window.HanoiViewer = (() => {
     }
     return true;
   }
-  function close() { window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
+  function close() { if (window.HanoiMapUi) window.HanoiMapUi.close(); window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
   function reset() { if (map && config) map.easeTo({ center: config.center, zoom: config.zoom, duration: 500 }); }
-  function destroy() { window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
+  function destroy() { if (window.HanoiMapUi) window.HanoiMapUi.destroy(); window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
   return { bind: x => {
     api = x;
+    if (window.HanoiMapUi) window.HanoiMapUi.bind();
     window.HanoiFixedShare.bind({ getMap: () => map, getConfig: () => config,
       isVisible: () => visible && !disposed, active: () => api.active(),
       openMap: () => open(false), send: x.send, toast: x.toast });

@@ -15,10 +15,20 @@ window.HanoiMyLocation = (() => {
     unavailable: 'Không truy cập được nguồn vị trí. Kiểm tra quyền và cài đặt Vị trí của điện thoại.',
     background: 'Đã dừng lấy vị trí khi ứng dụng ra nền. Bấm lại để lấy vị trí mới.'
   };
-  function status(text) {
+  function status(text, compact = text, level = 'normal') {
     const node = element('myLocationStatus');
     node.textContent = text; node.hidden = !text;
+    if (window.HanoiMapUi) window.HanoiMapUi.set('local', compact, level);
   }
+  const compactErrors = {
+    permission_denied: 'Chưa có quyền vị trí · Xem chi tiết',
+    permission_pending: 'Hãy xử lý hộp thoại quyền vị trí',
+    permission_timeout: 'Hết thời gian cấp quyền · Thử lại',
+    location_disabled: 'Hãy bật Vị trí trên điện thoại',
+    timeout: 'Chưa lấy được vị trí · Thử lại',
+    unavailable: 'Chưa truy cập được vị trí · Xem chi tiết',
+    background: 'Đã dừng lấy vị trí · Bấm để lấy lại'
+  };
   function button(busy) {
     const node = element('btnMyLocation');
     node.disabled = busy;
@@ -60,7 +70,7 @@ window.HanoiMyLocation = (() => {
     const bounds = config.bounds;
     clearPoint();
     if (lng < bounds[0][0] || lng > bounds[1][0] || lat < bounds[0][1] || lat > bounds[1][1]) {
-      status('Đã lấy được vị trí, nhưng nằm ngoài vùng bản đồ Hà Nội đã tải. Chưa thể hiển thị tại đây.');
+      status('Đã lấy được vị trí, nhưng nằm ngoài vùng bản đồ Hà Nội đã tải. Chưa thể hiển thị tại đây.', 'Vị trí của tôi nằm ngoài vùng bản đồ', 'warning');
       return;
     }
     const data = { type: 'FeatureCollection', features: [
@@ -74,44 +84,46 @@ window.HanoiMyLocation = (() => {
       paint: { 'circle-radius': 7, 'circle-color': '#1677ff', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
     map.easeTo({ center: [lng, lat], zoom: Math.min(accuracy > 1000 ? 12 : accuracy > 200 ? 14 : 16, config.maxZoom), duration: 600 });
     const time = new Date(fix.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    status((fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time + ' · Không tự cập nhật');
+    status((fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time + ' · Không tự cập nhật', 'Có thể gửi vị trí này');
   }
   function locate() {
     if (disposed || pending || !api.isVisible()) return;
     const map = api.getMap();
-    if (!map || !map.isStyleLoaded()) { status('Bản đồ đang nạp. Hãy bấm lại sau khi bản đồ hiển thị.'); return; }
+    if (!map || !map.isStyleLoaded()) { status('Bản đồ đang nạp. Hãy bấm lại sau khi bản đồ hiển thị.', 'Bản đồ đang nạp…'); return; }
     const bridge = window.AndroidBridge;
     if (!bridge || typeof bridge.requestMapLocation !== 'function') {
-      status('Cần cài APK hỗ trợ vị trí mới để dùng tính năng này.'); return;
+      status('Cần cài APK hỗ trợ vị trí mới để dùng tính năng này.', 'Cần cập nhật ứng dụng', 'error'); return;
     }
     clearPoint();
     if (api.onFix) api.onFix(null);
+    if (window.HanoiMapUi) window.HanoiMapUi.self(null);
     pending = 'loc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
     const id = pending;
     button(true);
-    status('Đang lấy vị trí trên máy này. Nếu được hỏi, hãy cấp quyền Vị trí; GPS có thể cần khoảng 45 giây ở nơi thoáng.');
+    status('Đang lấy vị trí trên máy này. Nếu được hỏi, hãy cấp quyền Vị trí; GPS có thể cần khoảng 45 giây ở nơi thoáng.', 'Đang lấy vị trí…');
     // Includes time spent on the Android permission dialog plus the GPS deadline.
     deadline = setTimeout(() => {
       if (pending !== id) return;
-      stopPending(); status(errors.timeout);
+      stopPending(); status(errors.timeout, compactErrors.timeout, 'warning');
     }, 140000);
     try { bridge.requestMapLocation(id); }
-    catch (_) { stopPending(); status(errors.unavailable); }
+    catch (_) { stopPending(); status(errors.unavailable, compactErrors.unavailable, 'warning'); }
   }
   function onNativeResult(result) {
     if (disposed || !pending || !result || result.id !== pending) return;
     stopPending();
     if (!api.isVisible()) return;
-    if (result.ok !== true) { status(errors[result.error] || errors.unavailable); return; }
+    if (result.ok !== true) { status(errors[result.error] || errors.unavailable, compactErrors[result.error] || compactErrors.unavailable, 'warning'); return; }
     if (![result.latitude, result.longitude, result.accuracy, result.timestamp, result.ageMs].every(Number.isFinite) ||
         result.latitude < -90 || result.latitude > 90 || result.longitude < -180 || result.longitude > 180 ||
         result.accuracy <= 0 || result.ageMs < 0 || result.ageMs > 30000 || result.timestamp <= 0) {
-      status('Tọa độ nhận được không hợp lệ hoặc đã cũ. Hãy bấm lại.'); return;
+      status('Tọa độ nhận được không hợp lệ hoặc đã cũ. Hãy bấm lại.', 'Cần lấy lại vị trí', 'warning'); return;
     }
+    if (window.HanoiMapUi) window.HanoiMapUi.self(result);
     if (api.onFix) api.onFix({ latitude: result.latitude, longitude: result.longitude, accuracy: result.accuracy, timestamp: result.timestamp, ageMs: result.ageMs, approximate: result.approximate === true });
-    try { render(result); } catch (error) { clearPoint(); status(error.message); }
+    try { render(result); } catch (error) { clearPoint(); status(error.message, 'Chưa hiện được vị trí · Xem chi tiết', 'warning'); }
   }
-  function cancel() { stopPending(); clearPoint(); status(''); if (api.onFix) api.onFix(null); }
+  function cancel() { stopPending(); clearPoint(); status(''); if (window.HanoiMapUi) window.HanoiMapUi.self(null); if (api.onFix) api.onFix(null); }
   function onVisibility() {
     if (document.hidden) { cancel(); }
   }

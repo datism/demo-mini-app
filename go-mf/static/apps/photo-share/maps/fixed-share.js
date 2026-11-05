@@ -11,13 +11,16 @@ window.HanoiFixedShare = (() => {
   const retiredSessions = new Set();
   const node = id => document.getElementById(id);
   const monotonic = () => performance.now();
-  function status(text) { node('fixedShareStatus').textContent = text; }
+  function status(text, compact = text, level = 'normal') {
+    node('fixedShareStatus').textContent = text;
+    if (window.HanoiMapUi) window.HanoiMapUi.set('share', compact, level);
+  }
   function fresh() { return draft && draft.ageMs + Math.max(0, monotonic() - draft.receivedAt) <= MAX_AGE_MS; }
   function updateButton() {
     const button = node('btnSendLocation');
     button.hidden = !draft;
     button.disabled = !fresh() || !!outgoing || !api.isVisible();
-    button.textContent = outgoing ? 'Đang gửi…' : !fresh() ? 'Lấy lại vị trí để gửi' : last && last.state === 'failed' && last.draft === draft ? 'Thử gửi lại' : 'Gửi vị trí này';
+    button.textContent = outgoing ? 'Đang gửi…' : !fresh() ? 'Cần vị trí mới' : last && last.state === 'failed' && last.draft === draft ? 'Gửi lại' : 'Gửi vị trí';
   }
   function setLocalFix(fix) {
     clearTimeout(expiryTimer); expiryTimer = null;
@@ -25,7 +28,7 @@ window.HanoiFixedShare = (() => {
     updateButton();
     if (draft) {
       // Disable stale snapshots without using either phone's wall clock.
-      expiryTimer = setTimeout(() => { expiryTimer = null; updateButton(); }, Math.max(1, MAX_AGE_MS - draft.ageMs + 1));
+      expiryTimer = setTimeout(() => { expiryTimer = null; updateButton(); if (window.HanoiMapUi && !outgoing && (!last || last.state !== 'received' || last.draft !== draft)) window.HanoiMapUi.set('share', 'Lấy vị trí mới để gửi', 'warning'); }, Math.max(1, MAX_AGE_MS - draft.ageMs + 1));
     }
   }
   function stopRetry() { clearTimeout(retryTimer); retryTimer = null; }
@@ -35,11 +38,11 @@ window.HanoiFixedShare = (() => {
     const sending = outgoing;
     if (sending.attempt >= MAX_ATTEMPTS) {
       outgoing = null; last.state = 'failed'; retryTimer = null;
-      status('Chưa nhận được xác nhận. Máy kia có thể đã nhận vị trí; bạn có thể thử gửi lại.');
+      status('Chưa nhận được xác nhận. Máy kia có thể đã nhận vị trí; bạn có thể thử gửi lại.', 'Chưa có xác nhận · Có thể gửi lại', 'warning');
       updateButton(); return;
     }
     sending.attempt++;
-    status('Đang gửi vị trí… (' + sending.attempt + '/' + MAX_ATTEMPTS + ')');
+    status('Đang gửi vị trí… (' + sending.attempt + '/' + MAX_ATTEMPTS + ')', 'Đang gửi vị trí…');
     sendPacket(sending.packet);
     // send() can synchronously deliver an ACK in a test/bridge; do not resurrect its timer.
     if (outgoing === sending) retryTimer = setTimeout(attempt, RETRY_MS);
@@ -47,7 +50,7 @@ window.HanoiFixedShare = (() => {
   function send() {
     if (disposed || outgoing || !api.isVisible()) return;
     if (api.active()) { api.toast('Hãy kết thúc chia sẻ ảnh/video/màn hình trước.'); return; }
-    if (!fresh()) { status('Vị trí đã quá 30 giây hoặc chưa có. Bấm Vị trí của tôi để lấy lại trước khi gửi.'); updateButton(); return; }
+    if (!fresh()) { status('Vị trí đã quá 30 giây hoặc chưa có. Bấm Vị trí của tôi để lấy lại trước khi gửi.', 'Lấy vị trí mới để gửi', 'warning'); updateButton(); return; }
     stopRetry();
     const sameRetry = last && last.state === 'failed' && last.draft === draft;
     const packet = sameRetry ? last.packet : {
@@ -84,7 +87,8 @@ window.HanoiFixedShare = (() => {
       stopRetry(); outgoing = null;
       last.state = m.status === 'received' ? 'received' : 'failed';
       status(m.status === 'received' ? 'Máy kia đã nhận vị trí cố định. Vị trí không tự cập nhật.' :
-        m.status === 'busy' ? 'Máy kia đang chia sẻ nội dung khác. Hãy thử lại sau.' : 'Máy kia không chấp nhận dữ liệu vị trí. Hãy lấy lại vị trí và gửi lại.');
+        m.status === 'busy' ? 'Máy kia đang chia sẻ nội dung khác. Hãy thử lại sau.' : 'Máy kia không chấp nhận dữ liệu vị trí. Hãy lấy lại vị trí và gửi lại.',
+        m.status === 'received' ? '✓ Đối phương đã nhận vị trí' : m.status === 'busy' ? 'Máy kia đang bận · Thử lại sau' : 'Chưa gửi được · Lấy lại vị trí', m.status === 'received' ? 'success' : 'warning');
       updateButton(); return true;
     }
     if (!validFix(m.fix)) { ack(m, 'invalid'); return true; }
@@ -120,6 +124,7 @@ window.HanoiFixedShare = (() => {
   }
   function updatePeerCard() {
     const card = node('peerLocationCard'); card.hidden = !peer;
+    if (window.HanoiMapUi) window.HanoiMapUi.peer(peer && peer.fix, peer ? covered(peer.fix) : null);
     if (!peer) return;
     const fix = peer.fix;
     const time = new Date(fix.timestamp).toLocaleString('vi-VN');
@@ -166,14 +171,14 @@ window.HanoiFixedShare = (() => {
   function onClose() {
     stopRetry(); outgoing = null;
     if (last && last.state === 'sending') {
-      last.state = 'failed'; status('Đã dừng chờ xác nhận khi đóng bản đồ. Máy kia có thể đã nhận vị trí.');
+      last.state = 'failed'; status('Đã dừng chờ xác nhận khi đóng bản đồ. Máy kia có thể đã nhận vị trí.', 'Đã dừng chờ xác nhận', 'warning');
     }
     setLocalFix(null);
   }
   function destroy() {
     onClose(); clearPeerLayers(); peer = null; last = null; retiredSessions.clear();
     peerSession = null; peerSequence = 0; disposed = true;
-    node('peerLocationCard').hidden = true; status('');
+    node('peerLocationCard').hidden = true; if (window.HanoiMapUi) window.HanoiMapUi.peer(null, null); status('');
   }
   function bind(options) {
     api = options;

@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.webkit.WebView
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -32,6 +33,37 @@ class MapLocationController(
     private var listener: LocationListener? = null
     private var timeout: Runnable? = null
     private var best: Location? = null
+    private var latest: Location? = null
+    private var fallback: Runnable? = null
+    private var receivedSamples = 0
+    private var rejectedSamples = 0
+
+    private fun ageMs(location: Location): Long =
+        (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+
+    private fun isFresh(location: Location): Boolean {
+        val age = ageMs(location)
+        return age in 0L..30_000L
+    }
+
+    // Prefer accuracy only among fresh fixes; a stale winner must never hide a fresh update.
+    private fun bestFresh(): Location? = listOfNotNull(best, latest)
+        .filter { isFresh(it) }.minByOrNull { it.accuracy }
+
+    private fun scheduleFallback() {
+        if (fallback != null) return
+        val candidate = bestFresh() ?: return
+        // Allow a short improvement window, but do not let this sample expire while waiting.
+        val delayMs = minOf(8_000L, (29_000L - ageMs(candidate)).coerceAtLeast(0L))
+        val task = Runnable {
+            fallback = null
+            if (!validOwner()) { cancel(); return@Runnable }
+            bestFresh()?.let { succeed(it) }
+            // If everything became stale, continue listening until the original 45s deadline.
+        }
+        fallback = task
+        handler.postDelayed(task, delayMs)
+    }
     private var permissionInFlight = false
     private var precise = false
 
@@ -84,26 +116,33 @@ class MapLocationController(
         val providers = mutableListOf<String>()
         if (precise && manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) providers += LocationManager.GPS_PROVIDER
         if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) providers += LocationManager.NETWORK_PROVIDER
+        Log.i("MapLocation", "start: precise=$precise providers=${providers.joinToString()}")
         if (providers.isEmpty()) { fail("location_disabled"); return }
         val token = requestId
         val callback = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 if (token != requestId) return
                 if (!validOwner()) { cancel(); return }
-                val ageNanos = SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos
-                if (ageNanos < 0L || ageNanos > 30_000_000_000L || !location.hasAccuracy() ||
+                receivedSamples++
+                if (!isFresh(location) || !location.hasAccuracy() ||
                     !location.accuracy.isFinite() || location.accuracy <= 0f ||
                     !location.latitude.isFinite() || !location.longitude.isFinite() ||
-                    location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
+                    location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) {
+                    rejectedSamples++
+                    return
+                }
+                latest = Location(location)
                 val previous = best
-                if (previous == null || location.accuracy < previous.accuracy) best = Location(location)
-                // Good GPS fix: finish now. Otherwise wait for a better fix until the deadline.
-                if (!precise || location.accuracy <= 50f) succeed(best ?: location)
+                if (previous == null || !isFresh(previous) || location.accuracy <= previous.accuracy) best = Location(location)
+                Log.d("MapLocation", "fix: provider=${location.provider} accuracyM=${location.accuracy} ageMs=${ageMs(location)}")
+                if (!precise || location.accuracy <= 50f) {
+                    bestFresh()?.let { succeed(it) }
+                } else scheduleFallback()
             }
             override fun onProviderDisabled(provider: String) {
                 if (token != requestId) return
                 if (providers.none { manager.isProviderEnabled(it) }) {
-                    best?.let { succeed(it) } ?: fail("location_disabled")
+                    bestFresh()?.let { succeed(it) } ?: fail("location_disabled")
                 }
             }
             override fun onProviderEnabled(provider: String) {}
@@ -112,7 +151,7 @@ class MapLocationController(
         }
         listener = callback
         armTimeout(45_000L) {
-            if (validOwner()) best?.let { succeed(it) } ?: fail("timeout") else cancel()
+            if (validOwner()) bestFresh()?.let { succeed(it) } ?: fail("timeout") else cancel()
         }
         var registered = false
         for (provider in providers) {
@@ -137,15 +176,19 @@ class MapLocationController(
 
     private fun succeed(location: Location) {
         if (!validOwner()) { cancel(); return }
-        val ageMs = ((SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0)
-        if (ageMs > 30_000L) { fail("timeout"); return }
+        val ageMs = ageMs(location)
+        if (ageMs !in 0L..30_000L) { fail("timeout"); return }
+        Log.i("MapLocation", "success: accuracyM=${location.accuracy} ageMs=$ageMs received=$receivedSamples rejected=$rejectedSamples")
         finish(JSONObject().put("ok", true)
             .put("latitude", location.latitude).put("longitude", location.longitude)
             .put("accuracy", location.accuracy.toDouble()).put("timestamp", location.time)
             .put("ageMs", ageMs).put("approximate", !precise))
     }
 
-    private fun fail(code: String) = finish(JSONObject().put("ok", false).put("error", code))
+    private fun fail(code: String) {
+        Log.i("MapLocation", "failure: code=$code received=$receivedSamples rejected=$rejectedSamples")
+        finish(JSONObject().put("ok", false).put("error", code))
+    }
 
     private fun finish(result: JSONObject) {
         val id = requestId ?: return
@@ -167,10 +210,15 @@ class MapLocationController(
         if (reason != null && requestId != null) { fail(reason); return }
         timeout?.let { handler.removeCallbacks(it) }
         timeout = null
+        fallback?.let { handler.removeCallbacks(it) }
+        fallback = null
         listener?.let { try { manager.removeUpdates(it) } catch (_: SecurityException) {} }
         listener = null
         requestId = null
         requestUrl = null
         best = null
+        latest = null
+        receivedSamples = 0
+        rejectedSamples = 0
     }
 }
