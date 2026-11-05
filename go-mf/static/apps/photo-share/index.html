@@ -545,7 +545,7 @@ function enterVideo(v) {
   $('senderCtl').hidden = !sender || screen;
   $('screenNote').hidden = !(sender && screen);
   document.querySelector('#videoView .controls').classList.toggle('nodur', !v.dur);
-  $('btnMute').classList.toggle('hide', sender);
+  $('btnMute').classList.toggle('hide', sender && screen); // screen share carries no sound
   $('dur').textContent = fmt(v.dur);
   renderMute(); renderVideoState(); renderTime(0);
   show('videoView');
