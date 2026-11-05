@@ -1,0 +1,5 @@
+Map data © OpenStreetMap contributors. https://www.openstreetmap.org/copyright
+Data source: existing Geofabrik/tilemaker Hanoi MBTiles.
+Detailed labels use actual tile attributes; no fixed landmark markers.
+Glyph font: Open Sans Semibold; source and coverage in fonts/coverage.json; license in fonts/licenses/.
+MapLibre license in vendor/LICENSE.txt.

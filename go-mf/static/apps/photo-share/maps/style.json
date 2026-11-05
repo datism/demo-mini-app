@@ -1,0 +1,1040 @@
+{
+  "version": 8,
+  "name": "Hanoi detailed offline",
+  "glyphs": "fonts/{fontstack}/{range}.pbf",
+  "sources": {
+    "hanoi": {
+      "type": "vector",
+      "tiles": [
+        "tiles/{z}/{x}/{y}.pbf"
+      ],
+      "minzoom": 9,
+      "maxzoom": 14,
+      "attribution": "© OpenStreetMap contributors"
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f5f2ec"
+      }
+    },
+    {
+      "id": "landcover",
+      "type": "fill",
+      "source": "hanoi",
+      "source-layer": "landcover",
+      "paint": {
+        "fill-color": "#d5e8c9",
+        "fill-opacity": 0.7
+      }
+    },
+    {
+      "id": "landuse",
+      "type": "fill",
+      "source": "hanoi",
+      "source-layer": "landuse",
+      "paint": {
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "park",
+            "cemetery",
+            "recreation_ground"
+          ],
+          "#cfe5c2",
+          [
+            "industrial",
+            "commercial"
+          ],
+          "#e8e2eb",
+          "#ebe9e1"
+        ],
+        "fill-opacity": 0.65
+      }
+    },
+    {
+      "id": "parks",
+      "type": "fill",
+      "source": "hanoi",
+      "source-layer": "park",
+      "paint": {
+        "fill-color": "#cce4bf",
+        "fill-opacity": 0.7
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "hanoi",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#a6d6eb"
+      }
+    },
+    {
+      "id": "waterways",
+      "type": "line",
+      "source": "hanoi",
+      "source-layer": "waterway",
+      "paint": {
+        "line-color": "#93cbe5",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          1,
+          14,
+          2.5,
+          18,
+          5
+        ]
+      }
+    },
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "hanoi",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#ded8d0",
+        "fill-outline-color": "#c9c0b5"
+      }
+    },
+    {
+      "id": "road-casing",
+      "type": "line",
+      "source": "hanoi",
+      "source-layer": "transportation",
+      "filter": [
+        "!=",
+        [
+          "get",
+          "class"
+        ],
+        "rail"
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#cfc4b3",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          0.8,
+          13,
+          3,
+          16,
+          7,
+          18,
+          13
+        ]
+      }
+    },
+    {
+      "id": "roads",
+      "type": "line",
+      "source": "hanoi",
+      "source-layer": "transportation",
+      "filter": [
+        "!=",
+        [
+          "get",
+          "class"
+        ],
+        "rail"
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "motorway",
+            "trunk"
+          ],
+          "#f4c578",
+          [
+            "primary",
+            "secondary"
+          ],
+          "#ffe2a8",
+          [
+            "path",
+            "track"
+          ],
+          "#e6d9c5",
+          "#ffffff"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          0.4,
+          13,
+          2,
+          16,
+          5,
+          18,
+          10
+        ]
+      }
+    },
+    {
+      "id": "rail",
+      "type": "line",
+      "source": "hanoi",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "rail"
+      ],
+      "paint": {
+        "line-color": "#9a9490",
+        "line-width": 1.5,
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "district-city-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "place",
+      "minzoom": 9,
+      "filter": [
+        "all",
+        [
+          "!=",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:vi"
+            ],
+            [
+              "get",
+              "name"
+            ],
+            [
+              "get",
+              "name:latin"
+            ],
+            [
+              "get",
+              "name:en"
+            ],
+            ""
+          ],
+          ""
+        ],
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "city",
+            "town",
+            "suburb",
+            "quarter",
+            "borough"
+          ],
+          true,
+          false
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          9,
+          12,
+          13,
+          16,
+          17,
+          19
+        ],
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#42505d",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "neighborhood-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "place",
+      "minzoom": 13,
+      "filter": [
+        "all",
+        [
+          "!=",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:vi"
+            ],
+            [
+              "get",
+              "name"
+            ],
+            [
+              "get",
+              "name:latin"
+            ],
+            [
+              "get",
+              "name:en"
+            ],
+            ""
+          ],
+          ""
+        ],
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "village",
+            "hamlet",
+            "neighbourhood",
+            "isolated_dwelling"
+          ],
+          true,
+          false
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": 12,
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#68716f",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "major-road-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "transportation_name",
+      "minzoom": 11,
+      "filter": [
+        "all",
+        [
+          "!=",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:vi"
+            ],
+            [
+              "get",
+              "name"
+            ],
+            [
+              "get",
+              "name:latin"
+            ],
+            [
+              "get",
+              "name:en"
+            ],
+            ""
+          ],
+          ""
+        ],
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "motorway",
+            "trunk",
+            "primary",
+            "secondary",
+            "tertiary"
+          ],
+          true,
+          false
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          10,
+          14,
+          12,
+          18,
+          15
+        ],
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "line",
+        "symbol-spacing": 280,
+        "text-max-angle": 35,
+        "text-rotation-alignment": "map",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#665c4e",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "local-street-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "transportation_name",
+      "minzoom": 14,
+      "filter": [
+        "all",
+        [
+          "!=",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:vi"
+            ],
+            [
+              "get",
+              "name"
+            ],
+            [
+              "get",
+              "name:latin"
+            ],
+            [
+              "get",
+              "name:en"
+            ],
+            ""
+          ],
+          ""
+        ],
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "motorway",
+            "trunk",
+            "primary",
+            "secondary",
+            "tertiary"
+          ],
+          false,
+          true
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          11,
+          17,
+          13,
+          18,
+          15
+        ],
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "line",
+        "symbol-spacing": 280,
+        "text-max-angle": 35,
+        "text-rotation-alignment": "map",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#5c5956",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "water-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "water_name",
+      "minzoom": 11,
+      "filter": [
+        "!=",
+        [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        ""
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          12,
+          16,
+          15
+        ],
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#397b9d",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "river-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "waterway",
+      "minzoom": 12,
+      "filter": [
+        "!=",
+        [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        ""
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": 12,
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "line",
+        "symbol-spacing": 280,
+        "text-max-angle": 35,
+        "text-rotation-alignment": "map",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#397b9d",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "park-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "park",
+      "minzoom": 13,
+      "filter": [
+        "!=",
+        [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        ""
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": 12,
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#507c44",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "poi-names",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "filter": [
+        "all",
+        [
+          "!=",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:vi"
+            ],
+            [
+              "get",
+              "name"
+            ],
+            [
+              "get",
+              "name:latin"
+            ],
+            [
+              "get",
+              "name:en"
+            ],
+            ""
+          ],
+          ""
+        ],
+        [
+          "<=",
+          [
+            "to-number",
+            [
+              "get",
+              "rank"
+            ],
+            10
+          ],
+          5
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:vi"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          10,
+          17,
+          12,
+          18,
+          13
+        ],
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#745a78",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    },
+    {
+      "id": "house-numbers",
+      "type": "symbol",
+      "source": "hanoi",
+      "source-layer": "housenumber",
+      "minzoom": 17,
+      "filter": [
+        "has",
+        "housenumber"
+      ],
+      "layout": {
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "housenumber"
+          ]
+        ],
+        "text-font": [
+          "Open Sans Semibold"
+        ],
+        "text-size": 10,
+        "text-padding": 3,
+        "text-max-width": 9,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-placement": "point",
+        "text-anchor": "center",
+        "symbol-sort-key": [
+          "to-number",
+          [
+            "get",
+            "rank"
+          ],
+          10
+        ]
+      },
+      "paint": {
+        "text-color": "#8b8077",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4
+      }
+    }
+  ]
+}
