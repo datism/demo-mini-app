@@ -64,14 +64,14 @@ window.HanoiLiveShare = (() => {
   function remember(id) { if(retired.has(id))return true; if(retired.size>=128)return false; retired.add(id);return true; }
   function ack(m,status) {transmit({t:ACK,version:1,id:m.id,seq:m.seq,kind:m.kind,status});}
   function start() {
-    if(disposed || own || !api.isVisible() || document.hidden)return;
+    if(disposed || own || !api.isVisible() || document.hidden || api.canStart && !api.canStart())return;
     if(api.active()){api.toast('Hãy kết thúc chia sẻ nội dung trước.');return;}
     if(transactions.size){notice('Đang xác nhận kết thúc phiên trước · Thử lại sau','warning');return;}
     const b=bridge();
     if(!b || !['startLiveMapLocation','stopLiveMapLocation','pauseLiveMapLocation','resumeLiveMapLocation'].every(k=>typeof b[k]==='function')){
       notice('Cần cài APK hỗ trợ chia sẻ trực tiếp','warning');return;
     }
-    const duration=Number(node('liveDuration').value);if(!MODES.includes(duration))return;
+    const duration=0;
     api.cancelOneShot();
     own={id:'live_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2),duration,
       endAt:duration===0?0:now()+duration,seq:0,nativeSeq:0,phase:'connecting',nativeStarted:false,
@@ -194,8 +194,11 @@ window.HanoiLiveShare = (() => {
   }
   function renderUi(){
     node('liveLauncher').hidden=!!own;node('liveOwnRow').hidden=!own;
-    if(own){node('btnMyLocation').disabled=true;localButtonLocked=true;}
-    else if(localButtonLocked){node('btnMyLocation').disabled=false;localButtonLocked=false;}
+    const legacyLocationButton=node('btnMyLocation');
+    if(own && legacyLocationButton){legacyLocationButton.disabled=true;localButtonLocked=true;}
+    else if(localButtonLocked && legacyLocationButton){legacyLocationButton.disabled=false;localButtonLocked=false;}
+    if(node('liveSharingHint'))node('liveSharingHint').hidden=!own;
+    if(window.HanoiMapUi && window.HanoiMapUi.ownLive)window.HanoiMapUi.ownLive(own ? own.phase==='paused'?'paused':'active' : 'stopped');
     if(own){
       const label=own.phase==='connecting'?'Đang kết nối':own.phase==='permission'?'Chờ cấp quyền':own.phase==='paused'?'Tạm dừng':
         own.lastFixAt===null?'Đang chờ GPS':now()-own.lastFixAt>STALE?'Chưa có vị trí mới':'Đang chia sẻ';
@@ -204,6 +207,7 @@ window.HanoiLiveShare = (() => {
     }
     node('peerLiveState').hidden=!peer || !!peer.fix;
     if(peer)node('peerLiveState').textContent='Đối phương · '+peerState();
+    if(window.HanoiQuickShare)window.HanoiQuickShare.refresh();
   }
   function tick(){
     if(disposed)return;

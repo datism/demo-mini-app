@@ -1,55 +1,37 @@
 #mapView { background:#eef0e8; z-index:10; }
 #hanoiMap { position:absolute; inset:0; }
-#mapView button { font:inherit; -webkit-tap-highlight-color:transparent; cursor:pointer; }
-#mapView button:focus-visible { outline:3px solid #89b8ff; outline-offset:2px; }
+#mapView button { font:inherit; -webkit-tap-highlight-color:transparent; cursor:pointer; touch-action:manipulation; }
+#mapView button:focus-visible { outline:3px solid #82b4fb; outline-offset:2px; }
 #mapView button:disabled { cursor:default; opacity:.55; }
-#mapView .mapHeader { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; padding-top:max(10px,env(safe-area-inset-top)); z-index:2; pointer-events:none; }
+#mapView .mapHeader { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:10px; padding:12px; padding-top:max(12px,env(safe-area-inset-top)); z-index:2; pointer-events:none; }
 #mapView .mapHeader > * { pointer-events:auto; }
-#mapView .mapHeader button { min-height:42px; padding:8px 11px; border:1px solid #e4e8ed; border-radius:14px; background:#fffffff5; color:#203146; box-shadow:0 2px 8px #182c4010; font-size:13px; }
-.mapHeading { display:flex; align-items:center; gap:6px; padding:8px 10px; border-radius:14px; background:#fffffff5; }
-.mapHeading strong { font-size:14px; white-space:nowrap; }
-.mapHeading > span { font-size:10px; color:#637267; }
-#mapView .maplibregl-ctrl-top-right { top:calc(70px + env(safe-area-inset-top, 0px)); }
-#mapView .maplibregl-ctrl-bottom-right, #mapView .maplibregl-ctrl-bottom-left { bottom:8px; }
-#mapView .mapLocationPanel { position:absolute; left:12px; right:12px; bottom:max(90px, env(safe-area-inset-bottom)); z-index:3; padding:10px; border:1px solid #e3e9f0; border-radius:20px; background:#fffffff7; box-shadow:0 6px 24px #172a401c; display:flex; flex-direction:column; gap:4px; max-height:calc(100% - 175px); overflow:auto; color:#1a293a; }
-.mapPanelHeading { display:flex; align-items:center; gap:8px; justify-content:space-between; }
-#mapCompactStatus { flex:1; font-size:13px; line-height:1.4; font-weight:600; }
+#btnMapBack { flex:0 0 44px; width:44px; height:44px; border:1px solid #e5eaf0; border-radius:50%; background:#fffffff5; color:#22374b; font-size:30px!important; line-height:1; box-shadow:0 2px 9px #182c4017; }
+.mapHeading { display:flex; flex-direction:column; gap:2px; padding:8px 12px; border-radius:15px; background:#fffffff2; box-shadow:0 2px 9px #182c400b; }
+.mapHeading strong { color:#1c3044; font-size:14px; font-weight:650; }
+.mapHeading > span { color:#697d8b; font-size:11px; }
+#mapView .mapLocationPanel { position:absolute; left:12px; right:12px; bottom:max(90px,env(safe-area-inset-bottom)); z-index:3; padding:10px; border:1px solid #e5eaf0; border-radius:20px; background:#fffffff7; box-shadow:0 7px 26px #172a401a; display:flex; flex-direction:column; gap:6px; max-height:calc(100% - 180px); overflow:auto; color:#1a293a; }
+#mapCompactStatus { padding:4px 3px; font-size:12px; line-height:1.45; color:#526477; }
 #mapCompactStatus[data-level="success"] { color:#196c3a; }
 #mapCompactStatus[data-level="warning"] { color:#8e590a; }
-#mapCompactStatus[data-level="error"] { color:#ad2d24; }
-#btnMapDetails { flex-shrink:0; border:0; border-radius:9px; padding:8px 6px; background:transparent; color:#426995; font-size:12px; min-height:36px; }
-.mapCompactRow { display:flex; align-items:center; gap:7px; min-height:26px; font-size:12px; line-height:1.4; }
-.mapCompactRow > span:not(.mapDot) { flex:1; min-width:0; }
+#mapCompactStatus[data-level="error"] { color:#a92b23; }
+.mapPerson { width:100%; display:flex; align-items:center; gap:8px; text-align:left; min-height:44px; padding:8px 6px; border:0; border-radius:11px; background:transparent; color:#344c61; font-size:12px!important; line-height:1.4; }
+.mapPerson:enabled:active { background:#edf3f9; }
+.mapPerson > span:not(.mapDot):not(.mapRowArrow) { flex:1; min-width:0; }
 .mapDot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
 .myDot { background:#1677ff; }
 .peerDot { background:#df6817; }
-#btnPeerLocation { border:0; border-radius:9px; background:#fff0e3; color:#8d3d04; padding:6px 12px; min-height:34px; font-size:12px; }
+.mapRowArrow { color:#7c8d9f; font-size:21px; line-height:1; }
+.mapPerson:disabled .mapRowArrow { visibility:hidden; }
 #mapView .mapActions { display:flex; gap:8px; }
-#mapView .mapActions button { flex:1; min-width:0; min-height:44px; padding:9px 10px; border:0; border-radius:12px; font-size:13px; font-weight:600; }
-#btnMyLocation { background:#eaf2ff; color:#1554a3; }
-#btnSendLocation { background:#176b3b; color:#fff; }
-#mapDetails { border-top:1px solid #e8ecf2; padding-top:8px; max-height:30vh; overflow:auto; font-size:12px; line-height:1.55; color:#526174; }
-#mapDetails > div:not(:empty) { padding:5px 0; overflow-wrap:anywhere; }
-#mapDetails #peerLocationCard { border-top:1px solid #edf0f4; }
-#peerLocationCoordinates { font-variant-numeric:tabular-nums; color:#64748b; }
-.mapDetailNote { margin:6px 0 0; font-size:11px; color:#68798b; }
+#mapView .mapActions button { flex:1; min-width:0; min-height:48px; padding:10px 8px; border:0; border-radius:13px; font-size:13px; line-height:1.25; font-weight:600; }
+#btnSendLocation { background:#1672de; color:#fff; }
+#btnStartLive { background:#edf5f0; color:#1a673c; }
+#liveOwnRow { position:sticky; bottom:0; z-index:1; background:#fff; }
+#btnStopLive { width:100%; min-height:48px; padding:10px 12px; border:0; border-radius:13px; background:#fff0ee; color:#a52c25; font-size:13px!important; font-weight:600!important; }
+.mapLiveHint { margin:0; padding:2px 4px; font-size:11px; line-height:1.4; color:#6c7c89; }
+#mapView .maplibregl-ctrl-bottom-right, #mapView .maplibregl-ctrl-bottom-left { bottom:8px; }
 @media (max-width:340px) {
-  #mapView .mapHeader { padding-left:8px; padding-right:8px; gap:4px; }
-  #mapView .mapHeader button { padding-left:8px; padding-right:8px; font-size:12px; }
-  .mapHeading { gap:4px; padding:8px; }
-  .mapHeading > span { display:none; }
-  #mapView .mapLocationPanel { left:8px; right:8px; padding:10px; }
+  #mapView .mapHeader { padding-left:8px; padding-right:8px; }
+  #mapView .mapLocationPanel { left:8px; right:8px; padding:8px; }
+  #mapView .mapActions button { font-size:12px; }
 }
-
-/* Live sharing stays inside the existing compact card. */
-.mapLiveLauncher { display:flex; align-items:center; gap:7px; padding-top:6px; border-top:1px solid #edf0f4; }
-.mapDurationLabel { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
-#liveDuration { flex:0 1 115px; min-width:0; min-height:40px; padding:7px 8px; border:1px solid #dbe3ed; border-radius:10px; color:#334960; background:#fff; font:inherit; font-size:12px; }
-#btnStartLive { flex:1; min-height:40px; padding:8px; border:0; border-radius:10px; background:#edf6f0; color:#176b3b; font-size:12px; font-weight:600; }
-.mapLiveRow { display:flex; gap:7px; align-items:center; padding:5px 0; font-size:12px; }
-#liveOwnStatus { flex:1; }
-.mapLiveDot { width:7px; height:7px; flex-shrink:0; border-radius:50%; background:#c43f35; }
-#btnStopLive { min-height:34px; border:0; padding:6px 12px; border-radius:9px; background:#fff0ee; color:#a52b24; font-size:12px; }
-.mapLiveHint { color:#6b7280; font-size:11px; padding:2px 0; }
-
-#liveOwnRow { position:sticky; top:0; z-index:1; background:#fff; }

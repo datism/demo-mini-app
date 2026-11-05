@@ -15,10 +15,10 @@
   ],
   "files": {
     "NOTICE.txt": "9237c86bbc93906a30469f5f9ab687ecd4883522e07be2a164ad37b8521d02cf",
-    "compact-ui.js": "079d32e18d02aa1793ba15400e1679b17873e7f2899e20756fc4ce4e073c2551",
+    "compact-ui.js": "12910ea3afddd7dbb63157ae68b41aab7e81b5c613a185c9650a62de42529145",
     "config.json": "99a4be542231804a9d07ea1b9d07db7192c67869c0fb45000a1d0e2dbd4a4c08",
     "detail-report.json": "33d2d85ac9d5bfb11d4d0e35754adce9468c43f9630d05c8584b61a9816009ce",
-    "fixed-share.js": "0475ec31b5cf5edc128f66ed7e99e3efddfc61ae9888452c7d87470286571f82",
+    "fixed-share.js": "2be076f224c30c071fd86773d130333c9c120ba5199d9536f049cb577573dea9",
     "fonts/Open Sans Semibold/0-255.pbf": "64da7011e07531351a249a3d26aad76e2f22e4e321e50833f742697b453e8365",
     "fonts/Open Sans Semibold/1024-1279.pbf": "0354f1c092e3604b09177de773f84caa1ca6d4f17a8099e4787fcba8e7282907",
     "fonts/Open Sans Semibold/11008-11263.pbf": "b93dd55ccc83b68fadf8e8796fc0911033ac74d9c13d37a1dd7331c7fefa4754",
@@ -112,8 +112,9 @@
     "fonts/Open Sans Semibold/8448-8703.pbf": "f568af4cb6e55460e59d0f6b575449adabf4e3e5c19c1363f3b375e85cf50634",
     "fonts/coverage.json": "16de68f2b15aa346f7bc5469636395c8dffd13e8381f78fb4ba83cfa4f688551",
     "fonts/licenses/OpenSans-LICENSE.txt": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
-    "live-share.js": "dd3c2ce04a0c5ddae3e85322c4d7153f16fbc69b004349c61003b6d5f9c9a006",
-    "my-location.js": "1a9851052ca91d5b0c125c565fe8434e5feb941781993893bae40126d41a2c9e",
+    "live-share.js": "60c72bff6441cd4c880cea7e8a80f676ec2fb9f727954c541e3a414ede451388",
+    "my-location.js": "68efe88ff0d76a4f946197f2ef309f3edbc00d980318ba3809395be72fd8c161",
+    "quick-share.js": "6bfd3632095c6a4a8321882a828b018b8573fade0583cae7b23ff1f4bd6a81ef",
     "style.json": "a8b1801e5c44fc08813c4d906448fc22edc0336050ae40697f0e3130f1d84be8",
     "tiles/10/811/449.pbf": "69154c6cb856ead99541a1b046cf3fb76b734a43ef5dd17f609993065546e02d",
     "tiles/10/811/450.pbf": "1e0afccabf1ad4a9570b4e87b588aeec0724ae513efb64cf31c3effe5aedbf6b",
@@ -2517,8 +2518,8 @@
     "vendor/maplibre-gl.css": "792ac997dcf6ae6f643eb4e2dee4630c85e7056526bd8fb85ffe83c67d6c41b4",
     "vendor/maplibre-gl.js": "b5a34e6930ff937dbbb9eec8892cffb80ba473cce88ae5ca8c4654432f5f0ebc",
     "vendor/version.json": "2fd27cd3b6c29a598b03ab128409126df89188054471efd95ee9c7c8a91edd25",
-    "viewer.css": "62f3bd023f6d9c598dd7032da7a28306869fed0203e8c08a4fe355fbfcccd136",
-    "viewer.js": "de6940be0c8f75dfde38c8104ca3b1294a784dfc494aa30b2a057e467dabc74a"
+    "viewer.css": "24690bf428925b44785b2b2599e3579209fe05a849e5abfcd62f2ce4a2b1411f",
+    "viewer.js": "8b5ef2f503f901c41ee1cf36ba9e571332168704fdc7b249785efbbc2c10fd54"
   },
-  "viewerRevision": "foreground-live-location-v1"
+  "viewerRevision": "minimal-two-action-sharing-v1"
 }

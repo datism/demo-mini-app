@@ -17,6 +17,8 @@ window.HanoiFixedShare = (() => {
   }
   function fresh() { return draft && draft.ageMs + Math.max(0, monotonic() - draft.receivedAt) <= MAX_AGE_MS; }
   function updateButton() {
+    if (api && api.onDelivery) api.onDelivery({ sending: !!outgoing, id: last && last.packet.id, state: last ? last.state : 'idle' });
+    if (api && api.quickAction) return;
     const button = node('btnSendLocation');
     button.hidden = !draft;
     button.disabled = !fresh() || !!outgoing || !api.isVisible();
@@ -28,7 +30,7 @@ window.HanoiFixedShare = (() => {
     updateButton();
     if (draft) {
       // Disable stale snapshots without using either phone's wall clock.
-      expiryTimer = setTimeout(() => { expiryTimer = null; updateButton(); if (window.HanoiMapUi && !outgoing && (!last || last.state !== 'received' || last.draft !== draft)) window.HanoiMapUi.set('share', 'Lấy vị trí mới để gửi', 'warning'); }, Math.max(1, MAX_AGE_MS - draft.ageMs + 1));
+      expiryTimer = setTimeout(() => { expiryTimer = null; updateButton(); if (window.HanoiMapUi && !api.quickAction && !outgoing && (!last || last.state !== 'received' || last.draft !== draft)) window.HanoiMapUi.set('share', 'Lấy vị trí mới để gửi', 'warning'); }, Math.max(1, MAX_AGE_MS - draft.ageMs + 1));
     }
   }
   function stopRetry() { clearTimeout(retryTimer); retryTimer = null; }
@@ -48,9 +50,9 @@ window.HanoiFixedShare = (() => {
     if (outgoing === sending) retryTimer = setTimeout(attempt, RETRY_MS);
   }
   function send() {
-    if (disposed || outgoing || !api.isVisible()) return;
-    if (api.active()) { api.toast('Hãy kết thúc chia sẻ ảnh/video/màn hình trước.'); return; }
-    if (!fresh()) { status('Vị trí đã quá 30 giây hoặc chưa có. Bấm Vị trí của tôi để lấy lại trước khi gửi.', 'Lấy vị trí mới để gửi', 'warning'); updateButton(); return; }
+    if (disposed || outgoing || !api.isVisible()) return false;
+    if (api.active()) { api.toast('Hãy kết thúc chia sẻ ảnh/video/màn hình trước.'); return false; }
+    if (!fresh()) { status('Vị trí đã quá 30 giây hoặc chưa có. Bấm Vị trí của tôi để lấy lại trước khi gửi.', 'Lấy vị trí mới để gửi', 'warning'); updateButton(); return false; }
     stopRetry();
     const sameRetry = last && last.state === 'failed' && last.draft === draft;
     const packet = sameRetry ? last.packet : {
@@ -63,6 +65,7 @@ window.HanoiFixedShare = (() => {
     last = { packet, draft, state: 'sending' };
     outgoing = { packet, attempt: 0 };
     updateButton(); attempt();
+    return packet.id;
   }
   function validEnvelope(m) {
     return m && m.version === 1 && typeof m.id === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(m.id) &&
@@ -86,9 +89,9 @@ window.HanoiFixedShare = (() => {
       if (last.state === 'received') return true;
       stopRetry(); outgoing = null;
       last.state = m.status === 'received' ? 'received' : 'failed';
-      status(m.status === 'received' ? 'Máy kia đã nhận vị trí cố định. Vị trí không tự cập nhật.' :
+      if (!api.quickAction || draft === last.draft) status(m.status === 'received' ? 'Máy kia đã nhận vị trí cố định. Vị trí không tự cập nhật.' :
         m.status === 'busy' ? 'Máy kia đang chia sẻ nội dung khác. Hãy thử lại sau.' : 'Máy kia không chấp nhận dữ liệu vị trí. Hãy lấy lại vị trí và gửi lại.',
-        m.status === 'received' ? '✓ Đối phương đã nhận vị trí' : m.status === 'busy' ? 'Máy kia đang bận · Thử lại sau' : 'Chưa gửi được · Lấy lại vị trí', m.status === 'received' ? 'success' : 'warning');
+        m.status === 'received' ? 'Đã gửi vị trí' : m.status === 'busy' ? 'Máy kia đang bận · Thử lại sau' : 'Chưa gửi được · Lấy lại vị trí', m.status === 'received' ? 'success' : 'warning');
       updateButton(); return true;
     }
     if (!validFix(m.fix)) { ack(m, 'invalid'); return true; }
@@ -133,7 +136,8 @@ window.HanoiFixedShare = (() => {
     node('peerLocationInfo').textContent = 'Vị trí đối phương' + (peer.liveState ? ' · ' + peer.liveState : '') + (fix.approximate ? ' (gần đúng)' : '') +
       ' · Sai số khoảng ' + Math.ceil(fix.accuracy) + ' m · Đo lúc ' + time +
       (peer.liveState ? '' : ' · Không tự cập nhật') + (covered(fix) === false ? ' · Ngoài vùng bản đồ Hà Nội đã tải' : '');
-    node('btnPeerLocation').disabled = covered(fix) !== true;
+    const focusButton = node('btnPeerLocation') || node('peerCompactRow');
+    if (focusButton) focusButton.disabled = covered(fix) !== true;
     node('peerLocationCoordinates').textContent = fix.latitude.toFixed(6) + ', ' + fix.longitude.toFixed(6);
   }
   function clearPeerLayers() {
@@ -184,8 +188,9 @@ window.HanoiFixedShare = (() => {
   }
   function bind(options) {
     api = options;
-    node('btnSendLocation').onclick = send;
-    node('btnPeerLocation').onclick = focusPeer;
+    if (!options.quickAction) node('btnSendLocation').onclick = send;
+    const focusButton = node('btnPeerLocation') || node('peerCompactRow');
+    if (focusButton) focusButton.onclick = focusPeer;
     updateButton();
   }
   function presentLive(value, focus) {

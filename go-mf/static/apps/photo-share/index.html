@@ -195,49 +195,38 @@
 
 <div class="view" id="mapView" hidden>
   <div id="hanoiMap" aria-label="Bản đồ Hà Nội"></div>
-  <div class="mapHeader">
-    <button id="btnMapBack" type="button" aria-label="Quay lại">‹ <span>Quay lại</span></button>
-    <div class="mapHeading"><strong>Hà Nội</strong><span>Offline</span></div>
-    <button id="btnMapReset" type="button" aria-label="Đưa bản đồ về Hà Nội">Về Hà Nội</button>
-  </div>
-  <section class="mapLocationPanel" aria-label="Thông tin vị trí">
-    <div class="mapPanelHeading">
-      <div id="mapCompactStatus" role="status" aria-live="polite">Đang mở bản đồ…</div>
-      <button id="btnMapDetails" type="button" aria-controls="mapDetails" aria-expanded="false">Chi tiết</button>
-    </div>
-    <div id="liveOwnRow" class="mapLiveRow" hidden><span class="mapLiveDot" aria-hidden="true"></span><span id="liveOwnStatus"></span><button id="btnStopLive" type="button">Dừng</button></div>
-    <div id="selfCompactRow" class="mapCompactRow" hidden><span class="mapDot myDot" aria-hidden="true"></span><span id="selfCompactInfo"></span></div>
-    <div id="peerCompactRow" class="mapCompactRow" hidden><span class="mapDot peerDot" aria-hidden="true"></span><span id="peerCompactInfo"></span><button id="btnPeerLocation" type="button" disabled>Xem</button></div>
-    <div id="mapDetails" hidden>
-      <div id="mapStatus" role="status">Đang mở bản đồ…</div>
-      <div id="myLocationStatus" hidden></div>
-      <div id="fixedShareStatus"></div>
-      <div id="liveShareDetail"></div>
-      <div id="peerLocationCard" hidden>
-        <div id="peerLocationInfo"></div>
-        <div id="peerLocationCoordinates"></div>
-      </div>
-      <p class="mapDetailNote">Gửi vị trí là ảnh chụp tại thời điểm đo. Chia sẻ trực tiếp cập nhật khi ứng dụng ở trước màn hình; ra nền sẽ tạm dừng. “Đã nhận” xác nhận máy kia nhận dữ liệu.</p>
-    </div>
+  <header class="mapHeader">
+    <button id="btnMapBack" type="button" aria-label="Quay lại">‹</button>
+    <div class="mapHeading"><strong>Chia sẻ vị trí</strong><span>Hà Nội · Offline</span></div>
+  </header>
+  <section class="mapLocationPanel" aria-label="Chia sẻ vị trí">
+    <div id="mapCompactStatus" role="status" aria-live="polite">Đang mở bản đồ…</div>
+    <button id="selfCompactRow" class="mapPerson" type="button" hidden aria-label="Xem vị trí của tôi trên bản đồ">
+      <span class="mapDot myDot" aria-hidden="true"></span><span id="selfCompactInfo"></span><span class="mapRowArrow" aria-hidden="true">›</span>
+    </button>
+    <button id="peerCompactRow" class="mapPerson" type="button" hidden aria-label="Xem vị trí đối phương trên bản đồ">
+      <span class="mapDot peerDot" aria-hidden="true"></span><span id="peerCompactInfo"></span><span class="mapRowArrow" aria-hidden="true">›</span>
+    </button>
     <div id="peerLiveState" class="mapLiveHint" hidden></div>
-    <div class="mapActions">
-      <button id="btnMyLocation" type="button">Vị trí của tôi</button>
-      <button id="btnSendLocation" type="button" hidden disabled>Gửi vị trí</button>
-    </div>
-    <div id="liveLauncher" class="mapLiveLauncher">
-      <label class="mapDurationLabel" for="liveDuration">Thời lượng</label>
-      <select id="liveDuration" aria-label="Thời lượng chia sẻ trực tiếp">
-        <option value="900000">15 phút</option><option value="3600000">1 giờ</option><option value="0">Hết cuộc gọi</option>
-      </select>
+    <div id="liveLauncher" class="mapActions">
+      <button id="btnSendLocation" type="button">Gửi vị trí</button>
       <button id="btnStartLive" type="button">Chia sẻ trực tiếp</button>
     </div>
+    <div id="liveOwnRow" hidden><button id="btnStopLive" type="button">Dừng chia sẻ</button></div>
+    <p id="liveSharingHint" class="mapLiveHint" hidden>Đến hết cuộc gọi · Ra nền sẽ tạm dừng</p>
   </section>
+  <div id="mapDiagnostics" hidden aria-hidden="true">
+    <div id="mapStatus"></div><div id="myLocationStatus" hidden></div><div id="fixedShareStatus"></div>
+    <div id="liveShareDetail"></div><div id="liveOwnStatus"></div>
+    <div id="peerLocationCard" hidden><div id="peerLocationInfo"></div><div id="peerLocationCoordinates"></div></div>
+  </div>
 </div>
 <script src="maps/vendor/maplibre-gl.js"></script>
 <script src="maps/compact-ui.js"></script>
 <script src="maps/my-location.js"></script>
 <script src="maps/fixed-share.js"></script>
 <script src="maps/live-share.js"></script>
+<script src="maps/quick-share.js"></script>
 <script src="maps/viewer.js"></script>
 <script>
 'use strict';
@@ -309,7 +298,6 @@ function startShare(kind) {
 window.HanoiViewer.bind({ show, send: sendJson, toast, active: () => !!state.s });
 $('btnHanoiMap').onclick = () => window.HanoiViewer.open(true);
 $('btnMapBack').onclick = () => window.HanoiViewer.close();
-$('btnMapReset').onclick = () => window.HanoiViewer.reset();
 $('btnPhoto').onclick = () => startShare('photo');
 $('btnVideo').onclick = () => startShare('video');
 $('btnScreen').onclick = () => startShare('screen');
