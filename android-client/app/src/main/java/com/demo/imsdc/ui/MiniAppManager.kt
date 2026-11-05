@@ -568,8 +568,9 @@ class MiniAppManager(val activity: CallActivity) {
         val b = activity.binding
         val tile = b.remoteTileView
         val appId = activity.currentAppId
-        val show = remoteTileApp(appId) && cameraWanted(appId) && contentSurface == null &&
-            b.webviewMiniapp.visibility == View.VISIBLE
+        // Also over a shared video or screen: the tile is a media overlay, above the content's plain surface
+        // layer, and it does not overlap my camera, so the two overlays never mix.
+        val show = remoteTileApp(appId) && cameraWanted(appId) && b.webviewMiniapp.visibility == View.VISIBLE
         val tileWanted = show && !remoteFolded
         if (!tileWanted) {
             // Move the decoder back to the background before the tile's surface goes away.
@@ -1531,7 +1532,7 @@ class MiniAppManager(val activity: CallActivity) {
                     view, 1, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                 )
                 contentSurface = view
-                applyRemoteFold() // no tile or button over the shared video
+                applyRemoteFold() // keep the other person's tile above the new surface
             }
             val holder = sv.holder
             if (holder.surface.isValid) use(holder.surface)
