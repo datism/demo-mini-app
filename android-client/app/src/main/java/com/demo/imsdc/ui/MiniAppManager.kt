@@ -390,6 +390,23 @@ class MiniAppManager(val activity: CallActivity) {
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
+    /** Full-screen Chia sẻ: my camera and the other person side by side at the top, like Caro (no folding). */
+    private fun shareRow(appId: String = activity.currentAppId) = appId == SHARE_APP && isFullScreen(appId)
+
+    /** Caro and full-screen Chia sẻ keep both tiles in a fixed row: no folding, no dragging. */
+    fun fixedTiles(appId: String = activity.currentAppId) = appId == "caro" || shareRow(appId)
+
+    private fun screenW() = activity.binding.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
+
+    /** Chia sẻ row: each tile's width and height, and the left margin that centres the pair. */
+    private fun shareRowTile(): Triple<Int, Int, Int> {
+        val w = (screenW() * TILE_WIDTH_FRACTION).toInt()
+        return Triple(w, w * 4 / 3, (screenW() - 2 * w - dp(TILE_GAP_DP)) / 2)
+    }
+
+    /** Chia sẻ row: the height of the band the tiles take at the top (the page lays out below it, see photo-share). */
+    private fun shareRowBand() = dp(FULLSCREEN_TILE_TOP_DP) + shareRowTile().second + dp(FULLSCREEN_TILE_TOP_DP)
+
     // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
     // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
     // activity_call.xml: remote video full screen, my camera a 90x125dp box at the top left (folded into a
@@ -453,20 +470,33 @@ class MiniAppManager(val activity: CallActivity) {
                 remote.layoutParams = remoteLp
             }
             if (fullScreen || b.layoutTopBar.bottom > 0) placeRemote() else b.layoutTopBar.post { placeRemote() }
+        } else if (shareRow()) {
+            // Chia sẻ: my camera on the left of the row; the other person's tile (applyRemoteFold) on the right.
+            val (tileW, tileH, sideMargin) = shareRowTile()
+            localLp.width = tileW
+            localLp.height = tileH
+            localLp.setMargins(sideMargin, dp(FULLSCREEN_TILE_TOP_DP), 0, 0)
+            local.layoutParams = localLp
+            local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            fullScreenRemote(remote, remoteLp)
         } else {
             localLp.width = dp(90)
             localLp.height = dp(125)
             localLp.setMargins(dp(16), if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16), dp(16), dp(16))
             local.layoutParams = localLp
             local.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED)
-            // Full-screen call video (under the page in Vẽ / Chia sẻ, which show the tile instead).
-            remoteLp.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            remoteLp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            remoteLp.gravity = android.view.Gravity.NO_GRAVITY
-            remoteLp.leftMargin = 0
-            remoteLp.topMargin = 0
-            remote.layoutParams = remoteLp
+            fullScreenRemote(remote, remoteLp)
         }
+    }
+
+    /** Full-screen call video (under the page in Vẽ / Chia sẻ, which show the tile instead). */
+    private fun fullScreenRemote(remote: View, remoteLp: android.widget.FrameLayout.LayoutParams) {
+        remoteLp.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        remoteLp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+        remoteLp.gravity = android.view.Gravity.NO_GRAVITY
+        remoteLp.leftMargin = 0
+        remoteLp.topMargin = 0
+        remote.layoutParams = remoteLp
     }
 
     // ───────────────────────── Full screen ─────────────────────────
@@ -496,6 +526,7 @@ class MiniAppManager(val activity: CallActivity) {
             if (activity.currentAppId !in FULLSCREEN_ON_REQUEST || fullScreenRequested == on) return@runOnUiThread
             fullScreenRequested = on
             applyWebViewBounds(activity.currentAppId)
+            applyCameraFold() // Chia sẻ full screen opens a folded camera (its row cannot fold)
         }
     }
 
@@ -512,7 +543,7 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Tap on my camera tile (not dragged): fold it into a camera button. Caro keeps its two tiles. */
     fun onCameraTileTapped() {
-        if (activity.currentAppId == "caro") return
+        if (fixedTiles()) return
         cameraFolded = true
         applyCameraFold()
     }
@@ -537,7 +568,7 @@ class MiniAppManager(val activity: CallActivity) {
             applyRemoteFold()
             return
         }
-        val folded = cameraFolded && appId != "caro"
+        val folded = cameraFolded && !fixedTiles(appId)
         b.localVideoView.visibility = if (folded) View.GONE else View.VISIBLE
         b.btnCameraRestore.visibility = if (folded) View.VISIBLE else View.GONE
         if (folded) b.btnCameraRestore.bringToFront() else b.localVideoView.bringToFront()
@@ -556,7 +587,7 @@ class MiniAppManager(val activity: CallActivity) {
     var remoteTileShown = false
         private set
 
-    fun onRemoteTileTapped() { remoteFolded = true; applyRemoteFold() }
+    fun onRemoteTileTapped() { if (!fixedTiles()) { remoteFolded = true; applyRemoteFold() } }
     fun onRemoteButtonTapped() { remoteFolded = false; applyRemoteFold() }
 
     /**
@@ -571,7 +602,9 @@ class MiniAppManager(val activity: CallActivity) {
         // Also over a shared video or screen: the tile is a media overlay, above the content's plain surface
         // layer, and it does not overlap my camera, so the two overlays never mix.
         val show = remoteTileApp(appId) && cameraWanted(appId) && b.webviewMiniapp.visibility == View.VISIBLE
-        val tileWanted = show && !remoteFolded
+        val row = shareRow(appId)
+        val folded = remoteFolded && !row
+        val tileWanted = show && !folded
         if (!tileWanted) {
             // Move the decoder back to the background before the tile's surface goes away.
             if (remoteTileShown) { remoteTileShown = false; activity.attachRemoteVideo() }
@@ -587,20 +620,23 @@ class MiniAppManager(val activity: CallActivity) {
         // Under my camera: the tile (or its folded button) at the top left, then a small gap.
         val selfTop = if (fullScreen) dp(FULLSCREEN_SELF_TOP_DP) else dp(16)
         val top = selfTop + (if (cameraFolded) dp(44) else dp(125)) + dp(REMOTE_TILE_GAP_DP)
+        val (rowW, rowH, rowSide) = shareRowTile()
         for (v in listOf<View>(tile, b.btnRemoteRestore)) {
             val lp = v.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
             lp.topToBottom = if (fullScreen) unset else b.layoutTopBar.id
             lp.topToTop = if (fullScreen) parent else unset
             lp.startToStart = parent
-            lp.setMargins(dp(16), top, 0, 0)
+            if (row) lp.setMargins(rowSide + rowW + dp(TILE_GAP_DP), dp(FULLSCREEN_TILE_TOP_DP), 0, 0)
+            else lp.setMargins(dp(16), top, 0, 0)
+            if (v === tile) { lp.width = if (row) rowW else dp(90); lp.height = if (row) rowH else dp(125) }
             v.layoutParams = lp
         }
 
         val name = activity.peerName
         b.btnRemoteRestore.text = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         b.btnRemoteRestore.contentDescription = "Hiện video của $name"
-        b.btnRemoteRestore.visibility = if (remoteFolded) View.VISIBLE else View.GONE
-        if (remoteFolded) {
+        b.btnRemoteRestore.visibility = if (folded) View.VISIBLE else View.GONE
+        if (folded) {
             b.btnRemoteRestore.bringToFront()
         } else {
             remoteTileShown = true
@@ -1528,9 +1564,9 @@ class MiniAppManager(val activity: CallActivity) {
                 val remote = activity.binding.remoteVideoView
                 remoteHiddenForContent = remote.visibility == View.VISIBLE
                 if (remoteHiddenForContent) remote.visibility = View.GONE
-                (activity.binding.root as android.view.ViewGroup).addView(
-                    view, 1, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-                )
+                val lp = android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                if (shareRow()) lp.topMargin = shareRowBand() // under the camera row, as the page lays out
+                (activity.binding.root as android.view.ViewGroup).addView(view, 1, lp)
                 contentSurface = view
                 applyRemoteFold() // keep the other person's tile above the new surface
             }
