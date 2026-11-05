@@ -1,11 +1,11 @@
-/* Offline Hanoi map with local-only native location; no location sharing or routing. */
+/* Offline Hanoi map: explicit fixed sharing over the existing ADC; no live tracking or routing. */
 window.HanoiViewer = (() => {
   let api, map, config, opening, timer, pending, visible = false, disposed = false, lastError = null;
   const seen = new Set();
   const status = text => { document.getElementById('mapStatus').textContent = text; };
   const message = (t, id) => ({ t, version: 1, id });
   async function ensureMap() {
-    if (map) { map.resize(); return; }
+    if (map) { map.resize(); window.HanoiFixedShare.onMapReady(); return; }
     if (opening) return opening;
     opening = (async () => {
       if (!window.maplibregl) throw new Error('Thiếu thư viện bản đồ. Cần chạy bước prepare và cập nhật DCAR.');
@@ -37,8 +37,10 @@ window.HanoiViewer = (() => {
       map.on('load', () => {
         if (disposed) return;
         if (!lastError) status('Đã nạp bản đồ chi tiết · ' + config.regionName);
+        window.HanoiFixedShare.onMapReady();
         if (pending) transmit();
       });
+      map.on('idle', () => { if (!disposed) window.HanoiFixedShare.onMapReady(); });
       map.on('error', event => {
         lastError = String(event.error && event.error.message || 'Lỗi không xác định');
         console.error('[HANOI_MAP]', lastError);
@@ -55,8 +57,11 @@ window.HanoiViewer = (() => {
   }
   function transmit() {
     if (!pending || disposed) return;
-    api.send(message('map.open', pending.id));
-    if (++pending.attempt >= 12) {
+    const request = pending;
+    request.attempt++;
+    api.send(message('map.open', request.id));
+    if (pending !== request) return;
+    if (request.attempt >= 12) {
       clearInterval(timer); timer = null;
       status('Đã gửi yêu cầu mở bản đồ; chưa nhận xác nhận từ máy kia. Có thể bấm lại để thử.');
       pending = null;
@@ -70,10 +75,11 @@ window.HanoiViewer = (() => {
     if (sync) {
       clearInterval(timer);
       pending = { id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2), attempt: 0 };
-      transmit(); timer = setInterval(transmit, 1500);
+      timer = setInterval(transmit, 1500); transmit();
     }
   }
   function receive(m) {
+    if (window.HanoiFixedShare.receive(m)) return true;
     if (!m || !['map.open','map.ack','map.busy'].includes(m.t)) return false;
     if (m.version !== 1 || typeof m.id !== 'string' || m.id.length > 100) return true;
     if (m.t === 'map.open') {
@@ -89,12 +95,16 @@ window.HanoiViewer = (() => {
     }
     return true;
   }
-  function close() { window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
+  function close() { window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
   function reset() { if (map && config) map.easeTo({ center: config.center, zoom: config.zoom, duration: 500 }); }
-  function destroy() { window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
+  function destroy() { window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
   return { bind: x => {
     api = x;
+    window.HanoiFixedShare.bind({ getMap: () => map, getConfig: () => config,
+      isVisible: () => visible && !disposed, active: () => api.active(),
+      openMap: () => open(false), send: x.send, toast: x.toast });
     window.HanoiMyLocation.bind({ getMap: () => map, getConfig: () => config,
-      isVisible: () => visible && !disposed });
+      isVisible: () => visible && !disposed,
+      onFix: fix => window.HanoiFixedShare.setLocalFix(fix) });
   }, open, close, receive, reset, destroy };
 })();

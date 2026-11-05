@@ -195,13 +195,22 @@
 
 <div class="view" id="mapView" hidden>
   <div id="hanoiMap" aria-label="Bản đồ Hà Nội"></div>
-  <div class="mapHeader"><button id="btnMapBack">‹ Quay lại</button><strong>Hà Nội</strong><div class="mapActions"><button id="btnMyLocation" type="button">Vị trí của tôi</button><button id="btnMapReset">Về Hà Nội</button></div></div>
+  <div class="mapHeader"><button id="btnMapBack">‹ Quay lại</button><strong>Hà Nội</strong><div class="mapActions"><button id="btnMyLocation" type="button">Vị trí của tôi</button><button id="btnSendLocation" type="button" hidden disabled>Gửi vị trí này</button><button id="btnMapReset">Về Hà Nội</button></div></div>
   <div id="mapStatus" role="status">Đang mở bản đồ…</div>
-  <div id="myLocationStatus" role="status" aria-live="polite" hidden></div>
-  <div class="mapNote">Bản đồ offline · Vị trí chỉ hiển thị trên máy này</div>
+  <div class="mapLocationPanel">
+    <div id="myLocationStatus" role="status" aria-live="polite" hidden></div>
+    <div id="fixedShareStatus" role="status" aria-live="polite"></div>
+    <div id="peerLocationCard" hidden>
+      <div id="peerLocationInfo"></div>
+      <div id="peerLocationCoordinates"></div>
+      <button id="btnPeerLocation" type="button">Xem vị trí đối phương</button>
+    </div>
+    <div class="mapLegend"><span class="myLegend">● Tôi</span><span class="peerLegend">● Đối phương</span><span>Vị trí cố định · Không tự cập nhật</span></div>
+  </div>
 </div>
 <script src="maps/vendor/maplibre-gl.js"></script>
 <script src="maps/my-location.js"></script>
+<script src="maps/fixed-share.js"></script>
 <script src="maps/viewer.js"></script>
 <script>
 'use strict';

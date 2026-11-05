@@ -1,4 +1,4 @@
-/* Local one-shot location only. This module never calls sendJson or a network API. */
+/* Local GPS acquisition. A validated snapshot becomes shareable only through the explicit send button. */
 window.HanoiMyLocation = (() => {
   'use strict';
   const SOURCE = 'my-location';
@@ -74,7 +74,7 @@ window.HanoiMyLocation = (() => {
       paint: { 'circle-radius': 7, 'circle-color': '#1677ff', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
     map.easeTo({ center: [lng, lat], zoom: Math.min(accuracy > 1000 ? 12 : accuracy > 200 ? 14 : 16, config.maxZoom), duration: 600 });
     const time = new Date(fix.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    status((fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time + ' · Chưa chia sẻ, không tự cập nhật');
+    status((fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time + ' · Không tự cập nhật');
   }
   function locate() {
     if (disposed || pending || !api.isVisible()) return;
@@ -85,6 +85,7 @@ window.HanoiMyLocation = (() => {
       status('Cần cài APK hỗ trợ vị trí mới để dùng tính năng này.'); return;
     }
     clearPoint();
+    if (api.onFix) api.onFix(null);
     pending = 'loc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
     const id = pending;
     button(true);
@@ -107,9 +108,10 @@ window.HanoiMyLocation = (() => {
         result.accuracy <= 0 || result.ageMs < 0 || result.ageMs > 30000 || result.timestamp <= 0) {
       status('Tọa độ nhận được không hợp lệ hoặc đã cũ. Hãy bấm lại.'); return;
     }
+    if (api.onFix) api.onFix({ latitude: result.latitude, longitude: result.longitude, accuracy: result.accuracy, timestamp: result.timestamp, ageMs: result.ageMs, approximate: result.approximate === true });
     try { render(result); } catch (error) { clearPoint(); status(error.message); }
   }
-  function cancel() { stopPending(); clearPoint(); status(''); }
+  function cancel() { stopPending(); clearPoint(); status(''); if (api.onFix) api.onFix(null); }
   function onVisibility() {
     if (document.hidden) { cancel(); }
   }
@@ -124,5 +126,5 @@ window.HanoiMyLocation = (() => {
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pagehide', cancel);
   }
-  return { bind, locate, onNativeResult, cancel, destroy };
+  return { bind, locate, onNativeResult, cancel, destroy, circle };
 })();

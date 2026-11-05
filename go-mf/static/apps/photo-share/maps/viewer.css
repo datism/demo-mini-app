@@ -19,3 +19,25 @@
 #mapView .mapActions { grid-column:1 / -1; justify-content:space-between; }
 #mapView #mapStatus { top:calc(132px + env(safe-area-inset-top, 0px)); }
 #mapView .maplibregl-ctrl-top-right { top:calc(202px + env(safe-area-inset-top, 0px)); }
+
+/* Fixed location sharing: status cards scroll above the native call-control pill. */
+#mapView .mapActions { display:grid; grid-template-columns:1fr 1fr; }
+#mapView .mapActions button { min-width:0; }
+#mapView .mapActions #btnMapReset { grid-column:2; grid-row:1; }
+#mapView .mapActions #btnSendLocation { grid-column:1 / -1; }
+#btnSendLocation { background:#176b3b; color:#fff; }
+#btnSendLocation:disabled { opacity:.6; }
+.mapLocationPanel { position:absolute; left:12px; right:12px; bottom:max(90px, env(safe-area-inset-bottom)); max-height:34%; overflow:auto; display:flex; flex-direction:column; gap:6px; z-index:3; }
+#mapView #myLocationStatus { position:static; box-shadow:none; margin:0; }
+#fixedShareStatus:not(:empty), #peerLocationCard { padding:10px 12px; border-radius:12px; background:#fff; color:#172b4d; box-shadow:0 2px 8px #0002; font-size:13px; }
+#peerLocationCard { border-left:4px solid #df6817; }
+#peerLocationCoordinates { margin-top:4px; color:#58677c; }
+#btnPeerLocation { margin-top:8px; padding:8px 10px; border:0; border-radius:8px; background:#fff0e3; color:#8d3d04; font:inherit; }
+#btnPeerLocation:disabled { opacity:.5; }
+.mapLegend { display:flex; flex-wrap:wrap; gap:8px; padding:7px 10px; border-radius:10px; background:#fff; font-size:12px; }
+.myLegend { color:#1677ff; }
+.peerLegend { color:#b74f08; }
+/* The send button adds a header row; reserve its height even while hidden. */
+#mapView .mapActions { min-height:86px; }
+#mapView #mapStatus { top:calc(178px + env(safe-area-inset-top, 0px)); max-height:64px; overflow:auto; }
+#mapView .maplibregl-ctrl-top-right { top:calc(252px + env(safe-area-inset-top, 0px)); }

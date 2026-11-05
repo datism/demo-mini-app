@@ -17,6 +17,7 @@
     "NOTICE.txt": "9237c86bbc93906a30469f5f9ab687ecd4883522e07be2a164ad37b8521d02cf",
     "config.json": "99a4be542231804a9d07ea1b9d07db7192c67869c0fb45000a1d0e2dbd4a4c08",
     "detail-report.json": "33d2d85ac9d5bfb11d4d0e35754adce9468c43f9630d05c8584b61a9816009ce",
+    "fixed-share.js": "ca043feada4ec6426d7eada4a1d546faf33f27545eb09ae2bb26172eb491ea2b",
     "fonts/Open Sans Semibold/0-255.pbf": "64da7011e07531351a249a3d26aad76e2f22e4e321e50833f742697b453e8365",
     "fonts/Open Sans Semibold/1024-1279.pbf": "0354f1c092e3604b09177de773f84caa1ca6d4f17a8099e4787fcba8e7282907",
     "fonts/Open Sans Semibold/11008-11263.pbf": "b93dd55ccc83b68fadf8e8796fc0911033ac74d9c13d37a1dd7331c7fefa4754",
@@ -110,7 +111,7 @@
     "fonts/Open Sans Semibold/8448-8703.pbf": "f568af4cb6e55460e59d0f6b575449adabf4e3e5c19c1363f3b375e85cf50634",
     "fonts/coverage.json": "16de68f2b15aa346f7bc5469636395c8dffd13e8381f78fb4ba83cfa4f688551",
     "fonts/licenses/OpenSans-LICENSE.txt": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
-    "my-location.js": "2113ac92e237ebf7ffe9af803d5530686740dd0e5d5cf83c38332003feff1525",
+    "my-location.js": "fa18d822f4d571fdb1f821c2f1f66fed03c57dce09f13d1132410f4c374cfe28",
     "style.json": "a8b1801e5c44fc08813c4d906448fc22edc0336050ae40697f0e3130f1d84be8",
     "tiles/10/811/449.pbf": "69154c6cb856ead99541a1b046cf3fb76b734a43ef5dd17f609993065546e02d",
     "tiles/10/811/450.pbf": "1e0afccabf1ad4a9570b4e87b588aeec0724ae513efb64cf31c3effe5aedbf6b",
@@ -2514,8 +2515,8 @@
     "vendor/maplibre-gl.css": "792ac997dcf6ae6f643eb4e2dee4630c85e7056526bd8fb85ffe83c67d6c41b4",
     "vendor/maplibre-gl.js": "b5a34e6930ff937dbbb9eec8892cffb80ba473cce88ae5ca8c4654432f5f0ebc",
     "vendor/version.json": "2fd27cd3b6c29a598b03ab128409126df89188054471efd95ee9c7c8a91edd25",
-    "viewer.css": "9808b960c531622ed92c34a0f15bde611ae1997ecd0950a90649f984d915e038",
-    "viewer.js": "5c3a4c43b3d2fc27eaaecab9a8f33f3ea8d04f289a2dc10aff9c90f988f62011"
+    "viewer.css": "70a090376987ead6f0d63e0b5c356d5854d4d03154c7f25947322938b5d03375",
+    "viewer.js": "4d1f81a7f9b8d1581f4144d26aee62e96ac9ace3739231a736ff4cda326bc298"
   },
-  "viewerRevision": "local-native-one-shot-location-v1"
+  "viewerRevision": "explicit-fixed-location-sharing-v1"
 }
