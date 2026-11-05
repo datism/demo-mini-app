@@ -390,8 +390,8 @@ class MiniAppManager(val activity: CallActivity) {
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
-    /** Full-screen Chia sẻ: my camera and the other person side by side at the top, like Caro (no folding). */
-    private fun shareRow(appId: String = activity.currentAppId) = appId == SHARE_APP && isFullScreen(appId)
+    /** Chia sẻ menu (full screen, the page asks): my camera and the other person side by side at the top, like Caro (no folding). */
+    private fun shareRow(appId: String = activity.currentAppId) = appId == SHARE_APP && cameraRowRequested && isFullScreen(appId)
 
     /** Caro and full-screen Chia sẻ keep both tiles in a fixed row: no folding, no dragging. */
     fun fixedTiles(appId: String = activity.currentAppId) = appId == "caro" || shareRow(appId)
@@ -403,9 +403,6 @@ class MiniAppManager(val activity: CallActivity) {
         val w = (screenW() * TILE_WIDTH_FRACTION).toInt()
         return Triple(w, w * 4 / 3, (screenW() - 2 * w - dp(TILE_GAP_DP)) / 2)
     }
-
-    /** Chia sẻ row: the height of the band the tiles take at the top (the page lays out below it, see photo-share). */
-    private fun shareRowBand() = dp(FULLSCREEN_TILE_TOP_DP) + shareRowTile().second + dp(FULLSCREEN_TILE_TOP_DP)
 
     // Video tiles (caro): my camera top-left, the other person top-right, both 3:4 (the remote stream is
     // 480x640 and the remote SurfaceView stretches to its size). Otherwise restore the defaults from
@@ -507,6 +504,8 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** The page currently on screen asked for full screen (reset whenever another page is launched). */
     @Volatile private var fullScreenRequested = false
+    /** Chia sẻ page: its menu shows the cameras in a row at the top; its photo / video views use the corner tiles. */
+    @Volatile private var cameraRowRequested = false
     /** The user folded the camera tile into a button; kept for the rest of the call. */
     private var cameraFolded = false
     private var callControlsShown = false
@@ -526,7 +525,17 @@ class MiniAppManager(val activity: CallActivity) {
             if (activity.currentAppId !in FULLSCREEN_ON_REQUEST || fullScreenRequested == on) return@runOnUiThread
             fullScreenRequested = on
             applyWebViewBounds(activity.currentAppId)
-            applyCameraFold() // Chia sẻ full screen opens a folded camera (its row cannot fold)
+            applyCameraFold()
+        }
+    }
+
+    /** Page (Chia sẻ): cameras in a row at the top for the menu (true), corner tiles for photo / video (false). */
+    fun setCameraRow(on: Boolean) {
+        activity.runOnUiThread {
+            if (activity.currentAppId != SHARE_APP || cameraRowRequested == on) return@runOnUiThread
+            cameraRowRequested = on
+            applyWebViewBounds(activity.currentAppId)
+            applyCameraFold() // the row cannot fold; the corner tiles take back their folded state
         }
     }
 
@@ -727,6 +736,7 @@ class MiniAppManager(val activity: CallActivity) {
             activity.webRtcManager.foregroundIsHome = (targetId == HOME_APP || targetId == "operator-menu" || hotlineApp != null)
             Log.i(TAG, "launchMiniApp targetId=$targetId")
             fullScreenRequested = false // a new page starts windowed; Content Sharing asks again
+            cameraRowRequested = false
             applyWebViewBounds(targetId)
 
             if (targetId == "operator-menu") {
@@ -1565,7 +1575,6 @@ class MiniAppManager(val activity: CallActivity) {
                 remoteHiddenForContent = remote.visibility == View.VISIBLE
                 if (remoteHiddenForContent) remote.visibility = View.GONE
                 val lp = android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-                if (shareRow()) lp.topMargin = shareRowBand() // under the camera row, as the page lays out
                 (activity.binding.root as android.view.ViewGroup).addView(view, 1, lp)
                 contentSurface = view
                 applyRemoteFold() // keep the other person's tile above the new surface

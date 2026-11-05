@@ -1366,6 +1366,7 @@ class CallActivity : AppCompatActivity() {
             override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
             override fun setFullScreen(on: Boolean) = miniAppManager.setFullScreen(on)
+            override fun setCameraRow(on: Boolean) = miniAppManager.setCameraRow(on)
             override fun showCallControls() = miniAppManager.showCallControls()
         }
 
