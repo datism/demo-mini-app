@@ -110,6 +110,7 @@
     "fonts/Open Sans Semibold/8448-8703.pbf": "f568af4cb6e55460e59d0f6b575449adabf4e3e5c19c1363f3b375e85cf50634",
     "fonts/coverage.json": "16de68f2b15aa346f7bc5469636395c8dffd13e8381f78fb4ba83cfa4f688551",
     "fonts/licenses/OpenSans-LICENSE.txt": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5",
+    "my-location.js": "2113ac92e237ebf7ffe9af803d5530686740dd0e5d5cf83c38332003feff1525",
     "style.json": "a8b1801e5c44fc08813c4d906448fc22edc0336050ae40697f0e3130f1d84be8",
     "tiles/10/811/449.pbf": "69154c6cb856ead99541a1b046cf3fb76b734a43ef5dd17f609993065546e02d",
     "tiles/10/811/450.pbf": "1e0afccabf1ad4a9570b4e87b588aeec0724ae513efb64cf31c3effe5aedbf6b",
@@ -2513,8 +2514,8 @@
     "vendor/maplibre-gl.css": "792ac997dcf6ae6f643eb4e2dee4630c85e7056526bd8fb85ffe83c67d6c41b4",
     "vendor/maplibre-gl.js": "b5a34e6930ff937dbbb9eec8892cffb80ba473cce88ae5ca8c4654432f5f0ebc",
     "vendor/version.json": "2fd27cd3b6c29a598b03ab128409126df89188054471efd95ee9c7c8a91edd25",
-    "viewer.css": "bb254e2006f64f4fc3922093db8a638561078d77f51db762df564eceefba1e00",
-    "viewer.js": "a9dbad8f86356513d5c7b245e09f1d2d0e0b01d80f0df0412cfe03114d3bd681"
+    "viewer.css": "9808b960c531622ed92c34a0f15bde611ae1997ecd0950a90649f984d915e038",
+    "viewer.js": "5c3a4c43b3d2fc27eaaecab9a8f33f3ea8d04f289a2dc10aff9c90f988f62011"
   },
-  "viewerRevision": "detailed-labels-local-glyphs-v2"
+  "viewerRevision": "local-native-one-shot-location-v1"
 }

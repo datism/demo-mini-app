@@ -7,3 +7,15 @@
 .hanoiLabel { padding:3px 6px; background:#fffffff0; border:1px solid #c9d2dc; border-radius:5px; font-size:12px; color:#273548; pointer-events:none; }
 #mapView .maplibregl-ctrl-top-right { top:132px; }
 #mapView .maplibregl-ctrl-bottom-right, #mapView .maplibregl-ctrl-bottom-left { bottom:8px; }
+
+/* Local location controls; wrap on narrow phone screens. */
+#mapView .mapHeader { flex-wrap:wrap; }
+.mapActions { display:flex; flex-wrap:wrap; gap:6px; }
+#btnMyLocation { background:#1677ff; color:white; }
+#btnMyLocation:disabled { opacity:.6; }
+#myLocationStatus { position:absolute; left:12px; right:12px; bottom:132px; padding:10px 12px; border-radius:12px; background:#fff; color:#172b4d; box-shadow:0 2px 12px #0002; font-size:13px; z-index:3; }
+#mapView .mapHeader { display:grid; grid-template-columns:auto 1fr; }
+#mapView .mapHeader strong { text-align:right; }
+#mapView .mapActions { grid-column:1 / -1; justify-content:space-between; }
+#mapView #mapStatus { top:calc(132px + env(safe-area-inset-top, 0px)); }
+#mapView .maplibregl-ctrl-top-right { top:calc(202px + env(safe-area-inset-top, 0px)); }

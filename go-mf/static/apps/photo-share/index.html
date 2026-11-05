@@ -195,11 +195,13 @@
 
 <div class="view" id="mapView" hidden>
   <div id="hanoiMap" aria-label="Bản đồ Hà Nội"></div>
-  <div class="mapHeader"><button id="btnMapBack">‹ Quay lại</button><strong>Hà Nội</strong><button id="btnMapReset">Về Hà Nội</button></div>
+  <div class="mapHeader"><button id="btnMapBack">‹ Quay lại</button><strong>Hà Nội</strong><div class="mapActions"><button id="btnMyLocation" type="button">Vị trí của tôi</button><button id="btnMapReset">Về Hà Nội</button></div></div>
   <div id="mapStatus" role="status">Đang mở bản đồ…</div>
-  <div class="mapNote">Bản đồ offline · Chưa bật chia sẻ vị trí</div>
+  <div id="myLocationStatus" role="status" aria-live="polite" hidden></div>
+  <div class="mapNote">Bản đồ offline · Vị trí chỉ hiển thị trên máy này</div>
 </div>
 <script src="maps/vendor/maplibre-gl.js"></script>
+<script src="maps/my-location.js"></script>
 <script src="maps/viewer.js"></script>
 <script>
 'use strict';

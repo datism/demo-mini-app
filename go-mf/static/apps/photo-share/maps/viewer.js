@@ -1,4 +1,4 @@
-/* Offline map preview only: no device location APIs, no route calculation. */
+/* Offline Hanoi map with local-only native location; no location sharing or routing. */
 window.HanoiViewer = (() => {
   let api, map, config, opening, timer, pending, visible = false, disposed = false, lastError = null;
   const seen = new Set();
@@ -89,8 +89,12 @@ window.HanoiViewer = (() => {
     }
     return true;
   }
-  function close() { visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
+  function close() { window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
   function reset() { if (map && config) map.easeTo({ center: config.center, zoom: config.zoom, duration: 500 }); }
-  function destroy() { disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
-  return { bind: x => { api = x; }, open, close, receive, reset, destroy };
+  function destroy() { window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
+  return { bind: x => {
+    api = x;
+    window.HanoiMyLocation.bind({ getMap: () => map, getConfig: () => config,
+      isVisible: () => visible && !disposed });
+  }, open, close, receive, reset, destroy };
 })();

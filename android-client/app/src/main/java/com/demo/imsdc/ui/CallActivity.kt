@@ -460,6 +460,10 @@ class CallActivity : AppCompatActivity() {
         android.Manifest.permission.RECORD_AUDIO,
         android.Manifest.permission.CAMERA
     )
+    private var mapLocationController: com.demo.imsdc.location.MapLocationController? = null
+
+    internal fun cancelMapLocationForNavigation() { mapLocationController?.cancel() }
+
     private val permissionRequestCode = 101
 
     // --- Lifecycle -----------------------------------------------------------
@@ -609,6 +613,7 @@ class CallActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (mapLocationController?.onPermissionResult(requestCode) == true) return
         if (requestCode == permissionRequestCode) {
             if (grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
                 initAndStart()
@@ -1341,6 +1346,18 @@ class CallActivity : AppCompatActivity() {
                 }
             }
         }
+        mapLocationController = com.demo.imsdc.location.MapLocationController(this, binding.webviewMiniapp) {
+            currentAppId == "photo-share" && !isEndingCall &&
+                binding.webviewMiniapp.visibility == View.VISIBLE &&
+                binding.webviewMiniapp.url == "https://miniapp/index.html" &&
+                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        }
+        androidBridge.onRequestMapLocation = { id ->
+            runOnUiThread { mapLocationController?.request(id) }
+        }
+        androidBridge.onCancelMapLocation = { id ->
+            runOnUiThread { mapLocationController?.cancelFromJs(id) }
+        }
         androidBridge.onJsRequestedAdc = imsDcSdk.onJsRequestedAdc
         val sdkBridge = imsDcSdk.getJavascriptInterface()
         // Inject AndroidBridge & IMSDataChannelBridge into WebView
@@ -1760,6 +1777,7 @@ class CallActivity : AppCompatActivity() {
     }
 
     private fun endCall() {
+        mapLocationController?.cancel()
         if (isEndingCall) return
         isEndingCall = true
         agentCallJob?.cancel()
@@ -1820,6 +1838,7 @@ class CallActivity : AppCompatActivity() {
     private var cameraPausedInBackground = false
 
     override fun onStop() {
+        mapLocationController?.cancel("background")
         super.onStop()
         if (!isChangingConfigurations) {
             // Hidden (Home, another app, screen off): the ringing call and a pending request ask by notification.
@@ -1839,6 +1858,8 @@ class CallActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        mapLocationController?.cancel()
+        mapLocationController = null
         super.onDestroy()
         agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)

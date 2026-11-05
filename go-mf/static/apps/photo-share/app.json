@@ -1,10 +1,10 @@
 {
-    "appId":  "photo-share",
-    "appName":  "Content Sharing",
-    "version":  "2.2.0-hanoi-detailed",
-    "connectionPolicy":  "P2P",
-    "qosHint":  {
-                    "latencyMs":  200,
-                    "packetLossRate":  0.05
-                }
+  "appId": "photo-share",
+  "appName": "Content Sharing",
+  "version": "2.3.0-hanoi-my-location",
+  "connectionPolicy": "P2P",
+  "qosHint": {
+    "latencyMs": 200,
+    "packetLossRate": 0.05
+  }
 }
