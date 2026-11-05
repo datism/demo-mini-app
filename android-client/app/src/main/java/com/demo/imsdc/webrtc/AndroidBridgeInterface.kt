@@ -48,6 +48,7 @@ class AndroidBridgeInterface(
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
         fun setFullScreen(on: Boolean)
+        fun setCameraRow(on: Boolean)
         fun showCallControls()
     }
 
@@ -91,6 +92,10 @@ class AndroidBridgeInterface(
     /** Page: full screen on (photo viewer, video) or off. Hides the call bar and buttons, keeps my camera. */
     @JavascriptInterface
     fun setFullScreen(on: Boolean) { shareHandler?.setFullScreen(on) }
+
+    /** Page: the Content Sharing menu wants both cameras side by side at the top (true), or the usual corner tiles. */
+    @JavascriptInterface
+    fun setCameraRow(on: Boolean) { shareHandler?.setCameraRow(on) }
 
     /** Page: the user tapped the content in full screen; show the call buttons for a few seconds. */
     @JavascriptInterface

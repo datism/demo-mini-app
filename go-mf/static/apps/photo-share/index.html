@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi" class="full">
+<html lang="vi" class="full row">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -97,18 +97,18 @@
   .round { width: 54px; height: 54px; border-radius: 50%; border: 0; background: #fff; color: #000; display: grid; place-items: center; }
   .round svg { width: 22px; height: 22px; }
 
-  /* Full screen (native hides the call UI): my camera and the other person side by side in a band at the top
-     (each tile 34% of the width, 3:4, 12px above and below: MiniAppManager.shareRowBand), the call pill at the
-     bottom centre. Every view lays out below the band. */
-  :root { --band: calc(24px + 45.333vw); }
-  html.full .view { top: var(--band); }
-  html.full.video body { background: linear-gradient(#000 var(--band), transparent var(--band)); }
-  html.full #home { padding: 8px 20px 72px; }
-  html.full #home .choices { margin-top: 20px; }
+  /* Full screen (native hides the call UI): the call pill at the bottom centre. Photo / video: my camera at the
+     top-left with the other person under it. Menu (html.row): both cameras side by side in a band at the top
+     (each tile 34% of the width, 3:4, 12px above and below: MiniAppManager.shareRowTile), the menu below it. */
+  html.full .bar { padding-left: 116px; }
   html.full #dots { bottom: 62px; }
   html.full .controls { padding-bottom: 60px; }
   html.full .center { padding-bottom: 72px; }
-  @media (max-height: 700px) { html.full .choice { padding: 12px 14px; } html.full .choice svg { margin-bottom: 8px; } }
+  :root { --band: calc(24px + 45.333vw); }
+  html.row .view { top: var(--band); }
+  html.row #home { padding: 8px 20px 72px; }
+  html.row #home .choices { margin-top: 20px; }
+  @media (max-height: 700px) { html.row .choice { padding: 12px 14px; } html.row .choice svg { margin-bottom: 8px; } }
   #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(21,24,29,.92); color: #fff; font-size: 12.5px;
            padding: 9px 14px; border-radius: 999px; z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
   #toast.show { opacity: 1; }
@@ -223,7 +223,7 @@ function sendJson(obj) {
   const s = JSON.stringify(obj), b = B();
   if (b && b.send) b.send(1000, s); else if (b && b.sendData) b.sendData(s); else console.warn('[CS] no bridge', s);
 }
-function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); if (name !== 'setFullScreen' && name !== 'showCallControls') console.warn('[CS] bridge missing', name); }
+function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); if (name !== 'setFullScreen' && name !== 'setCameraRow' && name !== 'showCallControls') console.warn('[CS] bridge missing', name); }
 window._handleMessageFromNative = window._handleMessageFromNative || function () {};
 
 let toastTimer = null;
@@ -237,8 +237,12 @@ function show(v) {
   VIEWS.forEach(id => { $(id).hidden = id !== v; });
   document.documentElement.classList.toggle('dark', v === 'viewer');
   document.documentElement.classList.toggle('video', v === 'videoView');
-  // Every view is full screen (native hides the call UI and shows the pill at the bottom).
+  // Every view is full screen (native hides the call UI and shows the pill at the bottom). The menu and its
+  // waiting screens put both cameras side by side at the top; photo and video keep the corner tiles.
+  const row = v === 'home' || v === 'wait' || v === 'peerPicking';
   document.documentElement.classList.add('full');
+  document.documentElement.classList.toggle('row', row);
+  call('setCameraRow', row);
   call('setFullScreen', true);
 }
 function peerLabel() { return state.peer || 'đối phương'; }
@@ -595,7 +599,7 @@ window.addEventListener('load', () => {
   if (window.ImsDcBridge && window.ImsDcBridge.createDataChannel) window.ImsDcBridge.createDataChannel('photo-share');
   else if (window._dsbridge) { try { window._dsbridge.call('createAppDataChannel', 'photo-share'); } catch (e) {} }
   const b = B(); if (b && typeof b.peerNumber === 'function') { try { window.shareEvent('peer', { peer: b.peerNumber() }); } catch (e) {} }
-  call('setFullScreen', true); // the menu is full screen too
+  call('setCameraRow', true); call('setFullScreen', true); // the menu: full screen, cameras in a row
 });
 window.cleanUpImsDcObjects = function () { endSession(); };
 </script>
