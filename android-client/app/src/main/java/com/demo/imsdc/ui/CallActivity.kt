@@ -65,6 +65,49 @@ class CallActivity : AppCompatActivity() {
         private const val AGENT_NO_ANSWER_MS = 2_500L
         @Volatile
         var activeInstance: CallActivity? = null
+
+        private var crashByeInstalled = false
+
+        /**
+         * When the app crashes (any thread) during a call, send BYE (or CANCEL while still ringing out) before the
+         * process dies, so the other phone does not stay in the call. Then the usual crash handling runs.
+         */
+        private fun installCrashBye() {
+            if (crashByeInstalled) return
+            crashByeInstalled = true
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+                try {
+                    val a = activeInstance
+                    val sm = SipManager.shared
+                    val cId = a?.callId ?: sm?.currentCallId
+                    if (a != null && sm != null && cId != null && !a.isEndingCall && a::remoteUser.isInitialized) {
+                        a.isEndingCall = true
+                        val established = a.isCallActiveUiShown || sm.isCallActive
+                        val fTag = sm.currentFromTag
+                        val peer = a.remoteUser
+                        Log.e(TAG, "Crash during the call: sending ${if (established) "BYE" else "CANCEL"} first", error)
+                        // On its own thread (the crashing one may be the main thread), at most 1.5 s.
+                        val sender = Thread {
+                            try {
+                                kotlinx.coroutines.runBlocking {
+                                    kotlinx.coroutines.withTimeoutOrNull(1_500) {
+                                        if (established) sm.bye(peer, null, overrideCallId = cId, overrideFromTag = fTag)
+                                        else sm.cancel(peer, null, overrideCallId = cId, overrideFromTag = fTag)
+                                    }
+                                }
+                            } catch (_: Throwable) {}
+                        }
+                        sender.start()
+                        sender.join(2_000)
+                    }
+                } catch (_: Throwable) {
+                } finally {
+                    if (previous != null) previous.uncaughtException(thread, error)
+                    else { android.os.Process.killProcess(android.os.Process.myPid()); kotlin.system.exitProcess(10) }
+                }
+            }
+        }
         val isCallActive: Boolean
             get() = activeInstance?.let { !it.isFinishing && !it.isDestroyed && !it.isEndingCall } ?: false
 
@@ -78,6 +121,8 @@ class CallActivity : AppCompatActivity() {
         // In-call home screen: the emote app (it needs its own ADC), with the app tray at the bottom.
         // "‹ Menu" and Back return here instead of to operator-menu.
         const val HOME_APP = "fun-calling-app"
+        /** No call audio from the other phone for this long: it is gone, end the call (startMediaWatchdog). */
+        private const val MEDIA_TIMEOUT_MS = 20_000L
 
         const val EXTRA_SIP_SERVER  = "sip_server"
         const val EXTRA_LOCAL_USER  = "local_user"
@@ -537,6 +582,7 @@ class CallActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activeInstance = this
+        installCrashBye()
         configureWindowAndLockScreen()
 
         val isIncoming = intent.getStringExtra(EXTRA_INCOMING_INVITE) != null
@@ -1403,6 +1449,7 @@ class CallActivity : AppCompatActivity() {
             override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
             override fun setFullScreen(on: Boolean) = miniAppManager.setFullScreen(on)
+            override fun setCameraRow(on: Boolean) = miniAppManager.setCameraRow(on)
             override fun showCallControls() = miniAppManager.showCallControls()
         }
 
@@ -1691,6 +1738,7 @@ class CallActivity : AppCompatActivity() {
             if (!isCallActiveUiShown) {
                 isCallActiveUiShown = true
                 startOngoingCallService()
+                startMediaWatchdog()
                 val hotlineAppId = hotlineApp(remoteUser)
                 if (hotlineAppId != null) {
                     binding.localVideoView.visibility = View.GONE
@@ -1890,7 +1938,10 @@ class CallActivity : AppCompatActivity() {
         mapLocationController?.cancel()
         mapLocationController = null
         super.onDestroy()
+        // Destroyed without endCall() (the system closed the call screen): still release the other phone below.
+        val endedHere = isEndingCall
         agentCallJob?.cancel()
+        mediaWatchdog?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
         isEndingCall = true
         if (activeInstance === this) {
@@ -1913,7 +1964,7 @@ class CallActivity : AppCompatActivity() {
         dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()
         // Ensure remote peer is released if call was in progress or ringing
-        if (!isEndingCall && (callId != null || SipManager.shared?.currentCallId != null)) {
+        if (!endedHere && (callId != null || SipManager.shared?.currentCallId != null)) {
             val rUser = remoteUser
             val lIp = localIp
             val cId = callId ?: SipManager.shared?.currentCallId
@@ -2087,6 +2138,31 @@ class CallActivity : AppCompatActivity() {
 
     // ── 1900 "Gặp tổng đài viên": the verified screen rings, nobody answers, back to the booking page ──
     private var agentCallJob: kotlinx.coroutines.Job? = null
+
+    private var mediaWatchdog: kotlinx.coroutines.Job? = null
+
+    /**
+     * Ends the call when the other phone has sent no call audio for MEDIA_TIMEOUT_MS: its app crashed or lost
+     * the network without a BYE, and this phone would otherwise stay in the call forever. Hotlines (agents) are
+     * left alone, as they may not stream audio continuously.
+     */
+    private fun startMediaWatchdog() {
+        if (hotlineApp(remoteUser) != null) return
+        mediaWatchdog?.cancel()
+        mediaWatchdog = lifecycleScope.launch {
+            while (true) {
+                delay(5_000)
+                if (isEndingCall) break
+                val last = rtpMediaManager?.lastAudioRxMs ?: 0L
+                if (last > 0 && android.os.SystemClock.elapsedRealtime() - last > MEDIA_TIMEOUT_MS) {
+                    Log.w(TAG, "No call audio from $remoteUser for ${MEDIA_TIMEOUT_MS / 1000}s: ending the call")
+                    Toast.makeText(this@CallActivity, "Mất kết nối với $peerName", Toast.LENGTH_LONG).show()
+                    endCall()
+                    break
+                }
+            }
+        }
+    }
 
     fun startAgentCall() {
         if (agentCallJob?.isActive == true) return
