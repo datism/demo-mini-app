@@ -474,6 +474,71 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    private var busyTts: android.speech.tts.TextToSpeech? = null
+    private var busyTone: ToneGenerator? = null
+
+    /**
+     * 486 Busy Here: says "Người dùng đang bận" (Vietnamese TTS) on the call stream, or plays the busy
+     * tone when no Vietnamese voice is available. [onDone] runs once, at the latest after 6 s.
+     */
+    private fun playBusyAnnouncement(onDone: () -> Unit) {
+        var done = false
+        var spoke = false
+        fun finishOnce() {
+            if (done) return
+            done = true
+            try { busyTts?.stop(); busyTts?.shutdown() } catch (_: Exception) {}
+            busyTts = null
+            try { busyTone?.release() } catch (_: Exception) {}
+            busyTone = null
+            onDone()
+        }
+        fun playTone() {
+            if (done || busyTone != null) return
+            try {
+                busyTts?.stop()
+                busyTone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80).also {
+                    it.startTone(ToneGenerator.TONE_SUP_BUSY, 3000)
+                }
+                Log.i(TAG, "Busy: Vietnamese TTS unavailable, playing the busy tone")
+            } catch (e: Exception) {
+                Log.e(TAG, "Busy tone failed: ${e.message}")
+            }
+            lifecycleScope.launch { delay(3000); finishOnce() }
+        }
+        val main = android.os.Handler(mainLooper)
+        try {
+            busyTts = android.speech.tts.TextToSpeech(this) { status ->
+                main.post {
+                    val tts = busyTts
+                    if (done || tts == null) return@post
+                    val lang = if (status == android.speech.tts.TextToSpeech.SUCCESS)
+                        tts.setLanguage(java.util.Locale("vi", "VN")) else android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED
+                    if (lang < android.speech.tts.TextToSpeech.LANG_AVAILABLE) { playTone(); return@post }
+                    tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(id: String?) { spoke = true }
+                        override fun onDone(id: String?) { main.post { finishOnce() } }
+                        @Deprecated("Deprecated in Java")
+                        override fun onError(id: String?) { main.post { playTone() } }
+                    })
+                    val params = android.os.Bundle().apply {
+                        putInt(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_VOICE_CALL)
+                    }
+                    tts.speak("Người dùng đang bận, vui lòng gọi lại sau", android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "busy")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "TTS init failed: ${e.message}")
+            playTone()
+        }
+        lifecycleScope.launch {
+            delay(2000)
+            if (!spoke) playTone() // engine silent (no voice data, slow init)
+            delay(4000)
+            finishOnce()
+        }
+    }
+
     private fun stopRingbackTone() {
         try {
             ringbackToneGenerator?.stopTone()
@@ -1035,7 +1100,17 @@ class CallActivity : AppCompatActivity() {
                                 finish()
                             }
                         }
-                        486, 603 -> {
+                        486 -> {
+                            stopRingbackTone()
+                            binding.tvCallStatus.text = "Người dùng đang bận"
+                            playBusyAnnouncement {
+                                resetAudio()
+                                releaseVideoViews()
+                                webRtcManager.close()
+                                finish()
+                            }
+                        }
+                        603 -> {
                             stopRingbackTone()
                             binding.tvCallStatus.text = "Người dùng từ chối cuộc gọi"
                             lifecycleScope.launch {
@@ -1933,6 +2008,10 @@ class CallActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try { busyTts?.shutdown() } catch (_: Exception) {}
+        busyTts = null
+        try { busyTone?.release() } catch (_: Exception) {}
+        busyTone = null
         liveMapLocationController?.stop()
         liveMapLocationController = null
         mapLocationController?.cancel()
