@@ -52,6 +52,7 @@
         <!-- Call screen: Video overlay + WebView Mini-app -->
         <activity
             android:name=".ui.CallActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="true"
             android:screenOrientation="portrait"
             android:launchMode="singleTop"

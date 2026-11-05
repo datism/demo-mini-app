@@ -15,6 +15,13 @@ import java.net.InetSocketAddress
 
 private const val TAG = "ContentReceiver"
 
+
+/**
+ * Volume of a shared video's sound on both phones (the sender's preview and the receiver's stream), against
+ * the call voice at full volume: at 1.0 the video drowned out the other person.
+ */
+const val SHARED_VIDEO_VOLUME = 0.3f
+
 /**
  * Receives the shared content (a=content:slides) the other phone streams through the MF: H.264 RTP is
  * reassembled into access units and decoded onto [surface]; PCMA RTP is played through an AudioTrack.
@@ -52,7 +59,7 @@ class ContentReceiver(
 
     fun setMuted(value: Boolean) {
         muted = value
-        try { track?.setVolume(if (value) 0f else 1f) } catch (_: Exception) {}
+        try { track?.setVolume(if (value) 0f else SHARED_VIDEO_VOLUME) } catch (_: Exception) {}
     }
 
     fun stop() {
@@ -264,7 +271,7 @@ class ContentReceiver(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
-        t.setVolume(if (muted) 0f else 1f)
+        t.setVolume(if (muted) 0f else SHARED_VIDEO_VOLUME)
         t.play()
         val buf = ByteArray(2048)
         while (running) {

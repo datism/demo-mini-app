@@ -53,6 +53,10 @@ class RtpMediaManager(
     // Threads
     private var audioSenderThread: Thread? = null
     private var audioReceiverThread: Thread? = null
+    /** When the far end's last call audio packet arrived (elapsedRealtime), 0 before the first. The far phone
+     *  sends audio all call long (silence too), so a long gap means it is gone: CallActivity's media watchdog. */
+    @Volatile var lastAudioRxMs = 0L
+        private set
     private var videoReceiverThread: Thread? = null
 
     // State
@@ -589,6 +593,7 @@ class RtpMediaManager(
                         // Drop loopback packet sent by our own sender
                         continue
                     }
+                    lastAudioRxMs = android.os.SystemClock.elapsedRealtime()
 
                     val payloadLen = len - 12
                     val decodeSamples = minOf(payloadLen, pcmOutput.size)

@@ -1623,7 +1623,7 @@ class MiniAppManager(val activity: CallActivity) {
                     preview = android.media.MediaPlayer().apply {
                         setDataSource(activity, uri)
                         setSurface(surface)
-                        val v = if (shareMuted) 0f else 1f
+                        val v = if (shareMuted) 0f else com.demo.imsdc.media.SHARED_VIDEO_VOLUME
                         setVolume(v, v)
                         setOnPreparedListener { it.start() }
                         prepareAsync()
@@ -1707,7 +1707,7 @@ class MiniAppManager(val activity: CallActivity) {
     fun muteShareAudio(muted: Boolean) {
         shareMuted = muted
         receiver?.setMuted(muted)
-        val v = if (muted) 0f else 1f
+        val v = if (muted) 0f else com.demo.imsdc.media.SHARED_VIDEO_VOLUME
         try { preview?.setVolume(v, v) } catch (e: Exception) { Log.w(TAG, "Preview volume: ${e.message}") }
     }
 
