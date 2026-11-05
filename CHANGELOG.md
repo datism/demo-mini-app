@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- Chia sẻ video: the sender now hears the video too (before, their copy played silent). The page's mute button shows for the sender as well and silences only their phone; on speakerphone the other person may hear an echo through the call, so mute it or use earphones. The mute setting also carries over to the next shared video on the receiver.
 - Caro fills tall screens: in full screen the two video tiles grow into the height that was left empty under the board (up to the pair spanning the width, 12dp side margins), and the page centres the board in its panel instead of pinning it to the top.
 - App-open request: the "<name> muốn mở <app>" prompt is now a centred card (rounded on all sides, 24dp from the screen edges, at most 400dp wide, dialog pop-in animation) instead of a bottom sheet.
 - Fix: the other person's camera tile in Vẽ & Chia sẻ was never visible — it reused the background call video, which lies under the page, so the white page painted over it. The tile is now its own SurfaceView in the call UI layer (media overlay, brought to front like my camera) and the decoder switches between it and the background; the hide-and-recreate z-order workaround is gone.

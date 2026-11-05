@@ -1497,6 +1497,8 @@ class MiniAppManager(val activity: CallActivity) {
     private var screen: com.demo.imsdc.media.ScreenStreamer? = null
     private var receiver: ContentReceiver? = null
     private var preview: android.media.MediaPlayer? = null
+    /** The page's mute button: silences the shared video's sound on this phone (receiver's stream or sender's preview). */
+    @Volatile private var shareMuted = false
     private var contentSurface: android.view.SurfaceView? = null
     private var remoteHiddenForContent = false
     private var videoTicker: kotlinx.coroutines.Job? = null
@@ -1544,7 +1546,7 @@ class MiniAppManager(val activity: CallActivity) {
     private fun startReceiver(ep: SdpHelper.SlidesEndpoint) {
         withContentSurface { surface ->
             receiver?.stop()
-            receiver = ContentReceiver(RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort, surface).also { it.start() }
+            receiver = ContentReceiver(RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort, surface).also { it.setMuted(shareMuted); it.start() }
         }
     }
 
@@ -1568,13 +1570,15 @@ class MiniAppManager(val activity: CallActivity) {
             }
             streamer = s
             s.start()
-            // The sender watches the same video locally, silent so it does not echo into the call.
+            // The sender watches and hears the same video locally. On speakerphone the mic can pick it up
+            // and the other person may hear an echo through the call; the page's mute button silences it.
             withContentSurface { surface ->
                 try {
                     preview = android.media.MediaPlayer().apply {
                         setDataSource(activity, uri)
                         setSurface(surface)
-                        setVolume(0f, 0f)
+                        val v = if (shareMuted) 0f else 1f
+                        setVolume(v, v)
                         setOnPreparedListener { it.start() }
                         prepareAsync()
                     }
@@ -1653,8 +1657,13 @@ class MiniAppManager(val activity: CallActivity) {
         try { preview?.let { if (paused) it.pause() else it.start() } } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
     }
 
-    /** Receiver: mute only this phone's speaker. */
-    fun muteShareAudio(muted: Boolean) { receiver?.setMuted(muted) }
+    /** Mute the shared video's sound on this phone only: the receiver's stream, or the sender's local preview. */
+    fun muteShareAudio(muted: Boolean) {
+        shareMuted = muted
+        receiver?.setMuted(muted)
+        val v = if (muted) 0f else 1f
+        try { preview?.setVolume(v, v) } catch (e: Exception) { Log.w(TAG, "Preview volume: ${e.message}") }
+    }
 
     private fun releaseVideo() {
         videoTicker?.cancel(); videoTicker = null
