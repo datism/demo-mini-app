@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- Chia sẻ video: the video's sound plays at 30% on both phones (sender's preview and receiver), so it no longer drowns out the other person's voice. Like the voice, it follows the call's earpiece/speaker choice.
 - Chia sẻ màn hình: the viewer no longer gets a speaker button (a screen share has no sound, so it did nothing).
 - Chia sẻ menu (and its waiting screens): my camera and the other person sit side by side in a row at the top, like Caro (34% of the width each, 3:4, no folding or dragging), with the menu under it. The photo, video and screen-share views keep the small corner tiles (my camera at the top left, the other person under it), which fold on tap. The page tells native which layout it wants (`AndroidBridge.setCameraRow`).
 - Chia sẻ: the menu (and the waiting screens) is full screen too, like the photo and video views: the title sits beside my camera, the choices low on the screen above the call pill. Tap the pill for the call buttons.
