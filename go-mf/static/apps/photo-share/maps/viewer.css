@@ -1,0 +1,37 @@
+#mapView { background:#eef0e8; z-index:10; }
+#hanoiMap { position:absolute; inset:0; }
+#mapView button { font:inherit; -webkit-tap-highlight-color:transparent; cursor:pointer; touch-action:manipulation; }
+#mapView button:focus-visible { outline:3px solid #82b4fb; outline-offset:2px; }
+#mapView button:disabled { cursor:default; opacity:.55; }
+#mapView .mapHeader { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:10px; padding:12px; padding-top:max(12px,env(safe-area-inset-top)); z-index:2; pointer-events:none; }
+#mapView .mapHeader > * { pointer-events:auto; }
+#btnMapBack { flex:0 0 44px; width:44px; height:44px; border:1px solid #e5eaf0; border-radius:50%; background:#fffffff5; color:#22374b; font-size:30px!important; line-height:1; box-shadow:0 2px 9px #182c4017; }
+.mapHeading { display:flex; flex-direction:column; gap:2px; padding:8px 12px; border-radius:15px; background:#fffffff2; box-shadow:0 2px 9px #182c400b; }
+.mapHeading strong { color:#1c3044; font-size:14px; font-weight:650; }
+.mapHeading > span { color:#697d8b; font-size:11px; }
+#mapView .mapLocationPanel { position:absolute; left:12px; right:12px; bottom:max(90px,env(safe-area-inset-bottom)); z-index:3; padding:10px; border:1px solid #e5eaf0; border-radius:20px; background:#fffffff7; box-shadow:0 7px 26px #172a401a; display:flex; flex-direction:column; gap:6px; max-height:calc(100% - 180px); overflow:auto; color:#1a293a; }
+#mapCompactStatus { padding:4px 3px; font-size:12px; line-height:1.45; color:#526477; }
+#mapCompactStatus[data-level="success"] { color:#196c3a; }
+#mapCompactStatus[data-level="warning"] { color:#8e590a; }
+#mapCompactStatus[data-level="error"] { color:#a92b23; }
+.mapPerson { width:100%; display:flex; align-items:center; gap:8px; text-align:left; min-height:44px; padding:8px 6px; border:0; border-radius:11px; background:transparent; color:#344c61; font-size:12px!important; line-height:1.4; }
+.mapPerson:enabled:active { background:#edf3f9; }
+.mapPerson > span:not(.mapDot):not(.mapRowArrow) { flex:1; min-width:0; }
+.mapDot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.myDot { background:#1677ff; }
+.peerDot { background:#df6817; }
+.mapRowArrow { color:#7c8d9f; font-size:21px; line-height:1; }
+.mapPerson:disabled .mapRowArrow { visibility:hidden; }
+#mapView .mapActions { display:flex; gap:8px; }
+#mapView .mapActions button { flex:1; min-width:0; min-height:48px; padding:10px 8px; border:0; border-radius:13px; font-size:13px; line-height:1.25; font-weight:600; }
+#btnSendLocation { background:#1672de; color:#fff; }
+#btnStartLive { background:#edf5f0; color:#1a673c; }
+#liveOwnRow { position:sticky; bottom:0; z-index:1; background:#fff; }
+#btnStopLive { width:100%; min-height:48px; padding:10px 12px; border:0; border-radius:13px; background:#fff0ee; color:#a52c25; font-size:13px!important; font-weight:600!important; }
+.mapLiveHint { margin:0; padding:2px 4px; font-size:11px; line-height:1.4; color:#6c7c89; }
+#mapView .maplibregl-ctrl-bottom-right, #mapView .maplibregl-ctrl-bottom-left { bottom:8px; }
+@media (max-width:340px) {
+  #mapView .mapHeader { padding-left:8px; padding-right:8px; }
+  #mapView .mapLocationPanel { left:8px; right:8px; padding:8px; }
+  #mapView .mapActions button { font-size:12px; }
+}

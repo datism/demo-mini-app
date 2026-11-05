@@ -25,14 +25,23 @@
   #home h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
   #home .sub { color: var(--muted); font-size: 13px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #2da44e; }
-  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
-  .choice.wide { grid-column: 1 / -1; }
-  .choice { border: 1px solid var(--line); background: var(--bg); border-radius: 18px; padding: 18px 14px 16px; text-align: left;
-            font: inherit; color: var(--ink); display: grid; gap: 4px; }
+  #home { overflow-y: auto; overscroll-behavior: contain; }
+  #home > h1, #home > .sub, #home > .foot { flex-shrink: 0; }
+  .choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr;
+             gap: 12px; margin-top: 28px; width: 100%; max-width: 540px; align-self: center; flex-shrink: 0; }
+  .choice { min-width: 0; min-height: 142px; border: 1px solid var(--line); background: var(--bg); border-radius: 18px;
+            padding: 16px 14px; text-align: left; font: inherit; color: var(--ink);
+            display: flex; flex-direction: column; align-items: flex-start; gap: 6px; cursor: pointer; }
   .choice:active { background: var(--accent-soft); border-color: var(--accent); }
-  .choice svg { width: 26px; height: 26px; color: var(--accent); margin-bottom: 18px; }
-  .choice b { font-size: 15px; font-weight: 600; }
-  .choice span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+  .choice:focus-visible { outline: 3px solid #89b8ff; outline-offset: 2px; }
+  .choice svg { flex-shrink: 0; width: 26px; height: 26px; color: var(--accent); margin-bottom: 10px; }
+  .choice b { font-size: 15px; font-weight: 600; line-height: 1.35; }
+  .choice span { min-height: 32px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+  #home .foot { padding-top: 16px; }
+  @media (max-width: 340px) {
+    #home .choices { gap: 10px; }
+    #home .choice b { font-size: 14px; }
+  }
   #home .foot { margin-top: auto; font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.5; }
 
   /* Màn chờ */
@@ -108,11 +117,13 @@
   html.row .view { top: var(--band); }
   html.row #home { padding: 8px 20px 72px; }
   html.row #home .choices { margin-top: 20px; }
-  @media (max-height: 700px) { html.row .choice { padding: 12px 14px; } html.row .choice svg { margin-bottom: 8px; } }
+  @media (max-height: 700px) { html.row .choice { min-height: 124px; padding: 12px 14px; } html.row .choice svg { margin-bottom: 8px; } }
   #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(21,24,29,.92); color: #fff; font-size: 12.5px;
            padding: 9px 14px; border-radius: 999px; z-index: 60; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
   #toast.show { opacity: 1; }
 </style>
+<link rel="stylesheet" href="maps/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="maps/viewer.css">
 </head>
 <body>
 
@@ -121,16 +132,20 @@
   <div class="sub"><span class="live-dot"></span><span id="peerLine">Đang trong cuộc gọi</span></div>
   <div class="choices">
     <button class="choice" id="btnPhoto">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg>
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg>
       <b>Ảnh</b><span>Chia sẻ ảnh</span>
     </button>
     <button class="choice" id="btnVideo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 5 2.5-5 2.5z"/></svg>
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 5 2.5-5 2.5z"/></svg>
       <b>Video</b><span>Phát trực tiếp</span>
     </button>
-    <button class="choice wide" id="btnScreen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
-      <b>Màn hình</b><span>Chia sẻ màn hình điện thoại, kể cả khi bạn mở ứng dụng khác</span>
+    <button class="choice" id="btnScreen">
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+      <b>Màn hình</b><span>Chia sẻ màn hình</span>
+    </button>
+    <button class="choice" id="btnHanoiMap">
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+      <b>Chia sẻ Vị Trí</b><span>Gửi một lần hoặc trực tiếp</span>
     </button>
   </div>
   <p class="foot">Người kia cần chấp nhận trước khi bạn chọn nội dung.</p>
@@ -190,6 +205,41 @@
 <div id="toast"></div>
 <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
 
+<div class="view" id="mapView" hidden>
+  <div id="hanoiMap" aria-label="Bản đồ Hà Nội"></div>
+  <header class="mapHeader">
+    <button id="btnMapBack" type="button" aria-label="Quay lại">‹</button>
+    <div class="mapHeading"><strong>Chia sẻ vị trí</strong><span>Hà Nội · Offline</span></div>
+  </header>
+  <section class="mapLocationPanel" aria-label="Chia sẻ vị trí">
+    <div id="mapCompactStatus" role="status" aria-live="polite">Đang mở bản đồ…</div>
+    <button id="selfCompactRow" class="mapPerson" type="button" hidden aria-label="Xem vị trí của tôi trên bản đồ">
+      <span class="mapDot myDot" aria-hidden="true"></span><span id="selfCompactInfo"></span><span class="mapRowArrow" aria-hidden="true">›</span>
+    </button>
+    <button id="peerCompactRow" class="mapPerson" type="button" hidden aria-label="Xem vị trí đối phương trên bản đồ">
+      <span class="mapDot peerDot" aria-hidden="true"></span><span id="peerCompactInfo"></span><span class="mapRowArrow" aria-hidden="true">›</span>
+    </button>
+    <div id="peerLiveState" class="mapLiveHint" hidden></div>
+    <div id="liveLauncher" class="mapActions">
+      <button id="btnSendLocation" type="button">Gửi vị trí</button>
+      <button id="btnStartLive" type="button">Chia sẻ trực tiếp</button>
+    </div>
+    <div id="liveOwnRow" hidden><button id="btnStopLive" type="button">Dừng chia sẻ</button></div>
+    <p id="liveSharingHint" class="mapLiveHint" hidden>Đến hết cuộc gọi · Ra nền sẽ tạm dừng</p>
+  </section>
+  <div id="mapDiagnostics" hidden aria-hidden="true">
+    <div id="mapStatus"></div><div id="myLocationStatus" hidden></div><div id="fixedShareStatus"></div>
+    <div id="liveShareDetail"></div><div id="liveOwnStatus"></div>
+    <div id="peerLocationCard" hidden><div id="peerLocationInfo"></div><div id="peerLocationCoordinates"></div></div>
+  </div>
+</div>
+<script src="maps/vendor/maplibre-gl.js"></script>
+<script src="maps/compact-ui.js"></script>
+<script src="maps/my-location.js"></script>
+<script src="maps/fixed-share.js"></script>
+<script src="maps/live-share.js"></script>
+<script src="maps/quick-share.js"></script>
+<script src="maps/viewer.js"></script>
 <script>
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
@@ -232,8 +282,9 @@ const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(
 const kindWord = k => k === 'photo' ? 'ảnh' : k === 'screen' ? 'màn hình' : 'video';
 const streamed = k => k === 'video' || k === 'screen'; // phát qua đường video chia sẻ
 
-const VIEWS = ['home', 'wait', 'peerPicking', 'viewer', 'videoView'];
+const VIEWS = ['home', 'wait', 'peerPicking', 'viewer', 'videoView', 'mapView'];
 function show(v) {
+  if (v !== 'mapView' && window.HanoiLiveShare && window.HanoiLiveShare.isActive()) window.HanoiLiveShare.stop('closed');
   VIEWS.forEach(id => { $(id).hidden = id !== v; });
   document.documentElement.classList.toggle('dark', v === 'viewer');
   document.documentElement.classList.toggle('video', v === 'videoView');
@@ -249,6 +300,7 @@ function peerLabel() { return state.peer || 'đối phương'; }
 
 /* ─────────────── Mời / chờ / chấp nhận ─────────────── */
 function startShare(kind) {
+  if (window.HanoiLiveShare && window.HanoiLiveShare.isActive()) window.HanoiLiveShare.stop('closed');
   const b = B();
   if (!b || typeof b.requestShare !== 'function') { toast('Cần cập nhật ứng dụng trên máy này'); return; }
   state.s = { kind, role: 'sender' };
@@ -259,6 +311,9 @@ function startShare(kind) {
   show('wait');
   call('requestShare', kind);
 }
+window.HanoiViewer.bind({ show, send: sendJson, toast, active: () => !!state.s });
+$('btnHanoiMap').onclick = () => window.HanoiViewer.open(true);
+$('btnMapBack').onclick = () => window.HanoiViewer.close();
 $('btnPhoto').onclick = () => startShare('photo');
 $('btnVideo').onclick = () => startShare('video');
 $('btnScreen').onclick = () => startShare('screen');
@@ -582,6 +637,7 @@ window.receiveData = function (dataStr) {
   try {
     if (dataStr.startsWith('PSHARE:')) { const parts = dataStr.split(':'); onPshare(parts[1], parts.slice(2).join(':')); return; }
     const msg = JSON.parse(dataStr);
+    if (window.HanoiViewer && window.HanoiViewer.receive(msg)) return;
     switch (msg.t) {
       case 'offer': onOffer(msg); break;
       case 'fetch': onFetch(msg); break;
@@ -601,7 +657,7 @@ window.addEventListener('load', () => {
   const b = B(); if (b && typeof b.peerNumber === 'function') { try { window.shareEvent('peer', { peer: b.peerNumber() }); } catch (e) {} }
   call('setCameraRow', true); call('setFullScreen', true); // the menu: full screen, cameras in a row
 });
-window.cleanUpImsDcObjects = function () { endSession(); };
+window.cleanUpImsDcObjects = function () { if (window.HanoiViewer) window.HanoiViewer.destroy(); endSession(); };
 </script>
 </body>
 </html>

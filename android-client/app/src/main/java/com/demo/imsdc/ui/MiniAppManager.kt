@@ -89,6 +89,11 @@ class MiniAppManager(val activity: CallActivity) {
         wv.setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
         wv.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                activity.cancelMapLocationForNavigation()
+                super.onPageStarted(view, url, favicon)
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: ""
                 Log.i(TAG, "shouldOverrideUrlLoading: $url")
@@ -727,6 +732,7 @@ class MiniAppManager(val activity: CallActivity) {
                 Log.i(TAG, "launchMiniApp targetId=$targetId already shown, not reloading")
                 return@launch
             }
+            activity.cancelMapLocationForNavigation()
             // The page on screen changes from here on; until now the current page kept its channels.
             activity.isMiniAppInitiator = initiator
             activity.imsDcSdk.resetLabels()

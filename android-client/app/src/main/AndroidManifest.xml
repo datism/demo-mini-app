@@ -10,6 +10,11 @@
     <!-- Cho phép cleartext HTTP trong LAN (SIP + DCSF) -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- Location: requested only when tapping My location; no background access. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
     <!-- ─── Audio/Video permissions ────────────────────────────── -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />

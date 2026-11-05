@@ -54,6 +54,29 @@ class AndroidBridgeInterface(
 
     var shareHandler: ShareHandler? = null
 
+    var onStartLiveMapLocation: ((String) -> Unit)? = null
+    var onStopLiveMapLocation: ((String) -> Unit)? = null
+    var onPauseLiveMapLocation: ((String) -> Unit)? = null
+    var onResumeLiveMapLocation: ((String) -> Unit)? = null
+
+    @JavascriptInterface
+    fun startLiveMapLocation(payload: String) { onStartLiveMapLocation?.invoke(payload) }
+    @JavascriptInterface
+    fun stopLiveMapLocation(id: String) { onStopLiveMapLocation?.invoke(id) }
+    @JavascriptInterface
+    fun pauseLiveMapLocation(id: String) { onPauseLiveMapLocation?.invoke(id) }
+    @JavascriptInterface
+    fun resumeLiveMapLocation(id: String) { onResumeLiveMapLocation?.invoke(id) }
+
+    var onRequestMapLocation: ((String) -> Unit)? = null
+    var onCancelMapLocation: ((String) -> Unit)? = null
+
+    @JavascriptInterface
+    fun requestMapLocation(requestId: String) { onRequestMapLocation?.invoke(requestId) }
+
+    @JavascriptInterface
+    fun cancelMapLocation(requestId: String) { onCancelMapLocation?.invoke(requestId) }
+
     /** Page: the user chose Ảnh or Video. Native sends the Re-INVITE; the page hears back via window.shareEvent. */
     @JavascriptInterface
     fun requestShare(kind: String) { shareHandler?.requestShare(kind) }

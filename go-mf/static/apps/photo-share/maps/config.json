@@ -1,0 +1,21 @@
+{
+  "regionName": "Hà Nội — bản đồ chi tiết",
+  "bounds": [
+    [
+      105.25,
+      20.55
+    ],
+    [
+      106.1,
+      21.45
+    ]
+  ],
+  "center": [
+    105.8342,
+    21.0278
+  ],
+  "zoom": 12.5,
+  "minZoom": 9,
+  "maxZoom": 18,
+  "landmarks": []
+}

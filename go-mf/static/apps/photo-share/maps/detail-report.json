@@ -1,0 +1,95 @@
+{
+  "tileCount": 2398,
+  "zooms": [
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "labelFeatureCounts": {
+    "place": 7796,
+    "transportation_name": 75824,
+    "waterway": 2054,
+    "poi": 45184,
+    "water_name": 1561,
+    "housenumber": 14171
+  },
+  "samples": {
+    "place": [
+      "Mãn Đức",
+      "Tây Đằng",
+      "Cao Phong",
+      "Hưng Hóa",
+      "Thanh Thủy",
+      "Sơn Đông",
+      "Lập Thạch",
+      "Xuân Lôi",
+      "Lâm Thao",
+      "Phong Châu"
+    ],
+    "transportation_name": [
+      "Quốc lộ 6",
+      "Quốc lộ 12B",
+      "Quốc lộ 32",
+      "Đường Làng Văn Hóa",
+      "Đường Lý Nam Đế",
+      "Quốc lộ 32 - Đường Hồ Chí Minh",
+      "Đường Nguyễn Văn Linh",
+      "Cầu Cò",
+      "Đường Quảng Oai",
+      "Dốc Cun"
+    ],
+    "waterway": [
+      "Sông Lô",
+      "Sông Đà",
+      "Sông Bùi",
+      "Sông Hồng",
+      "Sông Tích",
+      "Sông Phó Đáy",
+      "Sông Nông Giang",
+      "Suối Yến",
+      "Sông Bôi",
+      "Sông Nhuệ"
+    ],
+    "poi": [
+      "Trung tâm Y tế khu vực Tân Lạc",
+      "Trung tâm Y tế khu vực Đà Bắc",
+      "Trung tâm Y tế khu vực Thanh Thuỷ",
+      "Trung tâm Y tế huyện Tam Nông",
+      "Trung tâm Y tế khu vực Lâm Thao",
+      "Trung tâm Y tế khu vực Phù Ninh",
+      "Trung tâm Y tế khu vực Cao Phong",
+      "bệnh viện quân y 108",
+      "mộ đằng ngoại nhà vợ",
+      "bến xe Hoà Bình"
+    ],
+    "water_name": [
+      "Sông Đà",
+      "Hồ Hòa Bình",
+      "Hồ Huyện Ủy",
+      "Sông Hồng",
+      "Đầm Sản",
+      "Đập Vống",
+      "Suối Cai",
+      "Sông Tích",
+      "Hồ Yên Thịnh",
+      "Hồ Dè"
+    ],
+    "housenumber": [
+      "Khu 1",
+      "14",
+      "1 ngõ 122 B",
+      "1",
+      "112",
+      "khu 13",
+      "IC8 PHÙ NINH",
+      "362",
+      "364",
+      "16"
+    ]
+  },
+  "fontStack": "Open Sans Semibold",
+  "fontBlockCount": 91
+}
