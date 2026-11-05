@@ -4,7 +4,7 @@ window.HanoiFixedShare = (() => {
   const TYPE = 'location.fixed', ACK = TYPE + '.ack', SOURCE = 'peer-fixed-location';
   const session = 's_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
   const MAX_ATTEMPTS = 6, RETRY_MS = 2000, MAX_AGE_MS = 30000;
-  let api, draft = null, peer = null, outgoing = null, last = null;
+  let api, draft = null, peer = null, fixedPeer = null, outgoing = null, last = null;
   let retryTimer = null, expiryTimer = null, sequence = 0, disposed = false, rendered = null, focusPending = false;
   let peerSession = null, peerSequence = 0;
   // A retired page session must not replace a newer page's snapshot on a delayed retry.
@@ -98,7 +98,7 @@ window.HanoiFixedShare = (() => {
     }
     if (m.session === peerSession && m.seq === peerSequence) {
       // Only the exact same operation is a duplicate. Conflicting IDs cannot replace it.
-      ack(m, peer && peer.id === m.id ? 'received' : 'invalid'); return true;
+      ack(m, fixedPeer && fixedPeer.id === m.id ? 'received' : 'invalid'); return true;
     }
     if (api.active()) { ack(m, 'busy'); return true; }
     if (peerSession && peerSession !== m.session) {
@@ -106,9 +106,11 @@ window.HanoiFixedShare = (() => {
       if (retiredSessions.size >= 64) { ack(m, 'invalid'); return true; }
       retiredSessions.add(peerSession);
     }
+    if (api.onFixedPeer) api.onFixedPeer();
     peerSession = m.session; peerSequence = m.seq;
     peer = { id: m.id, fix: { latitude: m.fix.latitude, longitude: m.fix.longitude,
       accuracy: m.fix.accuracy, timestamp: m.fix.timestamp, approximate: m.fix.approximate } };
+    fixedPeer = peer;
     rendered = null; focusPending = true;
     updatePeerCard();
     // ACK means validated and retained in this page, not that the user viewed the map.
@@ -124,13 +126,13 @@ window.HanoiFixedShare = (() => {
   }
   function updatePeerCard() {
     const card = node('peerLocationCard'); card.hidden = !peer;
-    if (window.HanoiMapUi) window.HanoiMapUi.peer(peer && peer.fix, peer ? covered(peer.fix) : null);
+    if (window.HanoiMapUi) window.HanoiMapUi.peer(peer && peer.fix, peer ? covered(peer.fix) : null, peer && peer.liveState);
     if (!peer) return;
     const fix = peer.fix;
     const time = new Date(fix.timestamp).toLocaleString('vi-VN');
-    node('peerLocationInfo').textContent = 'Vị trí đối phương' + (fix.approximate ? ' (gần đúng)' : '') +
+    node('peerLocationInfo').textContent = 'Vị trí đối phương' + (peer.liveState ? ' · ' + peer.liveState : '') + (fix.approximate ? ' (gần đúng)' : '') +
       ' · Sai số khoảng ' + Math.ceil(fix.accuracy) + ' m · Đo lúc ' + time +
-      ' · Không tự cập nhật' + (covered(fix) === false ? ' · Ngoài vùng bản đồ Hà Nội đã tải' : '');
+      (peer.liveState ? '' : ' · Không tự cập nhật') + (covered(fix) === false ? ' · Ngoài vùng bản đồ Hà Nội đã tải' : '');
     node('btnPeerLocation').disabled = covered(fix) !== true;
     node('peerLocationCoordinates').textContent = fix.latitude.toFixed(6) + ', ' + fix.longitude.toFixed(6);
   }
@@ -176,7 +178,7 @@ window.HanoiFixedShare = (() => {
     setLocalFix(null);
   }
   function destroy() {
-    onClose(); clearPeerLayers(); peer = null; last = null; retiredSessions.clear();
+    onClose(); clearPeerLayers(); peer = null; fixedPeer = null; last = null; retiredSessions.clear();
     peerSession = null; peerSequence = 0; disposed = true;
     node('peerLocationCard').hidden = true; if (window.HanoiMapUi) window.HanoiMapUi.peer(null, null); status('');
   }
@@ -186,5 +188,11 @@ window.HanoiFixedShare = (() => {
     node('btnPeerLocation').onclick = focusPeer;
     updateButton();
   }
-  return { bind, setLocalFix, send, receive, onMapReady, onClose, destroy };
+  function presentLive(value, focus) {
+    if (disposed || !value || !value.fix) return;
+    if (!peer || peer.id !== value.id) rendered = null;
+    peer = value; focusPending = !!focus;
+    updatePeerCard(); renderPeer();
+  }
+  return { bind, setLocalFix, send, receive, onMapReady, onClose, destroy, presentLive };
 })();

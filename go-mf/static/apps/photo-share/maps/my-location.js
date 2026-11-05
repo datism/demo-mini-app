@@ -63,7 +63,7 @@ window.HanoiMyLocation = (() => {
     coordinates.push(coordinates[0].slice());
     return coordinates;
   }
-  function render(fix) {
+  function render(fix, live = false) {
     const map = api.getMap(), config = api.getConfig();
     if (!map || !map.isStyleLoaded() || !config) throw new Error('Bản đồ chưa sẵn sàng. Bấm lại sau khi bản đồ nạp xong.');
     const lng = fix.longitude, lat = fix.latitude, accuracy = fix.accuracy;
@@ -84,10 +84,12 @@ window.HanoiMyLocation = (() => {
       paint: { 'circle-radius': 7, 'circle-color': '#1677ff', 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
     map.easeTo({ center: [lng, lat], zoom: Math.min(accuracy > 1000 ? 12 : accuracy > 200 ? 14 : 16, config.maxZoom), duration: 600 });
     const time = new Date(fix.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    status((fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time + ' · Không tự cập nhật', 'Có thể gửi vị trí này');
+    const detail = (fix.approximate ? 'Vị trí gần đúng' : 'Vị trí của tôi') + ' · Sai số khoảng ' + Math.ceil(accuracy) + ' m · ' + time;
+    if (live) { element('myLocationStatus').textContent = detail + ' · Chia sẻ trực tiếp'; element('myLocationStatus').hidden = false; }
+    else status(detail + ' · Không tự cập nhật', 'Có thể gửi vị trí này');
   }
   function locate() {
-    if (disposed || pending || !api.isVisible()) return;
+    if (disposed || pending || !api.isVisible() || window.HanoiLiveShare && window.HanoiLiveShare.isActive()) return;
     const map = api.getMap();
     if (!map || !map.isStyleLoaded()) { status('Bản đồ đang nạp. Hãy bấm lại sau khi bản đồ hiển thị.', 'Bản đồ đang nạp…'); return; }
     const bridge = window.AndroidBridge;
@@ -138,5 +140,10 @@ window.HanoiMyLocation = (() => {
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('pagehide', cancel);
   }
-  return { bind, locate, onNativeResult, cancel, destroy, circle };
+  function showLiveFix(fix) {
+    if (disposed) return;
+    if (window.HanoiMapUi) window.HanoiMapUi.self(fix);
+    try { render(fix, true); } catch (error) { status(error.message, 'Chưa hiện được điểm · Xem chi tiết', 'warning'); }
+  }
+  return { bind, locate, onNativeResult, cancel, destroy, circle, showLiveFix };
 })();

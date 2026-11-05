@@ -462,7 +462,13 @@ class CallActivity : AppCompatActivity() {
     )
     private var mapLocationController: com.demo.imsdc.location.MapLocationController? = null
 
-    internal fun cancelMapLocationForNavigation() { mapLocationController?.cancel() }
+    private var liveMapLocationController: com.demo.imsdc.location.LiveMapLocationController? = null
+
+    internal fun cancelMapLocationForNavigation() {
+        mapLocationController?.cancel()
+        // Notify the old page while it can still send a final stop over its ADC.
+        liveMapLocationController?.stop("navigation")
+    }
 
     private val permissionRequestCode = 101
 
@@ -614,6 +620,7 @@ class CallActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (mapLocationController?.onPermissionResult(requestCode) == true) return
+        if (liveMapLocationController?.onPermissionResult(requestCode) == true) return
         if (requestCode == permissionRequestCode) {
             if (grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
                 initAndStart()
@@ -1352,6 +1359,19 @@ class CallActivity : AppCompatActivity() {
                 binding.webviewMiniapp.url == "https://miniapp/index.html" &&
                 lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
         }
+        liveMapLocationController = com.demo.imsdc.location.LiveMapLocationController(
+            this, binding.webviewMiniapp,
+            ownerPage = { currentAppId == "photo-share" && !isEndingCall &&
+                binding.webviewMiniapp.url == "https://miniapp/index.html" },
+            foregroundAllowed = { binding.webviewMiniapp.visibility == View.VISIBLE &&
+                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) }
+        )
+        androidBridge.onStartLiveMapLocation = { payload ->
+            runOnUiThread { mapLocationController?.cancel(); liveMapLocationController?.start(payload) }
+        }
+        androidBridge.onStopLiveMapLocation = { id -> runOnUiThread { liveMapLocationController?.stopFromJs(id) } }
+        androidBridge.onPauseLiveMapLocation = { id -> runOnUiThread { liveMapLocationController?.pauseFromJs(id) } }
+        androidBridge.onResumeLiveMapLocation = { id -> runOnUiThread { liveMapLocationController?.resumeFromJs(id) } }
         androidBridge.onRequestMapLocation = { id ->
             runOnUiThread { mapLocationController?.request(id) }
         }
@@ -1777,6 +1797,7 @@ class CallActivity : AppCompatActivity() {
     }
 
     private fun endCall() {
+        liveMapLocationController?.stop()
         mapLocationController?.cancel()
         if (isEndingCall) return
         isEndingCall = true
@@ -1837,7 +1858,13 @@ class CallActivity : AppCompatActivity() {
     /** onStop paused my camera (no camera-type call service); onStart resumes it. */
     private var cameraPausedInBackground = false
 
+    override fun onResume() {
+        super.onResume()
+        window.decorView.post { liveMapLocationController?.resume() }
+    }
+
     override fun onStop() {
+        liveMapLocationController?.pause()
         mapLocationController?.cancel("background")
         super.onStop()
         if (!isChangingConfigurations) {
@@ -1858,6 +1885,8 @@ class CallActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        liveMapLocationController?.stop()
+        liveMapLocationController = null
         mapLocationController?.cancel()
         mapLocationController = null
         super.onDestroy()

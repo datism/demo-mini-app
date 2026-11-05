@@ -5,12 +5,14 @@ window.HanoiMapUi = (() => {
   const entries = {}, node = id => document.getElementById(id);
   function refresh() {
     const chosen = entries.map && entries.map.level === 'error' ? entries.map :
-      [entries.local, entries.share].filter(Boolean).sort((a,b) => b.order - a.order)[0] || entries.map;
+      entries.live && entries.live.level === 'active' ? entries.live :
+      [entries.live, entries.local, entries.share].filter(Boolean).sort((a,b) => b.order - a.order)[0] || entries.map;
     const target = node('mapCompactStatus');
     target.textContent = chosen ? chosen.text : 'Vị trí cố định · Chưa tự cập nhật';
     target.dataset.level = chosen ? chosen.level : 'normal';
   }
   function set(channel, text, level = 'normal') {
+    if (entries[channel] && entries[channel].text === text && entries[channel].level === level) return;
     entries[channel] = text ? { text, level, order: ++serial } : null;
     refresh();
   }
@@ -20,9 +22,9 @@ window.HanoiMapUi = (() => {
     node('selfCompactRow').hidden = !fix;
     if (fix) node('selfCompactInfo').textContent = (fix.approximate ? 'Tôi (gần đúng)' : 'Tôi') + ' · ±' + accuracy(fix.accuracy) + ' · ' + time(fix.timestamp);
   }
-  function peer(fix, covered) {
+  function peer(fix, covered, liveState = null) {
     node('peerCompactRow').hidden = !fix;
-    if (fix) node('peerCompactInfo').textContent = 'Đối phương' + (fix.approximate ? ' (gần đúng)' : '') + ' · ±' + accuracy(fix.accuracy) + ' · ' + time(fix.timestamp) + (covered === false ? ' · Ngoài vùng' : '');
+    if (fix) node('peerCompactInfo').textContent = 'Đối phương' + (liveState ? ' · ' + liveState : '') + (fix.approximate ? ' (gần đúng)' : '') + ' · ±' + accuracy(fix.accuracy) + ' · ' + time(fix.timestamp) + (covered === false ? ' · Ngoài vùng' : '');
   }
   function collapse() {
     node('mapDetails').hidden = true;

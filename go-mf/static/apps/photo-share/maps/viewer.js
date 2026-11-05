@@ -8,7 +8,7 @@ window.HanoiViewer = (() => {
   };
   const message = (t, id) => ({ t, version: 1, id });
   async function ensureMap() {
-    if (map) { map.resize(); window.HanoiFixedShare.onMapReady(); return; }
+    if (map) { map.resize(); window.HanoiFixedShare.onMapReady(); if (window.HanoiLiveShare) window.HanoiLiveShare.onMapReady(); return; }
     if (opening) return opening;
     opening = (async () => {
       if (!window.maplibregl) throw new Error('Thiếu thư viện bản đồ. Cần chạy bước prepare và cập nhật DCAR.');
@@ -41,6 +41,7 @@ window.HanoiViewer = (() => {
         if (disposed) return;
         if (!lastError) status('Đã nạp bản đồ chi tiết · ' + config.regionName, 'Chọn Vị trí của tôi để bắt đầu');
         window.HanoiFixedShare.onMapReady();
+        if (window.HanoiLiveShare) window.HanoiLiveShare.onMapReady();
         if (pending) transmit();
       });
       map.on('idle', () => { if (!disposed) window.HanoiFixedShare.onMapReady(); });
@@ -82,6 +83,7 @@ window.HanoiViewer = (() => {
     }
   }
   function receive(m) {
+    if (window.HanoiLiveShare && window.HanoiLiveShare.receive(m)) return true;
     if (window.HanoiFixedShare.receive(m)) return true;
     if (!m || !['map.open','map.ack','map.busy'].includes(m.t)) return false;
     if (m.version !== 1 || typeof m.id !== 'string' || m.id.length > 100) return true;
@@ -98,17 +100,25 @@ window.HanoiViewer = (() => {
     }
     return true;
   }
-  function close() { if (window.HanoiMapUi) window.HanoiMapUi.close(); window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
+  function close() { if (window.HanoiLiveShare) window.HanoiLiveShare.onClose(); if (window.HanoiMapUi) window.HanoiMapUi.close(); window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
   function reset() { if (map && config) map.easeTo({ center: config.center, zoom: config.zoom, duration: 500 }); }
-  function destroy() { if (window.HanoiMapUi) window.HanoiMapUi.destroy(); window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
+  function destroy() { if (window.HanoiLiveShare) window.HanoiLiveShare.destroy(); if (window.HanoiMapUi) window.HanoiMapUi.destroy(); window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
   return { bind: x => {
     api = x;
     if (window.HanoiMapUi) window.HanoiMapUi.bind();
     window.HanoiFixedShare.bind({ getMap: () => map, getConfig: () => config,
-      isVisible: () => visible && !disposed, active: () => api.active(),
-      openMap: () => open(false), send: x.send, toast: x.toast });
+      isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden, active: () => api.active(),
+      openMap: () => open(false), send: x.send, toast: x.toast,
+      onFixedPeer: () => { if (window.HanoiLiveShare) window.HanoiLiveShare.forgetPeer(); } });
     window.HanoiMyLocation.bind({ getMap: () => map, getConfig: () => config,
-      isVisible: () => visible && !disposed,
+      isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden,
       onFix: fix => window.HanoiFixedShare.setLocalFix(fix) });
+    if (window.HanoiLiveShare) window.HanoiLiveShare.bind({
+      isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden, active: () => api.active(), openMap: () => open(false),
+      send: x.send, toast: x.toast,
+      cancelOneShot: () => { window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); },
+      showLocalFix: fix => window.HanoiMyLocation.showLiveFix(fix),
+      presentPeer: (value, focus) => window.HanoiFixedShare.presentLive(value, focus)
+    });
   }, open, close, receive, reset, destroy };
 })();

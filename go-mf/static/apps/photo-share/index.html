@@ -205,21 +205,31 @@
       <div id="mapCompactStatus" role="status" aria-live="polite">Đang mở bản đồ…</div>
       <button id="btnMapDetails" type="button" aria-controls="mapDetails" aria-expanded="false">Chi tiết</button>
     </div>
+    <div id="liveOwnRow" class="mapLiveRow" hidden><span class="mapLiveDot" aria-hidden="true"></span><span id="liveOwnStatus"></span><button id="btnStopLive" type="button">Dừng</button></div>
     <div id="selfCompactRow" class="mapCompactRow" hidden><span class="mapDot myDot" aria-hidden="true"></span><span id="selfCompactInfo"></span></div>
     <div id="peerCompactRow" class="mapCompactRow" hidden><span class="mapDot peerDot" aria-hidden="true"></span><span id="peerCompactInfo"></span><button id="btnPeerLocation" type="button" disabled>Xem</button></div>
     <div id="mapDetails" hidden>
       <div id="mapStatus" role="status">Đang mở bản đồ…</div>
       <div id="myLocationStatus" hidden></div>
       <div id="fixedShareStatus"></div>
+      <div id="liveShareDetail"></div>
       <div id="peerLocationCard" hidden>
         <div id="peerLocationInfo"></div>
         <div id="peerLocationCoordinates"></div>
       </div>
-      <p class="mapDetailNote">Vị trí cố định, chỉ cập nhật khi bạn lấy và gửi lại. “Đã nhận” xác nhận máy kia nhận dữ liệu.</p>
+      <p class="mapDetailNote">Gửi vị trí là ảnh chụp tại thời điểm đo. Chia sẻ trực tiếp cập nhật khi ứng dụng ở trước màn hình; ra nền sẽ tạm dừng. “Đã nhận” xác nhận máy kia nhận dữ liệu.</p>
     </div>
+    <div id="peerLiveState" class="mapLiveHint" hidden></div>
     <div class="mapActions">
       <button id="btnMyLocation" type="button">Vị trí của tôi</button>
       <button id="btnSendLocation" type="button" hidden disabled>Gửi vị trí</button>
+    </div>
+    <div id="liveLauncher" class="mapLiveLauncher">
+      <label class="mapDurationLabel" for="liveDuration">Thời lượng</label>
+      <select id="liveDuration" aria-label="Thời lượng chia sẻ trực tiếp">
+        <option value="900000">15 phút</option><option value="3600000">1 giờ</option><option value="0">Hết cuộc gọi</option>
+      </select>
+      <button id="btnStartLive" type="button">Chia sẻ trực tiếp</button>
     </div>
   </section>
 </div>
@@ -227,6 +237,7 @@
 <script src="maps/compact-ui.js"></script>
 <script src="maps/my-location.js"></script>
 <script src="maps/fixed-share.js"></script>
+<script src="maps/live-share.js"></script>
 <script src="maps/viewer.js"></script>
 <script>
 'use strict';
@@ -272,6 +283,7 @@ const streamed = k => k === 'video' || k === 'screen'; // phát qua đường vi
 
 const VIEWS = ['home', 'wait', 'peerPicking', 'viewer', 'videoView', 'mapView'];
 function show(v) {
+  if (v !== 'mapView' && window.HanoiLiveShare && window.HanoiLiveShare.isActive()) window.HanoiLiveShare.stop('closed');
   VIEWS.forEach(id => { $(id).hidden = id !== v; });
   document.documentElement.classList.toggle('dark', v === 'viewer');
   document.documentElement.classList.toggle('video', v === 'videoView');
@@ -283,6 +295,7 @@ function peerLabel() { return state.peer || 'đối phương'; }
 
 /* ─────────────── Mời / chờ / chấp nhận ─────────────── */
 function startShare(kind) {
+  if (window.HanoiLiveShare && window.HanoiLiveShare.isActive()) window.HanoiLiveShare.stop('closed');
   const b = B();
   if (!b || typeof b.requestShare !== 'function') { toast('Cần cập nhật ứng dụng trên máy này'); return; }
   state.s = { kind, role: 'sender' };
