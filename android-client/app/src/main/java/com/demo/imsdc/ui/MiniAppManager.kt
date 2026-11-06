@@ -401,6 +401,11 @@ class MiniAppManager(val activity: CallActivity) {
     /** Caro and full-screen Chia sẻ keep both tiles in a fixed row: no folding, no dragging. */
     fun fixedTiles(appId: String = activity.currentAppId) = appId == "caro" || shareRow(appId)
 
+    /** My camera can be dragged only on the call screen itself (emote home, or no page shown); inside any app
+     *  (Chia sẻ and everything in it, Vẽ, Caro, …) it stays where the app puts it. Tapping still folds it. */
+    fun cameraDraggable(appId: String = activity.currentAppId) =
+        appId == HOME_APP || activity.binding.webviewMiniapp.visibility != View.VISIBLE
+
     private fun screenW() = activity.binding.root.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
 
     /** Chia sẻ row: each tile's width and height, and the left margin that centres the pair. */

@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- **Camera drag only on the call screen:** my camera tile can be dragged only on the call screen itself (emote home). Inside any app (Chia sẻ and everything in it, Vẽ, Caro, …) it stays where the app puts it; tapping still folds it where folding is allowed.
 - **Chia sẻ vị trí back:** pressing back on the map now closes it on the other phone too (`map.close` over the ADC, toast "… đã đóng chia sẻ vị trí"), like stopping a photo/video share.
 - **Chia sẻ vị trí invite:** choosing "Chia sẻ vị trí" now shows the other phone the same accept/decline popup as photo/video/screen (it used to open the map there straight away); the sender waits, can cancel, and both maps open on accept. Page-only, over the existing ADC.
 - **Busy Here:** a call that arrives while the phone is already in a call or ringing, or a call to your own number, gets 486 Busy Here; the current call is untouched (a second INVITE used to take over its state). The caller sees and hears "Người dùng đang bận" (Vietnamese TTS, busy tone if no voice).
