@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- **Chia sẻ vị trí:** with the phone's Location switch off, live sharing said "Đang chờ GPS" forever; it now says "Vị trí đang tắt · Bật Vị trí trong cài đặt nhanh" (and recovers once Location is turned on).
 - Calls left hanging on the other phone: (1) when the app crashes during a call it now sends BYE (CANCEL while still ringing out) before it dies; (2) the call screen was never meant to be rebuilt, but Android rebuilt it after a configuration change (e.g. coming back from a landscape app during a screen share), and that path skipped the BYE through a bug (`onDestroy` set `isEndingCall` before checking it). The call screen now handles configuration changes itself and the BYE is sent; (3) as a last resort a phone ends the call after 20 s without any call audio from the other phone (not for hotlines), with a "Mất kết nối" toast.
 - Content Sharing video, the receiver still froze for seconds: video packets arrive slightly out of order through the MF (log: `Lost 4 … before seq 36835` then `Lost 65526 … before seq 36831`), and every reordering counted as a loss that dropped all pictures until the next keyframe. The receiver now puts packets back in order (64-packet window) before rebuilding pictures, and a real loss drops only the damaged picture (it waits for a keyframe only when the damaged picture was one).
 - Content Sharing video, the receiver lagged: one thread both read the RTP socket and fed the decoder, so packets overflowed the small default socket buffer while the decoder was busy, and every lost packet froze the picture until the next keyframe. Receiving and decoding now run on separate threads, the content sockets use 4 MB receive / 1 MB send buffers, decoded frames are shown as soon as they are ready, and a decoder that falls a second behind skips to the next keyframe. Lost packets are logged (`ContentReceiver: Lost N video packet(s)`).
@@ -16,6 +17,8 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- **Chia sẻ vị trí back:** pressing back on the map now closes it on the other phone too (`map.close` over the ADC, toast "… đã đóng chia sẻ vị trí"), like stopping a photo/video share.
+- **Chia sẻ vị trí invite:** choosing "Chia sẻ vị trí" now shows the other phone the same accept/decline popup as photo/video/screen (it used to open the map there straight away); the sender waits, can cancel, and both maps open on accept. Page-only, over the existing ADC.
 - **Busy Here:** a call that arrives while the phone is already in a call or ringing, or a call to your own number, gets 486 Busy Here; the current call is untouched (a second INVITE used to take over its state). The caller sees and hears "Người dùng đang bận" (Vietnamese TTS, busy tone if no voice).
 - Chia sẻ video: the video's sound plays at 30% on both phones (sender's preview and receiver), so it no longer drowns out the other person's voice. Like the voice, it follows the call's earpiece/speaker choice.
 - Chia sẻ màn hình: the viewer no longer gets a speaker button (a screen share has no sound, so it did nothing).

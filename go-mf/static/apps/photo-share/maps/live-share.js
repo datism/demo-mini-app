@@ -111,6 +111,7 @@ window.HanoiLiveShare = (() => {
     if(m.event==='active'||m.event==='waiting'){
       if(document.hidden){requestPause();return;}
       const wasPaused=own.phase==='paused';own.phase='waiting';own.nativeDeadline=0;
+      own.locationOff=m.event==='waiting' && m.reason==='location_disabled'; // Location switched off on this phone
       if(wasPaused)sendControl(own,'resume');renderUi();return;
     }
     if(m.event!=='fix' || document.hidden || own.phase==='paused')return;
@@ -118,7 +119,7 @@ window.HanoiLiveShare = (() => {
       approximate:f.approximate,ageAtSendMs:f.ageMs};
     if(!validFix(fix))return;
     if(remaining(own)!==null && remaining(own)<=0){stop('expired');return;}
-    own.phase='active';own.nativeDeadline=0;own.lastFixAt=now();
+    own.phase='active';own.nativeDeadline=0;own.lastFixAt=now();own.locationOff=false;
     const message=packet(own,'update');message.fix=fix;
     transmit(message);
     api.showLocalFix({...fix,ageMs:fix.ageAtSendMs});
@@ -201,6 +202,7 @@ window.HanoiLiveShare = (() => {
     if(window.HanoiMapUi && window.HanoiMapUi.ownLive)window.HanoiMapUi.ownLive(own ? own.phase==='paused'?'paused':'active' : 'stopped');
     if(own){
       const label=own.phase==='connecting'?'Đang kết nối':own.phase==='permission'?'Chờ cấp quyền':own.phase==='paused'?'Tạm dừng':
+        own.locationOff?'Vị trí đang tắt · Bật Vị trí trong cài đặt nhanh':
         own.lastFixAt===null?'Đang chờ GPS':now()-own.lastFixAt>STALE?'Chưa có vị trí mới':'Đang chia sẻ';
       node('liveOwnStatus').textContent='Trực tiếp · '+formatRemaining(own);
       if(window.HanoiMapUi)window.HanoiMapUi.set('live',label==='Đang chia sẻ'?'Đang chia sẻ trực tiếp':label,'active');
