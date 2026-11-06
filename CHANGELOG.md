@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- **Call audio:** every call now starts with the mic unmuted (the mute button sets Android's global mic mute, which outlived the call, so a later call could send silence with the button showing off). Logs now show the mic and received sound level (`micPeak`, `rxPeak`) every 100 packets, plus the call volume at start.
 - **No audio after the Busy Here change:** the 486 check also caught the call's own re-INVITEs (Call-ID not the one stored), so the setup re-INVITEs were refused and both sides were silent. Only an INVITE without a To-tag (a new call) can now get 486.
 - **Chia sẻ vị trí:** with the phone's Location switch off, live sharing said "Đang chờ GPS" forever; it now says "Vị trí đang tắt · Bật Vị trí trong cài đặt nhanh" (and recovers once Location is turned on).
 - Calls left hanging on the other phone: (1) when the app crashes during a call it now sends BYE (CANCEL while still ringing out) before it dies; (2) the call screen was never meant to be rebuilt, but Android rebuilt it after a configuration change (e.g. coming back from a landscape app during a screen share), and that path skipped the BYE through a bug (`onDestroy` set `isEndingCall` before checking it). The call screen now handles configuration changes itself and the BYE is sent; (3) as a last resort a phone ends the call after 20 s without any call audio from the other phone (not for hotlines), with a "Mất kết nối" toast.
