@@ -938,6 +938,7 @@ class CallActivity : AppCompatActivity() {
         var initialY = 0f
         val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
         var isDragging = false
+        var canDrag = false
 
         // A tap (not a drag) on my camera tile folds it into a camera button; tapping the button opens it again.
         binding.localVideoView.setOnClickListener { miniAppManager.onCameraTileTapped() }
@@ -968,6 +969,8 @@ class CallActivity : AppCompatActivity() {
                     initialX = event.rawX
                     initialY = event.rawY
                     isDragging = false
+                    // Only on the call screen itself: inside an app the camera keeps its place (a tap still folds it).
+                    canDrag = miniAppManager.cameraDraggable()
                     true
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
@@ -975,7 +978,7 @@ class CallActivity : AppCompatActivity() {
                         kotlin.math.abs(event.rawY - initialY) > touchSlop) {
                         isDragging = true
                     }
-                    if (isDragging) {
+                    if (isDragging && canDrag) {
                         // Limit dragging within the screen boundaries
                         val parent = view.parent as? View
                         val maxX = parent?.width?.toFloat() ?: 0f
