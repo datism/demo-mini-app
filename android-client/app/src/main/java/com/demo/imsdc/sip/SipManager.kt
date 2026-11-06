@@ -614,10 +614,14 @@ class SipManager(
         Log.i(TAG, "← Incoming INVITE from $fromUser (call=$callId)")
 
         // A new call while one is ringing or up, or a call to ourselves: 486 Busy Here.
+        // Only an INVITE without a To-tag starts a new call (RFC 3261 12.1); one with a To-tag is a
+        // re-INVITE of the current call, whatever Call-ID it carries, and must never be turned away.
         // Checked before the pending* fields below are overwritten, so the current call keeps its state.
+        val newDialog = getTag(getHeader(msg, "to") ?: "").isNullOrEmpty()
         val inCall = com.demo.imsdc.ui.CallActivity.isCallActive || isCallActive ||
             (pendingCallId != null && IncomingCallNotificationManager.ringing)
         val busyReason = when {
+            !newDialog -> null
             fromUser == localUsername -> "call to self"
             inCall && callId != pendingCallId -> "already in a call (${pendingCallId})"
             else -> null
