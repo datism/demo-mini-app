@@ -28,6 +28,9 @@ import kotlin.random.Random
 private const val TAG = "SipManager"
 // Wait for a new network to settle before comparing IPs, so a short flap does not end the call.
 private const val IP_CHECK_DELAY_MS = 1500L
+/** Registration lifetime asked for in REGISTER, and when it is renewed (half way, so a lost refresh still has time). */
+private const val REGISTER_EXPIRES_S = 7200
+private const val REGISTER_REFRESH_MS = REGISTER_EXPIRES_S * 1000L / 2
 
 /**
  * SipManager — SIP stack tối giản cho PoC IMS DC
@@ -111,6 +114,8 @@ class SipManager(
     private val sipScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var ipCheckJob: kotlinx.coroutines.Job? = null
+    /** Renews the registration before it expires: during a long call no screen does it (MainActivity only on resume). */
+    private var registerRefreshJob: kotlinx.coroutines.Job? = null
     // IP announced in the current call's SDP; the call's RTP is tied to it.
     private var callLocalIp: String? = null
 
@@ -237,7 +242,28 @@ class SipManager(
         }
     }
 
+    private fun scheduleRegisterRefresh() {
+        registerRefreshJob?.cancel()
+        registerRefreshJob = sipScope.launch {
+            delay(REGISTER_REFRESH_MS)
+            if (!isRunning) return@launch
+            Log.i(TAG, "Renewing SIP registration (expires after ${REGISTER_EXPIRES_S}s)")
+            try { register() } catch (e: Exception) { Log.w(TAG, "Registration refresh failed: ${e.message}") }
+        }
+    }
+
+    /** Registers again right away (used when the server says it lost our registration). */
+    fun reRegisterNow(reason: String) {
+        if (!isRunning) return
+        Log.w(TAG, "Re-registering: $reason")
+        sipScope.launch {
+            try { register() } catch (e: Exception) { Log.w(TAG, "Re-register failed: ${e.message}") }
+        }
+    }
+
     fun stop() {
+        registerRefreshJob?.cancel()
+        registerRefreshJob = null
         isRunning = false
         unwatchNetwork()
         keepAliveThread?.interrupt()
@@ -518,6 +544,7 @@ class SipManager(
                     Log.i(TAG, "✅ REGISTER OK")
                     initialRegRetryJob?.cancel()
                     authRetryJob?.cancel()
+                    scheduleRegisterRefresh()
                     onRegistered?.invoke()
                 }
                 401 -> {
@@ -584,6 +611,9 @@ class SipManager(
                     if (isReInvite) {
                         // Re-INVITE failures should NOT terminate the ongoing call
                         Log.w(TAG, "Re-INVITE failed with $statusCode — call continues")
+                        // 430: the server no longer has our registration (expired, or server restarted). Register
+                        // again now; the caller retries the Re-INVITE once (MiniAppManager).
+                        if (statusCode == 430) reRegisterNow("430 on Re-INVITE")
                         onReInviteFailed?.invoke(statusCode, getCSeqNumber(msg))
                     } else {
                         Log.w(TAG, "INVITE response: $statusCode")
@@ -854,7 +884,7 @@ class SipManager(
             appendLine("Call-ID: $callId")
             appendLine("CSeq: $cseq REGISTER")
             appendLine("Contact: <sip:$localUsername@$effectiveIp:$localPort>;+sip.app-subtype=\"webrtc-datachannel\";+g.3gpp.ps-data-off")
-            appendLine("Expires: 7200")
+            appendLine("Expires: $REGISTER_EXPIRES_S")
             appendLine("Content-Length: 0")
             append("\r\n")
         }.replace("\r\n", "\n").replace("\n", "\r\n")
@@ -906,7 +936,7 @@ class SipManager(
             appendLine("Call-ID: $callId")
             appendLine("CSeq: $cseq REGISTER")
             appendLine("Contact: <sip:$localUsername@$localIp:$localPort>;+sip.app-subtype=\"webrtc-datachannel\";+g.3gpp.ps-data-off")
-            appendLine("Expires: 7200")
+            appendLine("Expires: $REGISTER_EXPIRES_S")
             appendLine("Authorization: Digest username=\"$localUsername\", realm=\"$realm\", nonce=\"$nonce\", uri=\"$uri\", response=\"$response\", algorithm=MD5")
             appendLine("Content-Length: 0")
             append("\r\n")
