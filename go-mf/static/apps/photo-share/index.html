@@ -313,7 +313,8 @@ function startShare(kind) {
 }
 window.HanoiViewer.bind({ show, send: sendJson, toast, active: () => !!state.s });
 $('btnHanoiMap').onclick = () => startMapShare();
-$('btnMapBack').onclick = () => window.HanoiViewer.close();
+// Back closes the map on both phones (like stopping a photo/video share); the map has no SIP stream, so it goes over the ADC.
+$('btnMapBack').onclick = () => { sendJson(mapMsg('map.close', Date.now().toString(36))); window.HanoiViewer.close(); };
 $('btnPhoto').onclick = () => startShare('photo');
 $('btnVideo').onclick = () => startShare('video');
 $('btnScreen').onclick = () => startShare('screen');
@@ -336,8 +337,9 @@ $('btnDecline').onclick = () => {
 
 /* ─────────────── Chia sẻ vị trí: mời như ảnh/video, chỉ qua ADC (không cần re-INVITE) ───────────────
  * map.invite{id} (gửi lại mỗi 1,5 s tới khi có map.ringing) · map.ringing · map.accept · map.decline · map.busy · map.cancel
+ * map.close: một bên bấm quay lại, bên kia cũng đóng bản đồ.
  * Bản đồ mở ở cả hai máy sau map.accept. Hai bên cùng mời một lúc: mỗi bên chấp nhận lời mời của bên kia. */
-const MAP_SIGNALS = ['map.invite', 'map.ringing', 'map.accept', 'map.decline', 'map.busy', 'map.cancel'];
+const MAP_SIGNALS = ['map.invite', 'map.ringing', 'map.accept', 'map.decline', 'map.busy', 'map.cancel', 'map.close'];
 const mapMsg = (t, id) => ({ t, version: 1, id });
 let mapRetry = null;
 function stopMapRetry() { clearInterval(mapRetry); mapRetry = null; }
@@ -382,6 +384,7 @@ function onMapSignal(m) {
     case 'map.decline': if (mine && s.role === 'sender') { stopMapRetry(); toast(peerLabel() + ' đã từ chối'); endSession(); } return;
     case 'map.busy': if (mine && s.role === 'sender') { stopMapRetry(); toast(peerLabel() + ' đang bận'); endSession(); } return;
     case 'map.cancel': if (mine && s.role === 'receiver') { toast(peerLabel() + ' đã hủy chia sẻ'); endSession(); } return;
+    case 'map.close': if (!$('mapView').hidden) { window.HanoiViewer.close(); toast(peerLabel() + ' đã đóng chia sẻ vị trí'); } return;
   }
 }
 $('btnPickLeave').onclick = () => { call('stopShare'); endSession(); };
