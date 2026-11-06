@@ -159,6 +159,8 @@ const val MAX_GLARE_ATTEMPTS = 3
 fun outcomeAction(outcome: ReInviteOutcome, attempt: Int, superseded: Boolean): OutcomeAction = when (outcome) {
     is ReInviteOutcome.Answered -> OutcomeAction.CONFIRM
     is ReInviteOutcome.Failed -> when {
+        // 430: the server lost our registration; SipManager registers again, and the offer is retried once.
+        outcome.code == 430 -> if (attempt == 1 && !superseded) OutcomeAction.RETRY else OutcomeAction.ROLLBACK
         outcome.code != 491 -> OutcomeAction.ROLLBACK
         superseded -> OutcomeAction.SUPERSEDED
         attempt < MAX_GLARE_ATTEMPTS -> OutcomeAction.RETRY

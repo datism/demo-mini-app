@@ -168,6 +168,10 @@ class AdcSlotsTest {
         assertEquals(OutcomeAction.SUPERSEDED, outcomeAction(ReInviteOutcome.Failed(491), 1, superseded = true))
         assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(491), MAX_GLARE_ATTEMPTS, superseded = false))
         assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(488), 1, superseded = false))
+        // 430 (registration lost): one retry after re-registering, then give up.
+        assertEquals(OutcomeAction.RETRY, outcomeAction(ReInviteOutcome.Failed(430), 1, superseded = false))
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(430), 2, superseded = false))
+        assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Failed(430), 1, superseded = true))
         assertEquals(OutcomeAction.ROLLBACK, outcomeAction(ReInviteOutcome.Timeout, 1, superseded = false))
     }
 

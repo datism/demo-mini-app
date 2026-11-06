@@ -914,6 +914,8 @@ class MiniAppManager(val activity: CallActivity) {
         private const val LOAD_RETRY_MS = 10_000L
         private const val LOAD_RETRIES = 2
         const val HOME_APP = CallActivity.HOME_APP
+        /** After a 430, how long the re-registration gets before the Re-INVITE is sent again. */
+        const val REREGISTER_WAIT_MS = 2000L
         private const val ANSWER_TIMEOUT_MS = 5000L
         /** A share request waits for a person, not for a stack: the far end rings (180) until its user decides. */
         private const val SHARE_ANSWER_TIMEOUT_MS = 35_000L
@@ -1040,6 +1042,7 @@ class MiniAppManager(val activity: CallActivity) {
         val desired = desiredSlots(request.target, HOME_APP, hotlineApp)
         var attempt = 1
         var confirmedAtGlare: SlotState? = null
+        var lastFailedCode: Int? = null
         while (true) {
             val step = negotiation.withLock {
                 // The far end's Re-INVITE, taken during the back-off, changed the slots: its offer won the glare.
@@ -1059,6 +1062,7 @@ class MiniAppManager(val activity: CallActivity) {
                 } finally { awaitingPeerDecision = false }
                 confirmed = confirmedAfter(result, offered, confirmed)
                 val action = outcomeAction(result, attempt, superseded = requests.hasPending)
+                lastFailedCode = (result as? ReInviteOutcome.Failed)?.code
                 Log.i(TAG, "Re-INVITE for ${request.target}: $result -> $action")
                 when (action) {
                     OutcomeAction.CONFIRM -> applyAnswer((result as ReInviteOutcome.Answered).sdp)
@@ -1103,8 +1107,10 @@ class MiniAppManager(val activity: CallActivity) {
                     return ChangeResult.REJECTED
                 }
                 OutcomeAction.RETRY -> {
-                    val delayMs = reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner)
-                    Log.i(TAG, "491 glare for ${request.target}, re-offering in $delayMs ms")
+                    // 430: give the new REGISTER (with its digest round) time to land before re-offering.
+                    val delayMs = if (lastFailedCode == 430) REREGISTER_WAIT_MS
+                        else reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner)
+                    Log.i(TAG, "${lastFailedCode ?: 491} for ${request.target}, re-offering in $delayMs ms")
                     delay(delayMs)   // without the lock: the far end's Re-INVITE is handled meanwhile
                     if (requests.hasPending) return ChangeResult.SUPERSEDED
                     attempt++
