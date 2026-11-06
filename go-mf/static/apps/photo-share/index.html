@@ -109,7 +109,7 @@
   /* Full screen (native hides the call UI): the call pill at the bottom centre. Photo / video: my camera at the
      top-left with the other person under it. Menu (html.row): both cameras side by side in a band at the top
      (each tile 34% of the width, 3:4, 12px above and below: MiniAppManager.shareRowTile), the menu below it. */
-  html.full .bar { padding-left: 116px; }
+  html.full .bar, html.full #mapView .mapHeader { padding-left: 116px; } /* back button right of my camera */
   html.full #dots { bottom: 62px; }
   html.full .controls { padding-bottom: 60px; }
   html.full .center { padding-bottom: 72px; }

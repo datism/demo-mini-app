@@ -40,6 +40,8 @@ object IncomingCallNotificationManager {
     private var wakeLock: PowerManager.WakeLock? = null
     private var ringtone: Ringtone? = null
     private var isRinging = false
+    /** An incoming call is ringing (not answered or declined yet). */
+    val ringing: Boolean get() = isRinging
     private var declineReceiver: BroadcastReceiver? = null
     private var pendingInviteRaw: String? = null
     /** The ringing call's notification, built but posted only while the app is in the background. */

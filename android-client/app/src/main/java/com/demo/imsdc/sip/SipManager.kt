@@ -613,6 +613,26 @@ class SipManager(
 
         Log.i(TAG, "← Incoming INVITE from $fromUser (call=$callId)")
 
+        // A new call while one is ringing or up, or a call to ourselves: 486 Busy Here.
+        // Checked before the pending* fields below are overwritten, so the current call keeps its state.
+        val inCall = com.demo.imsdc.ui.CallActivity.isCallActive || isCallActive ||
+            (pendingCallId != null && IncomingCallNotificationManager.ringing)
+        val busyReason = when {
+            fromUser == localUsername -> "call to self"
+            inCall && callId != pendingCallId -> "already in a call (${pendingCallId})"
+            else -> null
+        }
+        if (busyReason != null) {
+            Log.i(TAG, "→ 486 Busy Here to $fromUser (call=$callId): $busyReason")
+            try {
+                sendRaw(buildResponse(msg, 486, "Busy Here", "Content-Length: 0\r\n"))
+                busyCallIds.add(callId)
+            } catch (e: Exception) {
+                Log.e(TAG, "486 send error: ${e.message}")
+            }
+            return
+        }
+
         // Save call info for callee (B-side) to send BYE or ACK
         val from     = getHeader(msg, "from") ?: ""
         val to       = getHeader(msg, "to") ?: ""
@@ -698,6 +718,11 @@ class SipManager(
 
     private fun handleCancel(msg: String) {
         Log.i(TAG, "← CANCEL received")
+        if (isOtherCall(msg)) {
+            try { sendRaw(buildResponse(msg, 200, "OK", "")) } catch (_: Exception) {}
+            Log.i(TAG, "CANCEL for a call answered busy: 200 OK, current call untouched")
+            return
+        }
         // CANCEL of a Re-INVITE we hold for the user: 200 to the CANCEL, 487 to the Re-INVITE, the call goes on.
         val held = heldReInviteMsg
         if (held != null && getCSeqNumber(held) == getCSeqNumber(msg)) {
@@ -741,10 +766,24 @@ class SipManager(
         onCallEnded?.invoke()
     }
 
+    /** Call-IDs answered with 486 Busy Here. */
+    private val busyCallIds = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    /** A CANCEL/BYE of a call we turned away busy: it must not end the current call. */
+    private fun isOtherCall(msg: String): Boolean {
+        val id = getHeader(msg, "call-id") ?: return false
+        return busyCallIds.remove(id)
+    }
+
     // ─── Handle BYE ─────────────────────────────────────────────────────────
 
     private fun handleBye(msg: String) {
         Log.i(TAG, "← BYE received")
+        if (isOtherCall(msg)) {
+            try { sendRaw(buildResponse(msg, 481, "Call/Transaction Does Not Exist", "")) } catch (_: Exception) {}
+            Log.i(TAG, "BYE for a call answered busy: 481, current call untouched")
+            return
+        }
         val response = buildResponse(msg, 200, "OK", "")
         try {
             sendRaw(response)
