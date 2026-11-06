@@ -53,6 +53,10 @@ class RtpMediaManager(
     // Threads
     private var audioSenderThread: Thread? = null
     private var audioReceiverThread: Thread? = null
+    // Peak mic / received sample level over the last 100 packets, for the logs.
+    private var micPeak = 0
+    private var rxPeak = 0
+
     /** When the far end's last call audio packet arrived (elapsedRealtime), 0 before the first. The far phone
      *  sends audio all call long (silence too), so a long gap means it is gone: CallActivity's media watchdog. */
     @Volatile var lastAudioRxMs = 0L
@@ -514,8 +518,13 @@ class RtpMediaManager(
                         )
                         socket.send(packet)
                         audioPacketsSent++
+                        var peak = 0
+                        for (i in 0 until read) { val a = Math.abs(pcmBuffer[i].toInt()); if (a > peak) peak = a }
+                        if (peak > micPeak) micPeak = peak
                         if (audioPacketsSent % 100 == 0) {
-                            Log.d(TAG, "📊 Audio Packets Sent: $audioPacketsSent")
+                            // Peak of the last 2 s of mic audio (0..32767): near 0 means the mic is muted/silenced.
+                            Log.d(TAG, "📊 Audio Packets Sent: $audioPacketsSent micPeak=$micPeak")
+                            micPeak = 0
                         }
                     } catch (e: Exception) {
                         // Socket might be closed, ignore
@@ -612,8 +621,11 @@ class RtpMediaManager(
                         }
                     }
                     audioPacketsReceived++
+                    for (i in 0 until decodeSamples) { val a = Math.abs(pcmOutput[i].toInt()); if (a > rxPeak) rxPeak = a }
                     if (audioPacketsReceived % 100 == 0) {
-                        Log.d(TAG, "📊 Audio Packets Received: $audioPacketsReceived")
+                        // Peak of the last 2 s of received audio: near 0 means the far end sends silence.
+                        Log.d(TAG, "📊 Audio Packets Received: $audioPacketsReceived rxPeak=$rxPeak track=${audioTrack?.playState}")
+                        rxPeak = 0
                     }
                 } catch (e: Exception) {
                     // Socket closed, exit loop

@@ -910,6 +910,12 @@ class CallActivity : AppCompatActivity() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
         setSpeakerphoneOn(audioManager, true)
+        // The mute button sets Android's global mic mute, which outlives the call: start every call unmuted.
+        if (audioManager.isMicrophoneMute) Log.w(TAG, "Mic was left muted by an earlier call: unmuting")
+        audioManager.isMicrophoneMute = false
+        setCallButtonOn(binding.btnMute, false)
+        Log.i(TAG, "Audio: mode=${audioManager.mode} voiceVol=${audioManager.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)}/" +
+            "${audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_VOICE_CALL)}")
 
         // Setup WebView
         miniAppManager.setupWebView()
@@ -2116,6 +2122,7 @@ class CallActivity : AppCompatActivity() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             audioManager.mode = android.media.AudioManager.MODE_NORMAL
             setSpeakerphoneOn(audioManager, false)
+            audioManager.isMicrophoneMute = false
         } catch (e: Exception) {
             Log.w(TAG, "Error resetting audio: ${e.message}")
         }
