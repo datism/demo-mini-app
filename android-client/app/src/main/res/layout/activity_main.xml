@@ -339,45 +339,29 @@
                 android:paddingVertical="4dp" />
         </androidx.core.widget.NestedScrollView>
 
-        <!-- Floating button with a label: opens the keypad when it is collapsed -->
+        <!-- Floating Action Button: Mở lại Dialpad khi đang thu gọn -->
         <androidx.cardview.widget.CardView
             android:id="@+id/fab_show_dialpad"
-            android:layout_width="wrap_content"
-            android:layout_height="56dp"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
             android:layout_above="@id/bottom_nav_bar"
             android:layout_alignParentRight="true"
-            android:layout_marginRight="20dp"
+            android:layout_marginRight="24dp"
             android:layout_marginBottom="16dp"
-            app:cardCornerRadius="28dp"
+            app:cardCornerRadius="30dp"
             app:cardElevation="6dp"
             app:cardBackgroundColor="#FF22C55E"
             android:visibility="gone"
             android:clickable="true"
             android:focusable="true"
-            android:contentDescription="Mở bàn phím quay số"
             android:foreground="?android:attr/selectableItemBackground">
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingLeft="18dp"
-                android:paddingRight="22dp">
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:src="@drawable/ic_keypad"
-                    app:tint="#FFFFFFFF"
-                    android:importantForAccessibility="no" />
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginLeft="10dp"
-                    android:text="Bàn phím"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="16sp"
-                    android:fontFamily="sans-serif-medium" />
-            </LinearLayout>
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_keypad"
+                app:tint="#FFFFFFFF"
+                android:contentDescription="Mở bàn phím quay số" />
         </androidx.cardview.widget.CardView>
 
         <!-- Keypad Panel (Collapsible) -->

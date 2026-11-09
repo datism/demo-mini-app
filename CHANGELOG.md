@@ -6,7 +6,6 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Call: the full-screen pill (green dot + timer) is bigger, darker and labelled "▲ Nút cuộc gọi", so it is clear that tapping it brings back the call buttons and the way out of the app.
-- Dialer: the button that opens the keypad is now a labelled green pill ("Bàn phím") instead of an unlabelled round dot.
 - Dialer: the app opens on the phone tab with the keypad down and no leftover number; tapping a recent call or contact calls directly; after a call the screen returns to where it started (keypad cleared, recents, or contacts).
 - **Apps would not open after ~2 h in a call (430):** the SIP registration (Expires 7200) was only renewed when the home screen resumed, so during a long call it expired and every Re-INVITE got 430 "Registration Lost". SipManager now renews it every hour on its own, re-registers at once on a 430, and opening an app retries the Re-INVITE once after that.
 - **Call audio:** every call now starts with the mic unmuted (the mute button sets Android's global mic mute, which outlived the call, so a later call could send silence with the button showing off). Logs now show the mic and received sound level (`micPeak`, `rxPeak`) every 100 packets, plus the call volume at start.
