@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
                 Log.i(TAG, "debugReceiver CALL target=$target")
                 if (target != null) {
                     dialDigits = target
-                    binding.tvDialDigits.text = target
+                    showDigits()
                     binding.btnDialerCall.performClick()
                 }
             }
@@ -121,13 +121,15 @@ class MainActivity : AppCompatActivity() {
         registerDebugReceiver()
     }
 
-    /** Clears the typed number and shows the view a call came from (null = phone tab, keypad down). */
+    /** Clears the typed number and shows the tab a call came from (null = Gần đây). */
     private fun resetHome(origin: CallOrigin?) {
         dialDigits = ""
-        binding.tvDialDigits.text = ""
-        showingContacts = origin == CallOrigin.CONTACTS
-        if (origin == CallOrigin.DIALPAD) showDialpad(false) else hideDialpad(false)
-        refreshList()
+        showDigits()
+        showTab(when (origin) {
+            CallOrigin.DIALPAD -> HomeTab.KEYPAD
+            CallOrigin.CONTACTS -> HomeTab.CONTACTS
+            else -> HomeTab.RECENTS
+        })
     }
 
     /** Calls straight from the recents / contacts list, without opening the keypad. */
@@ -173,7 +175,7 @@ class MainActivity : AppCompatActivity() {
         Log.i(TAG, "onNewIntent: autoCall=$autoCall")
         if (!autoCall.isNullOrEmpty()) {
             dialDigits = autoCall
-            binding.tvDialDigits.text = autoCall
+            showDigits()
             binding.tvDialDigits.visibility = View.VISIBLE
             binding.btnDialerCall.performClick()
         }
@@ -259,38 +261,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var isDialpadVisible = true
+    private enum class HomeTab { KEYPAD, RECENTS, CONTACTS }
+    private var currentTab = HomeTab.RECENTS
 
-    private fun showDialpad(animate: Boolean = true) {
-        if (isDialpadVisible && binding.layoutDialpadPanel.visibility == View.VISIBLE) return
-        isDialpadVisible = true
-        if (animate) {
-            val transition = android.transition.AutoTransition().apply {
-                duration = 200
-            }
-            android.transition.TransitionManager.beginDelayedTransition(binding.layoutDialer, transition)
+    /** Shows one of the three home tabs (One UI Phone style): full keypad, recents, or contacts. */
+    private fun showTab(tab: HomeTab) {
+        currentTab = tab
+        val keypad = tab == HomeTab.KEYPAD
+        binding.layoutDialpadPanel.visibility = if (keypad) View.VISIBLE else View.GONE
+        binding.scrollRecentCalls.visibility = if (keypad) View.GONE else View.VISIBLE
+        binding.btnAddContact.visibility = if (tab == HomeTab.CONTACTS) View.VISIBLE else View.GONE
+        for ((view, t) in listOf(binding.tabKeypad to HomeTab.KEYPAD, binding.tabPhone to HomeTab.RECENTS,
+                                 binding.tabContacts to HomeTab.CONTACTS)) {
+            val on = t == tab
+            view.setBackgroundResource(if (on) com.demo.imsdc.R.drawable.bg_nav_tab_selected else 0)
+            (view.getChildAt(1) as? android.widget.TextView)?.setTypeface(null,
+                if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
-        binding.layoutDialpadPanel.visibility = View.VISIBLE
-        binding.fabShowDialpad.visibility = View.GONE
+        if (!keypad) {
+            binding.scrollRecentCalls.scrollTo(0, 0)
+            refreshList()
+        }
     }
 
-    private fun hideDialpad(animate: Boolean = true) {
-        if (!isDialpadVisible && binding.layoutDialpadPanel.visibility == View.GONE) return
-        isDialpadVisible = false
-        if (animate) {
-            val transition = android.transition.AutoTransition().apply {
-                duration = 200
-            }
-            android.transition.TransitionManager.beginDelayedTransition(binding.layoutDialer, transition)
-        }
-        binding.layoutDialpadPanel.visibility = View.GONE
-        binding.fabShowDialpad.visibility = View.VISIBLE
+    /** Puts [dialDigits] on screen; backspace and "Thêm vào danh bạ" only show while something is typed. */
+    private fun showDigits() {
+        binding.tvDialDigits.text = dialDigits
+        val vis = if (dialDigits.isEmpty()) View.INVISIBLE else View.VISIBLE
+        binding.btnBackspace.visibility = vis
+        binding.btnAddToContacts.visibility = vis
     }
 
     private fun doLogout() {
         sipManager?.stop()
         dialDigits = ""
-        binding.tvDialDigits.text = ""
+        showDigits()
         binding.layoutSetup.visibility = View.VISIBLE
         binding.layoutDialer.visibility = View.GONE
         binding.tvStatus.text = "Chưa đăng ký"
@@ -309,81 +314,41 @@ class MainActivity : AppCompatActivity() {
         for ((view, digit) in keys) {
             view.setOnClickListener {
                 dialDigits += digit
-                binding.tvDialDigits.text = dialDigits
+                showDigits()
             }
         }
 
-        // Nút Backspace xóa 1 ký tự
+        // Nút Backspace xóa 1 ký tự; nhấn giữ xóa sạch
         binding.btnBackspace.setOnClickListener {
             if (dialDigits.isNotEmpty()) {
-                dialDigits = dialDigits.substring(0, dialDigits.length - 1)
-                binding.tvDialDigits.text = dialDigits
+                dialDigits = dialDigits.dropLast(1)
+                showDigits()
             }
         }
-
-        // Nhấn giữ Backspace xóa sạch ký tự
         binding.btnBackspace.setOnLongClickListener {
             dialDigits = ""
-            binding.tvDialDigits.text = dialDigits
+            showDigits()
             true
         }
-
-        // Nút Thu gọn Dialpad (Góc trái hàng gọi)
-        binding.btnLogout.setOnClickListener {
-            hideDialpad(true)
-        }
-        binding.btnLogout.setOnLongClickListener {
-            doLogout()
-            true
+        binding.btnAddToContacts.setOnClickListener {
+            if (dialDigits.isNotEmpty()) editContactDialog(dialDigits, null)
         }
 
-        // Nút Nổi FAB mở Dialpad
-        binding.fabShowDialpad.setOnClickListener {
-            showDialpad(true)
-        }
+        // Thanh điều hướng dạng viên thuốc: Bàn phím · Gần đây · Danh bạ
+        binding.tabKeypad.setOnClickListener { showTab(HomeTab.KEYPAD) }
+        binding.tabPhone.setOnClickListener { showTab(HomeTab.RECENTS) }
+        binding.tabContacts.setOnClickListener { showTab(HomeTab.CONTACTS) }
+        binding.btnAddContact.setOnClickListener { editContactDialog(null, null) }
 
-        // Tab Phone mở / bật tắt Dialpad
-        binding.tabContacts.setOnClickListener {
-            showingContacts = true
-            if (isDialpadVisible) hideDialpad(true)
-            refreshList()
-        }
-        binding.tabPhone.setOnClickListener {
-            if (showingContacts) { showingContacts = false; refreshList(); return@setOnClickListener }
-            if (!isDialpadVisible) {
-                showDialpad(true)
-            } else {
-                hideDialpad(true)
-            }
-        }
-
-        // Khi cuộn hoặc chạm vào vùng lịch sử cuộc gọi -> Tự động thu gọn dialpad
-        binding.scrollRecentCalls.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
-            if (Math.abs(scrollY - oldScrollY) > 8 && isDialpadVisible) {
-                hideDialpad(true)
-            }
-        }
-        binding.scrollRecentCalls.setOnClickListener {
-            if (isDialpadVisible) hideDialpad(true)
-        }
-        binding.layoutRecentCalls.setOnClickListener {
-            if (isDialpadVisible) hideDialpad(true)
-        }
-
-        // Nút 3 chấm Menu: Đăng xuất & Cài đặt
-        binding.btnMoreMenu.setOnClickListener { v ->
+        // Nút 3 chấm Menu (ở cả tiêu đề danh sách và bàn phím)
+        val showMenu = { v: View ->
             val popup = android.widget.PopupMenu(this, v)
             popup.menu.add("Đăng xuất tài khoản")
-            popup.menu.add("Thu gọn bàn phím")
-            popup.setOnMenuItemClickListener { menuItem ->
-                when (menuItem.title) {
-                    "Đăng xuất tài khoản" -> doLogout()
-                    "Thu gọn bàn phím" -> hideDialpad(true)
-                }
-                true
-            }
+            popup.setOnMenuItemClickListener { doLogout(); true }
             popup.show()
         }
+        binding.btnMoreMenu.setOnClickListener { showMenu(it) }
+        binding.btnMoreMenuKeypad.setOnClickListener { showMenu(it) }
 
         // Nút Gọi từ bàn phím quay số
         binding.btnDialerCall.setOnClickListener {
@@ -455,7 +420,7 @@ class MainActivity : AppCompatActivity() {
                         binding.tvStatus.text = "✅ Đã đăng ký: $username"
                         binding.btnRegister.isEnabled = true
                         dialDigits = ""
-                        binding.tvDialDigits.text = ""
+                        showDigits()
                         
                         // Chuyển giao diện sang bàn phím Samsung OneUI
                         binding.layoutSetup.visibility = View.GONE
@@ -466,7 +431,7 @@ class MainActivity : AppCompatActivity() {
                         val autoCall = intent.getStringExtra("call")
                         if (!autoCall.isNullOrEmpty()) {
                             dialDigits = autoCall
-                            binding.tvDialDigits.text = autoCall
+                            showDigits()
                             binding.tvDialDigits.visibility = View.VISIBLE
                             binding.btnDialerCall.performClick()
                         }
@@ -609,7 +574,7 @@ class MainActivity : AppCompatActivity() {
             val newArr = org.json.JSONArray()
             newArr.put(item)
             for (i in 0 until arr.length()) {
-                if (newArr.length() >= 5) break
+                if (newArr.length() >= 50) break
                 newArr.put(arr.getJSONObject(i))
             }
             
@@ -627,10 +592,92 @@ class MainActivity : AppCompatActivity() {
         val isReal: Boolean = false
     )
 
+    // ───────────────── Danh sách kiểu One UI: tiêu đề nhóm + thẻ bo góc ─────────────────
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** Grey section label above a card group: a day in Gần đây, a letter in Danh bạ. */
+    private fun sectionHeader(text: String) = android.widget.TextView(this).apply {
+        this.text = text
+        setTextColor(android.graphics.Color.parseColor("#FF6E6E73"))
+        textSize = 14f
+        setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        setPadding(dp(20), dp(18), dp(20), dp(8))
+    }
+
+    /** Stacks [rows] into one rounded white card, with inset dividers between rows. */
+    private fun addCard(container: android.widget.LinearLayout, rows: List<View>) {
+        rows.forEachIndexed { i, row ->
+            row.setBackgroundResource(when {
+                rows.size == 1 -> com.demo.imsdc.R.drawable.bg_list_card
+                i == 0 -> com.demo.imsdc.R.drawable.bg_list_card_top
+                i == rows.size - 1 -> com.demo.imsdc.R.drawable.bg_list_card_bottom
+                else -> com.demo.imsdc.R.drawable.bg_list_card_mid
+            })
+            // Ripple over the card background
+            val tv = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+            row.foreground = androidx.core.content.ContextCompat.getDrawable(this, tv.resourceId)
+            container.addView(row)
+            if (i < rows.size - 1) {
+                container.addView(android.widget.FrameLayout(this).apply {
+                    setBackgroundColor(android.graphics.Color.WHITE)
+                    addView(View(this@MainActivity).apply {
+                        setBackgroundColor(android.graphics.Color.parseColor("#FFE5E5EA"))
+                    }, android.widget.FrameLayout.LayoutParams(-1, dp(1)).apply { setMargins(dp(20), 0, dp(20), 0) })
+                }, android.widget.LinearLayout.LayoutParams(-1, dp(1)))
+            }
+        }
+    }
+
+    /** One list row: optional leading view, a title, optional trailing text. */
+    private fun listRow(leading: View?, title: String, trailing: String?,
+                        onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            setOnClickListener { onClick() }
+            if (onLong != null) setOnLongClickListener { onLong(); true }
+        }
+        if (leading != null) row.addView(leading)
+        row.addView(android.widget.TextView(this).apply {
+            text = title
+            setTextColor(android.graphics.Color.parseColor("#FF111111"))
+            textSize = 18f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, -2, 1f).apply {
+                setMargins(if (leading != null) dp(14) else 0, 0, dp(8), 0)
+            }
+        })
+        if (trailing != null) row.addView(android.widget.TextView(this).apply {
+            text = trailing
+            setTextColor(android.graphics.Color.parseColor("#FF6E6E73"))
+            textSize = 14f
+        })
+        return row
+    }
+
+    private fun dayLabel(ts: Long): String {
+        val day = java.util.Calendar.getInstance().apply { timeInMillis = ts }
+        val today = java.util.Calendar.getInstance()
+        fun same(a: java.util.Calendar, b: java.util.Calendar) =
+            a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+                a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+        if (same(day, today)) return "Hôm nay"
+        today.add(java.util.Calendar.DAY_OF_YEAR, -1)
+        if (same(day, today)) return "Hôm qua"
+        val s = java.text.SimpleDateFormat("EEEE, d 'tháng' M", java.util.Locale("vi", "VN")).format(java.util.Date(ts))
+        return s.replaceFirstChar { it.uppercase() }
+    }
+
     private fun displayRecentCalls() {
         val container = binding.layoutRecentCalls
         container.removeAllViews()
-        
+        binding.tvHeaderSub.text = "Gần đây"
+
         val items = ArrayList<RecentCallItem>()
         val sp = getSharedPreferences("ims_dc_history", MODE_PRIVATE)
         val historyStr = sp.getString("history", "[]") ?: "[]"
@@ -638,10 +685,8 @@ class MainActivity : AppCompatActivity() {
             val arr = org.json.JSONArray(historyStr)
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
-                val num = obj.getString("number")
-                val incoming = obj.getBoolean("isIncoming")
-                val ts = obj.getLong("timestamp")
-                items.add(RecentCallItem(num, incoming, ts, isReal = true))
+                items.add(RecentCallItem(obj.getString("number"), obj.getBoolean("isIncoming"),
+                    obj.getLong("timestamp"), isReal = true))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi đọc lịch sử: ${e.message}")
@@ -649,249 +694,101 @@ class MainActivity : AppCompatActivity() {
 
         // Thêm mock data giống ảnh màn hình
         val now = System.currentTimeMillis()
-        if (items.none { it.number == "1001" }) {
-            items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2))
-        }
-        if (items.none { it.number == "1002" }) {
-            items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3))
-        }
-        if (items.none { it.number == "1003" }) {
-            items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8))
-        }
+        if (items.none { it.number == "1001" }) items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2))
+        if (items.none { it.number == "1002" }) items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3))
+        if (items.none { it.number == "1003" }) items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8))
 
-        // Sắp xếp theo thời gian mới nhất lên đầu
         items.sortByDescending { it.timestamp }
 
-        val density = resources.displayMetrics.density
-        val paddingPx = (12 * density).toInt()
-
+        // Back-to-back calls with the same number and direction on the same day become one row "(n)".
+        data class Merged(val item: RecentCallItem, var count: Int)
+        val merged = ArrayList<Merged>()
         for (item in items) {
-            val number = item.number
-            val isIncoming = item.isIncoming
-            val timestamp = item.timestamp
-            val rawName = item.displayName
-            
-            // Tên trong danh bạ của app, nếu có
-            val savedName = Phonebook.nameOf(this, number)
-            val displayName = savedName ?: rawName ?: number
+            val last = merged.lastOrNull()
+            if (last != null && last.item.number == item.number && last.item.isIncoming == item.isIncoming &&
+                dayLabel(last.item.timestamp) == dayLabel(item.timestamp)) last.count++
+            else merged.add(Merged(item, 1))
+        }
 
-            // Create row container (Horizontal LinearLayout)
-            val row = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                val typedValue = android.util.TypedValue()
-                theme.resolveAttribute(android.R.attr.selectableItemBackground, typedValue, true)
-                setBackgroundResource(typedValue.resourceId)
-                setPadding(paddingPx, (10 * density).toInt(), paddingPx, (10 * density).toInt())
-                
-                setOnClickListener { callFromList(number, CallOrigin.RECENTS) }
-                setOnLongClickListener { editContactDialog(number, savedName); true }
-            }
-
-            // 1. Avatar
-            val avatarFrame = android.widget.FrameLayout(this).apply {
-                val size = (44 * density).toInt()
-                layoutParams = android.widget.LinearLayout.LayoutParams(size, size)
-                setBackgroundResource(com.demo.imsdc.R.drawable.circle_avatar_bg)
-                
-                val colorHex = when (number) {
-                    "1001" -> "#FF4CAF50" // Green
-                    "1002" -> "#FFE91E63" // Pink
-                    "1003" -> "#FF9C27B0" // Purple
-                    else -> "#FF7C83FF" // Slate Blue
+        for ((label, group) in merged.groupBy { dayLabel(it.item.timestamp) }) {
+            container.addView(sectionHeader(label))
+            addCard(container, group.map { m ->
+                val number = m.item.number
+                val savedName = Phonebook.nameOf(this, number)
+                val icon = android.widget.ImageView(this).apply {
+                    layoutParams = android.widget.LinearLayout.LayoutParams(dp(20), dp(20))
+                    setImageResource(if (m.item.isIncoming) com.demo.imsdc.R.drawable.ic_phone_incoming
+                                     else com.demo.imsdc.R.drawable.ic_phone_outgoing)
+                    imageTintList = android.content.res.ColorStateList.valueOf(
+                        android.graphics.Color.parseColor(if (m.item.isIncoming) "#FF3B82F6" else "#FF22C55E"))
                 }
-                backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(colorHex))
-            }
-            
-            val initials = displayName.firstOrNull()?.toString()?.uppercase() ?: "?"
-            val tvInitials = android.widget.TextView(this).apply {
-                text = initials
-                setTextColor(android.graphics.Color.WHITE)
-                textSize = 18f
-                setTypeface(android.graphics.Typeface.DEFAULT_BOLD)
-                gravity = android.view.Gravity.CENTER
-            }
-            avatarFrame.addView(tvInitials, android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-            ))
-            row.addView(avatarFrame)
-
-            // 2. Middle Details (Name, Subtitle)
-            val detailsLayout = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                val lp = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
-                    setMargins((12 * density).toInt(), 0, (12 * density).toInt(), 0)
-                }
-                layoutParams = lp
-            }
-
-            val tvName = android.widget.TextView(this).apply {
-                text = displayName
-                setTextColor(android.graphics.Color.parseColor("#FF111111"))
-                textSize = 16f
-                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            }
-            detailsLayout.addView(tvName)
-
-            val subtitleLayout = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                val lp = android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, (2 * density).toInt(), 0, 0)
-                }
-                layoutParams = lp
-            }
-
-            val imgDirection = android.widget.ImageView(this).apply {
-                val size = (14 * density).toInt()
-                layoutParams = android.widget.LinearLayout.LayoutParams(size, size)
-                
-                if (isIncoming) {
-                    setImageResource(com.demo.imsdc.R.drawable.ic_phone_incoming)
-                    imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF22C55E")) // Green
-                } else {
-                    setImageResource(com.demo.imsdc.R.drawable.ic_phone_outgoing)
-                    imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF3B82F6")) // Blue
-                }
-            }
-            subtitleLayout.addView(imgDirection)
-
-            val tvSub = android.widget.TextView(this).apply {
-                text = if (savedName != null) " $number" else " VoLTE Vietnam"
-                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
-                textSize = 12f
-                val lp = android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins((4 * density).toInt(), 0, 0, 0)
-                }
-                layoutParams = lp
-            }
-            subtitleLayout.addView(tvSub)
-            detailsLayout.addView(subtitleLayout)
-            row.addView(detailsLayout)
-
-            // 3. Time / Timestamp
-            val timeStr = android.text.format.DateFormat.format("HH:mm", timestamp).toString()
-            val tvTime = android.widget.TextView(this).apply {
-                text = timeStr
-                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
-                textSize = 12f
-            }
-            row.addView(tvTime)
-
-            // 4. Info Button (i)
-            val infoBtn = android.widget.ImageView(this).apply {
-                val size = (24 * density).toInt()
-                val lp = android.widget.LinearLayout.LayoutParams(size, size).apply {
-                    setMargins((12 * density).toInt(), 0, 0, 0)
-                }
-                layoutParams = lp
-                setImageResource(com.demo.imsdc.R.drawable.ic_info)
-                imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#FF8E8E93"))
-                val typedValue = android.util.TypedValue()
-                theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, typedValue, true)
-                setBackgroundResource(typedValue.resourceId)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { editContactDialog(number, savedName) }
-            }
-            row.addView(infoBtn)
-
-            container.addView(row)
+                val title = (savedName ?: number) + if (m.count > 1) " (${m.count})" else ""
+                listRow(icon, title, android.text.format.DateFormat.format("HH:mm", m.item.timestamp).toString(),
+                    onClick = { callFromList(number, CallOrigin.RECENTS) },
+                    onLong = { editContactDialog(number, savedName) })
+            })
         }
     }
 
     // ───────────────────────── Danh bạ (trong app) ─────────────────────────
 
-    private var showingContacts = false
+    private val avatarColors = listOf("#FF7C83FF", "#FF5AB0F0", "#FFB388FF", "#FFFF8A80", "#FF4DB6AC", "#FFFFB74D")
 
+    private fun avatar(initial: String, color: String) = android.widget.TextView(this).apply {
+        layoutParams = android.widget.LinearLayout.LayoutParams(dp(44), dp(44))
+        setBackgroundResource(com.demo.imsdc.R.drawable.circle_avatar_bg)
+        backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(color))
+        text = initial
+        gravity = android.view.Gravity.CENTER
+        setTextColor(android.graphics.Color.WHITE)
+        textSize = 18f
+    }
+
+    /** Redraws the list of the current tab (Gần đây or Danh bạ). */
     private fun refreshList() {
-        val active = android.graphics.Color.parseColor("#FF22C55E")
-        val idle = android.graphics.Color.parseColor("#FF8E8E93")
-        (binding.tabPhone.getChildAt(1) as? android.widget.TextView)?.setTextColor(if (showingContacts) idle else active)
-        (binding.tabContacts.getChildAt(1) as? android.widget.TextView)?.setTextColor(if (showingContacts) active else idle)
-        if (showingContacts) displayContacts() else displayRecentCalls()
+        when (currentTab) {
+            HomeTab.RECENTS -> displayRecentCalls()
+            HomeTab.CONTACTS -> displayContacts()
+            HomeTab.KEYPAD -> {}
+        }
     }
 
     private fun displayContacts() {
         val container = binding.layoutRecentCalls
         container.removeAllViews()
-        val density = resources.displayMetrics.density
-        val pad = (12 * density).toInt()
+        val contacts = Phonebook.all(this).sortedBy { it.second.lowercase() }
+        binding.tvHeaderSub.text = "${contacts.size} danh bạ có số điện thoại"
 
-        fun row(title: String, subtitle: String?, initial: String, color: String,
-                onClick: () -> Unit, onLong: (() -> Unit)? = null) {
-            val r = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                val tv = android.util.TypedValue()
-                theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
-                setBackgroundResource(tv.resourceId)
-                setPadding(pad, (10 * density).toInt(), pad, (10 * density).toInt())
-                setOnClickListener { onClick() }
-                if (onLong != null) setOnLongClickListener { onLong(); true }
-            }
-            val avatar = android.widget.FrameLayout(this).apply {
-                val size = (44 * density).toInt()
-                layoutParams = android.widget.LinearLayout.LayoutParams(size, size)
-                setBackgroundResource(com.demo.imsdc.R.drawable.circle_avatar_bg)
-                backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(color))
-                addView(android.widget.TextView(this@MainActivity).apply {
-                    text = initial
-                    setTextColor(android.graphics.Color.WHITE)
-                    textSize = 18f
-                    setTypeface(android.graphics.Typeface.DEFAULT_BOLD)
-                    gravity = android.view.Gravity.CENTER
-                }, android.widget.FrameLayout.LayoutParams(-1, -1))
-            }
-            r.addView(avatar)
-            val details = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(pad, 0, pad, 0) }
-            }
-            details.addView(android.widget.TextView(this).apply {
-                text = title
-                setTextColor(android.graphics.Color.parseColor("#FF111111"))
-                textSize = 16f
-                setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-            })
-            if (subtitle != null) details.addView(android.widget.TextView(this).apply {
-                text = subtitle
-                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
-                textSize = 12f
-            })
-            r.addView(details)
-            container.addView(r)
-        }
+        container.addView(android.widget.Space(this), android.widget.LinearLayout.LayoutParams(-1, dp(4)))
+        addCard(container, listOf(listRow(avatar("+", "#FF22C55E"), "Thêm liên hệ", null,
+            onClick = { editContactDialog(null, null) })))
 
-        row("Thêm liên hệ", null, "+", "#FF22C55E", onClick = { editContactDialog(null, null) })
-        val contacts = Phonebook.all(this)
         if (contacts.isEmpty()) {
             container.addView(android.widget.TextView(this).apply {
                 text = "Chưa có liên hệ nào. Nhấn giữ một cuộc gọi gần đây để lưu số."
-                setTextColor(android.graphics.Color.parseColor("#FF8E8E93"))
-                textSize = 13f
-                setPadding(pad, pad, pad, pad)
+                setTextColor(android.graphics.Color.parseColor("#FF6E6E73"))
+                textSize = 14f
+                setPadding(dp(20), dp(16), dp(20), dp(16))
             })
+            return
         }
-        for ((number, name) in contacts) {
-            row(name, number, name.firstOrNull()?.uppercase() ?: "?", "#FF7C83FF",
-                onClick = { callFromList(number, CallOrigin.CONTACTS) },
-                onLong = {
-                    androidx.appcompat.app.AlertDialog.Builder(this)
-                        .setTitle(name)
-                        .setItems(arrayOf("Sửa", "Xóa")) { _, which ->
-                            if (which == 0) editContactDialog(number, name)
-                            else { Phonebook.remove(this, number); refreshList() }
-                        }
-                        .show()
-                })
+        val byLetter = contacts.groupBy { it.second.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "#" }
+        for ((letter, group) in byLetter) {
+            container.addView(sectionHeader(letter))
+            addCard(container, group.map { (number, name) ->
+                val color = avatarColors[Math.floorMod(name.hashCode(), avatarColors.size)]
+                listRow(avatar(name.trim().firstOrNull()?.uppercase() ?: "?", color), name, null,
+                    onClick = { callFromList(number, CallOrigin.CONTACTS) },
+                    onLong = {
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("$name · $number")
+                            .setItems(arrayOf("Sửa", "Xóa")) { _, which ->
+                                if (which == 0) editContactDialog(number, name)
+                                else { Phonebook.remove(this, number); refreshList() }
+                            }
+                            .show()
+                    })
+            })
         }
     }
 
