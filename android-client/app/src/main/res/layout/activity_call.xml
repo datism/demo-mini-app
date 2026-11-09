@@ -368,17 +368,17 @@
         <LinearLayout
             android:id="@+id/layout_call_pill"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="40dp"
             android:layout_marginStart="16dp"
             android:layout_marginTop="12dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="12dp"
+            android:paddingHorizontal="16dp"
             android:background="@drawable/bg_call_pill_fullscreen"
             android:elevation="8dp"
             android:clickable="true"
             android:focusable="true"
-            android:contentDescription="Hiện nút cuộc gọi"
+            android:contentDescription="Hiện nút cuộc gọi: tắt tiếng, kết thúc, thoát ứng dụng"
             android:visibility="gone"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintStart_toStartOf="parent">
@@ -395,7 +395,19 @@
                 android:layout_marginStart="7dp"
                 android:text="00:00"
                 android:textColor="#FFFFFFFF"
-                android:textSize="12.5sp"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium" />
+
+            <!-- Label so the pill reads as a button: it brings back the call buttons (mute, end, exit app). -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:paddingStart="10dp"
+                android:background="@drawable/bg_call_pill_divider"
+                android:text="▲  Nút cuộc gọi"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp"
                 android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
