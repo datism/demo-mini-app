@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Dialer: the app opens on the phone tab with the keypad down and no leftover number; tapping a recent call or contact calls directly; after a call the screen returns to where it started (keypad cleared, recents, or contacts).
 - **Apps would not open after ~2 h in a call (430):** the SIP registration (Expires 7200) was only renewed when the home screen resumed, so during a long call it expired and every Re-INVITE got 430 "Registration Lost". SipManager now renews it every hour on its own, re-registers at once on a 430, and opening an app retries the Re-INVITE once after that.
 - **Call audio:** every call now starts with the mic unmuted (the mute button sets Android's global mic mute, which outlived the call, so a later call could send silence with the button showing off). Logs now show the mic and received sound level (`micPeak`, `rxPeak`) every 100 packets, plus the call volume at start.
 - **No audio after the Busy Here change:** the 486 check also caught the call's own re-INVITEs (Call-ID not the one stored), so the setup re-INVITEs were refused and both sides were silent. Only an INVITE without a To-tag (a new call) can now get 486.

@@ -29,6 +29,10 @@ class MainActivity : AppCompatActivity() {
     private var localIp = ""
     private var dialDigits = ""
 
+    /** Where the current outgoing call was started, so the home screen returns there when it ends. */
+    private enum class CallOrigin { DIALPAD, RECENTS, CONTACTS }
+    private var callOrigin: CallOrigin? = null
+
     private val debugReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
             Log.i(TAG, "debugReceiver onReceive: action=${intent?.action}")
@@ -92,6 +96,7 @@ class MainActivity : AppCompatActivity() {
 
         setupUI()
         setupDialerKeypad()
+        resetHome(null)
 
         val autoUser = intent.getStringExtra("username")
         if (autoUser != null) {
@@ -114,6 +119,31 @@ class MainActivity : AppCompatActivity() {
         }
 
         registerDebugReceiver()
+    }
+
+    /** Clears the typed number and shows the view a call came from (null = phone tab, keypad down). */
+    private fun resetHome(origin: CallOrigin?) {
+        dialDigits = ""
+        binding.tvDialDigits.text = ""
+        showingContacts = origin == CallOrigin.CONTACTS
+        if (origin == CallOrigin.DIALPAD) showDialpad(false) else hideDialpad(false)
+        refreshList()
+    }
+
+    /** Calls straight from the recents / contacts list, without opening the keypad. */
+    private fun callFromList(number: String, origin: CallOrigin) {
+        callOrigin = origin
+        dialDigits = number
+        binding.btnDialerCall.performClick()
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        // Back from a call, or the app reopened from the background.
+        if (!CallActivity.isCallActive) {
+            resetHome(callOrigin)
+            callOrigin = null
+        }
     }
 
     private fun registerDebugReceiver() {
@@ -370,8 +400,10 @@ class MainActivity : AppCompatActivity() {
 
             if (sipServer.isEmpty() || username.isEmpty() || remoteUser.isEmpty() || localIp.isEmpty() || localIp == "0.0.0.0") {
                 Toast.makeText(this, "Vui lòng điền đầy đủ thông tin để gọi", Toast.LENGTH_SHORT).show()
+                callOrigin = null
                 return@setOnClickListener
             }
+            if (callOrigin == null) callOrigin = CallOrigin.DIALPAD
 
             val activePort = SipManager.shared?.getLocalPort() ?: 0
             
@@ -652,11 +684,7 @@ class MainActivity : AppCompatActivity() {
                 setBackgroundResource(typedValue.resourceId)
                 setPadding(paddingPx, (10 * density).toInt(), paddingPx, (10 * density).toInt())
                 
-                setOnClickListener {
-                    dialDigits = number
-                    binding.tvDialDigits.text = dialDigits
-                    showDialpad(true)
-                }
+                setOnClickListener { callFromList(number, CallOrigin.RECENTS) }
                 setOnLongClickListener { editContactDialog(number, savedName); true }
             }
 
@@ -854,11 +882,7 @@ class MainActivity : AppCompatActivity() {
         }
         for ((number, name) in contacts) {
             row(name, number, name.firstOrNull()?.uppercase() ?: "?", "#FF7C83FF",
-                onClick = {
-                    dialDigits = number
-                    binding.tvDialDigits.text = dialDigits
-                    showDialpad(true)
-                },
+                onClick = { callFromList(number, CallOrigin.CONTACTS) },
                 onLong = {
                     androidx.appcompat.app.AlertDialog.Builder(this)
                         .setTitle(name)
