@@ -197,445 +197,449 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- ─── SCREEN 2: SAMSUNG ONEUI DIALER KEYPAD (Light Theme) ────────── -->
+    <!-- ─── SCREEN 2: HOME (One UI Phone style: Bàn phím · Gần đây · Danh bạ) ─── -->
     <RelativeLayout
         android:id="@+id/layout_dialer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FFFFFFFF"
+        android:background="#FFF7F7F9"
         android:visibility="gone">
 
-        <!-- Top Header -->
-        <RelativeLayout
-            android:id="@+id/top_header"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_alignParentTop="true"
-            android:paddingHorizontal="20dp"
-            android:paddingTop="16dp"
-            android:paddingBottom="6dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Phone"
-                android:textColor="#FF111111"
-                android:textSize="32sp"
-                android:fontFamily="sans-serif-black" />
-            <ImageView
-                android:id="@+id/btn_more_menu"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_alignParentRight="true"
-                android:layout_centerVertical="true"
-                android:src="@drawable/ic_more_vert"
-                android:tint="#FF111111"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="?android:attr/selectableItemBackgroundBorderless" />
-        </RelativeLayout>
-
-        <!-- Bottom Navigation Tabs Bar -->
-        <LinearLayout
-            android:id="@+id/bottom_nav_bar"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_alignParentBottom="true"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:background="#FFFFFFFF"
-            android:paddingHorizontal="20dp"
-            android:layout_marginBottom="4dp">
-
-            <!-- Phone Tab -->
-            <LinearLayout
-                android:id="@+id/tab_phone"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="?android:attr/selectableItemBackgroundBorderless">
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_phone_active" />
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Phone"
-                    android:textColor="#FF22C55E"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp"
-                    android:fontFamily="sans-serif-medium" />
-            </LinearLayout>
-
-            <!-- Contacts Tab -->
-            <LinearLayout
-                android:id="@+id/tab_contacts"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="?android:attr/selectableItemBackgroundBorderless">
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_contacts" />
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Contacts"
-                    android:textColor="#FF8E8E93"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp" />
-            </LinearLayout>
-
-            <!-- Favourites Tab -->
-            <LinearLayout
-                android:id="@+id/tab_favourites"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:gravity="center"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="?android:attr/selectableItemBackgroundBorderless">
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_favourites" />
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Favourites"
-                    android:textColor="#FF8E8E93"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp" />
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <!-- Recent Calls List (Vertical Scrollable, takes all space above dialpad or nav bar) -->
+        <!-- Gần đây / Danh bạ: big title that scrolls away with the list -->
         <androidx.core.widget.NestedScrollView
             android:id="@+id/scroll_recent_calls"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_below="@id/top_header"
-            android:layout_above="@id/layout_dialpad_panel"
-            android:scrollbars="vertical"
-            android:paddingHorizontal="20dp"
-            android:fillViewport="true">
+            android:fillViewport="true"
+            android:clipToPadding="false"
+            android:paddingBottom="104dp">
             <LinearLayout
-                android:id="@+id/layout_recent_calls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingVertical="4dp" />
+                android:paddingHorizontal="16dp">
+
+                <LinearLayout
+                    android:id="@+id/top_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="200dp"
+                    android:orientation="vertical"
+                    android:gravity="center">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:background="@drawable/bg_badge_5g"
+                            android:paddingHorizontal="7dp"
+                            android:paddingVertical="1dp"
+                            android:text="5G"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="New Calling"
+                            android:textColor="#FF111111"
+                            android:textSize="30sp"
+                            android:fontFamily="sans-serif-medium" />
+                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/tv_header_sub"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FF6E6E73"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <!-- Toolbar icons under the title, right-aligned -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:orientation="horizontal"
+                    android:gravity="end|center_vertical">
+                    <ImageView
+                        android:id="@+id/btn_add_contact"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:padding="8dp"
+                        android:src="@drawable/ic_add_call"
+                        app:tint="#FF111111"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="Thêm liên hệ"
+                        android:background="?android:attr/selectableItemBackgroundBorderless" />
+                    <ImageView
+                        android:id="@+id/btn_more_menu"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:padding="8dp"
+                        android:src="@drawable/ic_more_vert"
+                        app:tint="#FF111111"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="Thêm tùy chọn"
+                        android:background="?android:attr/selectableItemBackgroundBorderless" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layout_recent_calls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
         </androidx.core.widget.NestedScrollView>
 
-        <!-- Floating Action Button: Mở lại Dialpad khi đang thu gọn -->
-        <androidx.cardview.widget.CardView
-            android:id="@+id/fab_show_dialpad"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:layout_above="@id/bottom_nav_bar"
-            android:layout_alignParentRight="true"
-            android:layout_marginRight="24dp"
-            android:layout_marginBottom="16dp"
-            app:cardCornerRadius="30dp"
-            app:cardElevation="6dp"
-            app:cardBackgroundColor="#FF22C55E"
-            android:visibility="gone"
-            android:clickable="true"
-            android:focusable="true"
-            android:foreground="?android:attr/selectableItemBackground">
-            <ImageView
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_gravity="center"
-                android:src="@drawable/ic_keypad"
-                app:tint="#FFFFFFFF"
-                android:contentDescription="Mở bàn phím quay số" />
-        </androidx.cardview.widget.CardView>
-
-        <!-- Keypad Panel (Collapsible) -->
+        <!-- Bàn phím: full-screen keypad -->
         <LinearLayout
             android:id="@+id/layout_dialpad_panel"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_above="@id/bottom_nav_bar"
+            android:layout_height="match_parent"
             android:orientation="vertical"
-            android:paddingHorizontal="20dp"
-            android:background="#FFFFFFFF">
+            android:paddingHorizontal="28dp"
+            android:paddingBottom="104dp"
+            android:visibility="gone">
 
-            <!-- Number Display -->
-            <TextView
-                android:id="@+id/tv_dial_digits"
-                android:layout_width="match_parent"
-                android:layout_height="60dp"
-                android:gravity="center"
-                android:textSize="36sp"
-                android:textColor="#FF000000"
-                android:fontFamily="sans-serif-medium"
-                android:hint=""
-                android:maxLines="1"
-                android:scrollHorizontally="true"
-                android:ellipsize="start"
-                android:layout_marginBottom="4dp" />
+            <ImageView
+                android:id="@+id/btn_more_menu_keypad"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end"
+                android:layout_marginTop="16dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_more_vert"
+                app:tint="#FF111111"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Thêm tùy chọn"
+                android:background="?android:attr/selectableItemBackgroundBorderless" />
 
-            <!-- Keypad Rows -->
+            <!-- Number area fills the space above the keys -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
-                android:layout_marginHorizontal="8dp"
-                android:layout_marginBottom="10dp">
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tv_dial_digits"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textSize="34sp"
+                    android:textColor="#FF111111"
+                    android:maxLines="1"
+                    android:ellipsize="start" />
+                <TextView
+                    android:id="@+id/btn_add_to_contacts"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:padding="6dp"
+                    android:text="Thêm vào danh bạ"
+                    android:textColor="#FF16A34A"
+                    android:textSize="15sp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:visibility="invisible" />
+            </LinearLayout>
 
-                <!-- Row 1 (1 2 3) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center"
-                    android:layout_marginBottom="10dp">
+                    android:layout_marginBottom="8dp">
                     <LinearLayout
                         android:id="@+id/key_1"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="oo" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="oo" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_2"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="A B C" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ABC" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_3"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="D E F" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DEF" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                 </LinearLayout>
-
-                <!-- Row 2 (4 5 6) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center"
-                    android:layout_marginBottom="10dp">
+                    android:layout_marginBottom="8dp">
                     <LinearLayout
                         android:id="@+id/key_4"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="G H I" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="GHI" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_5"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="5" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="J K L" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="5" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="JKL" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_6"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="6" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="M N O" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="6" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MNO" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                 </LinearLayout>
-
-                <!-- Row 3 (7 8 9) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center"
-                    android:layout_marginBottom="10dp">
+                    android:layout_marginBottom="8dp">
                     <LinearLayout
                         android:id="@+id/key_7"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="7" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="P Q R S" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="7" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PQRS" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_8"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="8" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="T U V" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="8" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TUV" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_9"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="9" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="W X Y Z" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="9" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="WXYZ" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                 </LinearLayout>
-
-                <!-- Row 4 (* 0 #) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center">
+                    android:layout_marginBottom="8dp">
                     <LinearLayout
                         android:id="@+id/key_star"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="*" android:textColor="#FF000000" android:textSize="26sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="(P)" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="*" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_0"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="+" android:textColor="#FF8E8E93" android:textSize="10sp" android:fontFamily="sans-serif-medium" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="+" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                     <LinearLayout
                         android:id="@+id/key_pound"
-                        android:layout_width="72dp"
-                        android:layout_height="72dp"
-                        android:background="@drawable/dialer_key_bg"
+                        android:layout_width="0dp"
+                        android:layout_height="76dp"
+                        android:layout_weight="1"
                         android:orientation="vertical"
                         android:gravity="center"
                         android:clickable="true"
                         android:focusable="true"
-                        android:layout_marginHorizontal="16dp">
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="#" android:textColor="#FF000000" android:textSize="24sp" android:fontFamily="sans-serif-medium" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="(W)" android:textColor="#FF8E8E93" android:textSize="9sp" />
+                        android:background="?android:attr/selectableItemBackgroundBorderless">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="#" android:textColor="#FF111111" android:textSize="34sp" android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="#FF6E6E73" android:textSize="12sp" android:minHeight="16dp" />
                     </LinearLayout>
                 </LinearLayout>
 
-            </LinearLayout>
-
-            <!-- Bottom Action Row -->
+            <!-- Call button centred, backspace to its right -->
             <RelativeLayout
                 android:layout_width="match_parent"
-                android:layout_height="76dp"
-                android:layout_marginBottom="2dp">
-
-                <!-- Dialer Pad Hide (Left side) -->
-                <ImageButton
-                    android:id="@+id/btn_logout"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:layout_alignParentLeft="true"
-                    android:layout_centerVertical="true"
-                    android:layout_marginLeft="28dp"
-                    android:background="?android:attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_keypad"
-                    app:tint="#FF8E8E93"
-                    android:contentDescription="Thu gọn bàn phím" />
-
-                <!-- Green Dial Button (Center) -->
+                android:layout_height="84dp"
+                android:layout_marginTop="8dp">
                 <ImageButton
                     android:id="@+id/btn_dialer_call"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
                     android:layout_centerInParent="true"
                     android:background="@drawable/circle_green_button_bg"
                     android:src="@android:drawable/ic_menu_call"
                     app:tint="#FFFFFFFF"
-                    android:contentDescription="Bắt đầu cuộc gọi"
-                    android:elevation="4dp" />
-
-                <!-- Backspace Button (Right side) -->
+                    android:contentDescription="Bắt đầu cuộc gọi" />
                 <ImageButton
                     android:id="@+id/btn_backspace"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
-                    android:layout_alignParentRight="true"
+                    android:layout_alignParentEnd="true"
                     android:layout_centerVertical="true"
-                    android:layout_marginRight="28dp"
+                    android:layout_marginEnd="20dp"
                     android:background="?android:attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_backspace"
-                    app:tint="#FF8E8E93"
-                    android:contentDescription="Xóa ký tự" />
-
+                    app:tint="#FF6E6E73"
+                    android:contentDescription="Xóa ký tự"
+                    android:visibility="invisible" />
             </RelativeLayout>
+        </LinearLayout>
 
+        <!-- Floating pill navigation -->
+        <LinearLayout
+            android:id="@+id/bottom_nav_bar"
+            android:layout_width="wrap_content"
+            android:layout_height="64dp"
+            android:layout_alignParentBottom="true"
+            android:layout_centerHorizontal="true"
+            android:layout_marginBottom="24dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:padding="4dp"
+            android:background="@drawable/bg_nav_pill"
+            android:elevation="8dp">
+            <LinearLayout
+                android:id="@+id/tab_keypad"
+                android:layout_width="84dp"
+                android:layout_height="56dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_keypad"
+                    app:tint="#FF3A3A3C"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Bàn phím"
+                    android:textColor="#FF3A3A3C"
+                    android:textSize="12sp" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/tab_phone"
+                android:layout_width="84dp"
+                android:layout_height="56dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_phone_active"
+                    app:tint="#FF3A3A3C"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Gần đây"
+                    android:textColor="#FF3A3A3C"
+                    android:textSize="12sp" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/tab_contacts"
+                android:layout_width="84dp"
+                android:layout_height="56dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_contacts"
+                    app:tint="#FF3A3A3C"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Danh bạ"
+                    android:textColor="#FF3A3A3C"
+                    android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
 
     </RelativeLayout>
