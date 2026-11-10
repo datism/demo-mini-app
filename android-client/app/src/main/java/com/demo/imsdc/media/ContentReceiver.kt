@@ -112,7 +112,8 @@ class ContentReceiver(
      * keyframe). If the decoder falls this far behind, the backlog is dropped and decoding restarts at
      * the next keyframe, so the picture stays live instead of lagging further.
      */
-    private val pictures = java.util.concurrent.LinkedBlockingQueue<ByteArray>(PICTURE_QUEUE)
+    private class Picture(val data: ByteArray, val rtpTs: Long)
+    private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
 
@@ -140,6 +141,8 @@ class ContentReceiver(
 
         fun handle(p: ByteArray) {
             val n = p.size
+            val rtpTs = ((p[4].toLong() and 0xFF) shl 24) or ((p[5].toLong() and 0xFF) shl 16) or
+                ((p[6].toLong() and 0xFF) shl 8) or (p[7].toLong() and 0xFF)
             val marker = (p[1].toInt() and 0x80) != 0
             val type = p[12].toInt() and 0x1F
             when {
@@ -178,11 +181,12 @@ class ContentReceiver(
             }
             if (keyframe) sawKey = true
             if (!sawKey) return // decoding can only start at a keyframe
-            if (!pictures.offer(picture)) {
+            val pic = Picture(picture, rtpTs)
+            if (!pictures.offer(pic)) {
                 Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
                 pictures.clear()
                 sawKey = keyframe
-                if (keyframe) pictures.offer(picture)
+                if (keyframe) pictures.offer(pic)
             }
         }
 
@@ -217,23 +221,33 @@ class ContentReceiver(
 
     private fun decodeLoop() {
         val info = MediaCodec.BufferInfo()
+        val clock = PlayoutClock(PLAYOUT_DELAY_MS * 1000L)
+        var lastTs = -1L
+        var ptsBaseUs = 0L
         while (running) {
             val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             val c = codec ?: (if (picture != null) startDecoder(sps, pps) else null)
             if (c == null) continue
             try {
                 if (picture != null) {
+                    // RTP time (90 kHz, wraps at 2^32) to a steadily increasing presentation time.
+                    if (lastTs >= 0) ptsBaseUs += ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
+                        if (it >= 0x80000000L) it - 0x100000000L else it
+                    } * 100 / 9
+                    lastTs = picture.rtpTs
                     val ii = c.dequeueInputBuffer(20_000)
                     if (ii >= 0) {
                         val ib = c.getInputBuffer(ii)!!
-                        ib.clear(); ib.put(picture)
-                        c.queueInputBuffer(ii, 0, picture.size, System.nanoTime() / 1000, 0)
+                        ib.clear(); ib.put(picture.data)
+                        c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
                     }
                 }
-                // Show every decoded picture as soon as it is ready, not when the next one arrives.
+                // Each decoded picture is shown at its own time, a fixed delay behind the stream, so network
+                // jitter is absorbed instead of showing up as uneven motion.
                 while (true) {
                     val oi = c.dequeueOutputBuffer(info, 0)
-                    if (oi >= 0) c.releaseOutputBuffer(oi, true) else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                    if (oi >= 0) c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, System.nanoTime() / 1000) * 1000)
+                    else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
                 }
             } catch (e: Exception) {
                 if (running) Log.w(TAG, "Decode error: ${e.message}")
@@ -267,12 +281,14 @@ class ContentReceiver(
         val t = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(8000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-            .setBufferSizeInBytes(maxOf(minBuf, 3200) * 2)
+            .setBufferSizeInBytes(maxOf(minBuf, 6400))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
         t.setVolume(if (muted) 0f else SHARED_VIDEO_VOLUME)
         t.play()
+        // Delay the sound as much as the picture's playout buffer, so they stay in step.
+        t.write(ShortArray((8 * PLAYOUT_DELAY_MS).toInt()), 0, (8 * PLAYOUT_DELAY_MS).toInt())
         val buf = ByteArray(2048)
         while (running) {
             val pkt = DatagramPacket(buf, buf.size)
@@ -287,7 +303,34 @@ class ContentReceiver(
     companion object {
         /** About a second of video at 30 fps. */
         private const val PICTURE_QUEUE = 30
+        /** How far playback runs behind the stream, to absorb network jitter. */
+        const val PLAYOUT_DELAY_MS = 200L
         /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
         private const val REORDER_WINDOW = 64
+    }
+}
+
+/**
+ * Maps a picture's presentation time to when it should be on screen: [delayUs] behind the first picture,
+ * then at the stream's own pace. A picture far late (a stall) or far off (pause, seek, a new stream)
+ * starts the timeline again from that picture.
+ */
+class PlayoutClock(private val delayUs: Long) {
+    private var baseWallUs = Long.MIN_VALUE
+    private var basePtsUs = 0L
+
+    fun renderAtUs(ptsUs: Long, nowUs: Long): Long {
+        var at = if (baseWallUs == Long.MIN_VALUE) Long.MIN_VALUE else baseWallUs + (ptsUs - basePtsUs)
+        if (at == Long.MIN_VALUE || at < nowUs - LATE_RESET_US || at > nowUs + delayUs + EARLY_RESET_US) {
+            baseWallUs = nowUs + delayUs
+            basePtsUs = ptsUs
+            at = baseWallUs
+        }
+        return at
+    }
+
+    companion object {
+        const val LATE_RESET_US = 100_000L
+        const val EARLY_RESET_US = 1_000_000L
     }
 }

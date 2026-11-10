@@ -19,6 +19,7 @@ class H264RtpSender(
     private var seq = Random.nextInt(0xFFFF)
     private val ssrc = Random.nextInt()
     @Volatile var closed = false
+    private var nextSendNs = 0L
 
     /** Sends one NAL (without start code); [marker] goes on the last packet of the picture. */
     fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) {
@@ -41,14 +42,25 @@ class H264RtpSender(
             System.arraycopy(nal, pos, payload, 2, len)
             send(header(ts, marker && last), payload)
             pos += len
-            if (!last && (seq % 4) == 0) Thread.sleep(1) // spread a keyframe, as the camera path does
         }
     }
 
     private fun header(ts: Long, marker: Boolean): ByteArray =
         RtpMediaManager.buildRtpHeader(97.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
 
+    /**
+     * Spaces packets [PACE_GAP_NS] apart. A phone keyframe is hundreds of packets; sent in one burst they
+     * overflow the Wi-Fi / radio queue and get lost, freezing the picture on the other phone. Normal
+     * pictures (tens of packets) still go out well within one frame time.
+     */
+    private fun pace() {
+        val now = System.nanoTime()
+        if (now < nextSendNs) java.util.concurrent.locks.LockSupport.parkNanos(nextSendNs - now)
+        nextSendNs = maxOf(now, nextSendNs) + PACE_GAP_NS
+    }
+
     private fun send(header: ByteArray, payload: ByteArray) {
+        pace()
         val bytes = ByteArray(header.size + payload.size)
         System.arraycopy(header, 0, bytes, 0, header.size)
         System.arraycopy(payload, 0, bytes, header.size, payload.size)
@@ -60,6 +72,8 @@ class H264RtpSender(
     companion object {
         private const val MAX_SINGLE = 1200
         private const val MAX_FRAGMENT = 1180
+        /** 0.25 ms between packets: at most ~4.8 MB/s (~38 Mbps), a 300-packet keyframe over ~75 ms. */
+        private const val PACE_GAP_NS = 250_000L
 
         /** Splits an Annex-B buffer (00 00 01 / 00 00 00 01 start codes) into its NAL units. */
         fun splitAnnexB(data: ByteArray): List<ByteArray> {

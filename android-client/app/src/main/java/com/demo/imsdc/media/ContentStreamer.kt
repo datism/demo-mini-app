@@ -157,6 +157,8 @@ class ContentStreamer(
             val buf = ByteBuffer.allocate(4 * 1024 * 1024)
             val rtp = H264RtpSender(socket, target, mfVideoPort, TAG)
             fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) { if (running) rtp.sendNal(nal, tsUs, marker) }
+            var frames = 0
+            var lastLogNs = 0L
 
             while (running) {
                 buf.clear()
@@ -169,6 +171,12 @@ class ContentStreamer(
                 buf.get(data, 0, n)
                 waitUntil(ptsUs)
                 if (!running) break
+                frames++
+                val lateMs = ((System.nanoTime() - originNs) / 1000 - ptsUs) / 1000
+                if (!paused && System.nanoTime() - lastLogNs > 1_000_000_000L) {
+                    Log.d(TAG, "video: $frames frames sent, ${lateMs} ms behind the clock")
+                    lastLogNs = System.nanoTime()
+                }
                 val nals = nalUnits(data)
                 if (sync) { sps?.let { sendNal(it, ptsUs, false) }; pps?.let { sendNal(it, ptsUs, false) } }
                 nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
