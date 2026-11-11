@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Hold now suspends everything, as 3GPP TS 24.186 clause 10.20 describes for data channel lines marked a=inactive. Mini-app messages on the data channels are neither sent nor delivered. Photo transfers wait, new app launches are refused, and a shared video or screen pauses (its m=video/audio slides lines also go a=inactive). A dim overlay covers the mini-app while the call buttons stay usable. Everything continues where it was on resume.
 - Call hold now really holds the call. The holding phone sends silence, plays nothing and stops its video. The other phone recognises the hold offer (audio a=inactive/sendonly), answers a=inactive, does the same, and shows "<name> đang giữ máy". Resume brings the sound back and the picture with a fresh keyframe. If the other side rejects a hold or resume, the change is rolled back.
 - SIP: a re-INVITE (hold, mute, opening an app) that arrives after the call has ended no longer rings as a new call. It is answered 481 Call/Transaction Does Not Exist, and the phone that sent it ends its side of the call on that 481.
 - Call screen: Hold is greyed out while dialing or ringing and enabled once the call connects, as on a real phone. End, Mute and Speaker work throughout.

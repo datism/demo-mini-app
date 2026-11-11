@@ -88,6 +88,7 @@ class H264RtpSender(
     }
 
     private fun send(header: ByteArray, payload: ByteArray) {
+        if (com.demo.imsdc.call.CallHold.active) return // shared content is suspended with the call
         pace()
         val bytes = ByteArray(header.size + payload.size)
         System.arraycopy(header, 0, bytes, 0, header.size)

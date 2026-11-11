@@ -717,6 +717,12 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     fun launchMiniApp(appId: String, sendRemoteTrigger: Boolean = true, initiator: Boolean = sendRemoteTrigger) {
+        if (sendRemoteTrigger && com.demo.imsdc.call.CallHold.active) {
+            // Every data channel is suspended while the call is on hold (TS 24.186 10.20): no app can open.
+            android.widget.Toast.makeText(activity, "Cuộc gọi đang được giữ", android.widget.Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "launchMiniApp $appId refused: call on hold")
+            return
+        }
         activity.lifecycleScope.launch(Dispatchers.Main) {
             val targetId = when {
                 appId.contains("0003210000000038") || appId.contains("tuyaapp") || appId.contains("sketch-sync-app") -> "sketch-sync-app"
@@ -1647,6 +1653,7 @@ class MiniAppManager(val activity: CallActivity) {
                 return@launch
             }
             streamer = s
+            userPausedVideo = false
             s.start()
             // The sender watches and hears the same video locally. On speakerphone the mic can pick it up
             // and the other person may hear an echo through the call; the page's mute button silences it.
@@ -1730,8 +1737,24 @@ class MiniAppManager(val activity: CallActivity) {
         emitShareEvent("stopped")
     }
 
+    /** The user's own pause of a shared video file (the page's button), kept apart from a pause for hold. */
+    private var userPausedVideo = false
+
+    /** Hold on/off: a shared video file stops where it is and continues from there on resume. */
+    fun onCallHoldChanged(held: Boolean) {
+        if (streamer == null) return
+        if (held) applyVideoPause(true)
+        else if (!userPausedVideo) applyVideoPause(false)
+    }
+
     /** Sender: pause or resume the stream and the local preview together. */
     fun pauseVideo(paused: Boolean) {
+        userPausedVideo = paused
+        if (!paused && com.demo.imsdc.call.CallHold.active) return // stays paused until the call is resumed
+        applyVideoPause(paused)
+    }
+
+    private fun applyVideoPause(paused: Boolean) {
         streamer?.let { if (paused) it.pause() else it.resume() }
         try { preview?.let { if (paused) it.pause() else it.start() } } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
     }

@@ -818,6 +818,7 @@ class CallActivity : AppCompatActivity() {
 
     private fun setupUI() {
         setHoldAvailable(false)
+        com.demo.imsdc.call.CallHold.active = false
         binding.tvRemoteUser.text = peerName
         val initial = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         binding.tvTopAvatar.text = initial
@@ -2099,6 +2100,7 @@ class CallActivity : AppCompatActivity() {
         com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
         sipManager.onReInviteReceived = null
         sipManager.onRemoteHoldChanged = null
+        com.demo.imsdc.call.CallHold.active = false
         sipManager.onReInviteFailed = null
         sipManager.onHeldReInviteCancelled = null
         if (::miniAppManager.isInitialized) { miniAppManager.resetShare(); miniAppManager.resetRequests() }
@@ -2217,6 +2219,38 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    private var holdOverlay: android.widget.TextView? = null
+
+    /**
+     * While on hold the mini-apps are suspended too: a dim layer over everything but the call buttons
+     * swallows touches, so nothing is played or drawn that the other side would never receive.
+     */
+    private fun showHoldOverlay(show: Boolean, text: String) {
+        val root = binding.root as android.view.ViewGroup
+        if (!show) {
+            holdOverlay?.let { root.removeView(it) }
+            holdOverlay = null
+            return
+        }
+        val v = holdOverlay ?: android.widget.TextView(this).apply {
+            setBackgroundColor(android.graphics.Color.parseColor("#B3000000"))
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 18f
+            gravity = android.view.Gravity.CENTER
+            isClickable = true // swallow touches meant for the page
+            isFocusable = true
+            elevation = 30f
+            root.addView(this, android.view.ViewGroup.LayoutParams(-1, -1))
+            holdOverlay = this
+        }
+        v.text = "⏸️\n$text"
+        v.bringToFront()
+        // The call buttons stay usable above it (Hold again resumes, End ends the call).
+        binding.layoutBottomControls.visibility = View.VISIBLE
+        binding.layoutBottomControls.bringToFront()
+        binding.layoutBottomControls.elevation = 31f
+    }
+
     /**
      * Applies hold to the media and the screen. Either side holding stops the call's sound and picture both
      * ways (silence still flows, so the media watchdog does not end the call); Hold is lit only when this side holds.
@@ -2224,7 +2258,13 @@ class CallActivity : AppCompatActivity() {
     private fun applyHoldState() {
         val mine = sipManager.isCallHoldActive
         val theirs = sipManager.remoteHoldActive
-        rtpMediaManager?.onHold = mine || theirs
+        val held = mine || theirs
+        val changed = com.demo.imsdc.call.CallHold.active != held
+        // Everything is suspended (TS 24.186 10.20): call media, data channels, shared content.
+        com.demo.imsdc.call.CallHold.active = held
+        rtpMediaManager?.onHold = held
+        if (changed && ::miniAppManager.isInitialized) miniAppManager.onCallHoldChanged(held)
+        showHoldOverlay(held, if (mine) "Bạn đang giữ cuộc gọi" else "$peerName đang giữ cuộc gọi")
         setCallButtonOn(binding.btnKeypadCircle, mine)
         binding.tvCallStatus.visibility = View.VISIBLE
         binding.tvCallStatus.text = when {
