@@ -36,7 +36,7 @@ private const val TAG = "DataChannelManager"
  *   - ADC tương ứng với "Application Data Channel" phục vụ P2A2P
  */
 /** Max size of one data channel message, as negotiated with the MF (a=max-message-size, go-mf MaxMessageSize). */
-private const val MAX_DC_MESSAGE = 65_536
+const val MAX_DC_MESSAGE = 65_536
 
 class DataChannelManager(
     private val webRtcManager: WebRtcManager,
@@ -714,6 +714,9 @@ class DataChannelManager(
         }
         outgoing.forEach { try { it() } catch (e: Exception) { Log.e(TAG, "Held message send failed: ${e.message}") } }
     }
+
+    /** A send to run on resume (pages send through more than one path; all of them wait the same way). */
+    fun holdOutgoing(send: () -> Unit) = heldOut.add(send)
 
     /** Call ended: nothing held is delivered any more. */
     fun dropHeld() { heldIn.clear(); heldOut.clear() }
