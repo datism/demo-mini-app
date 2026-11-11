@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Hold no longer breaks mini-app flows. Data channel messages sent or received during hold are queued and delivered in order on resume instead of dropped. A pending share request or decision is cancelled or declined cleanly on hold, and new share requests get "Thử lại sau". A request that crosses the hold gets 491. A video picked or a screen-capture consent given during hold starts on resume. Pages get window.onCallHold(), and photo-share pauses its map-invite resends and photo-fetch timeout while held.
 - Hold screen: a mini-app is now also replaced by the caller's avatar, name and status on the call background, like the video. The camera and remote video tiles are hidden while on hold and restored on resume. The page keeps its state underneath.
 - Hold screen is now Samsung-like instead of a dark full-screen overlay. The status reads "Đang giữ" or "Cuộc gọi đang chờ", and the Hold button turns into Resume (▶) on the holding phone. In a plain call, the frozen video is replaced by the caller's avatar and name. Over a mini-app, the page is faded with a small "Đang giữ" chip, and taps stay blocked.
 - Hold: the call could not be resumed, because the hold overlay was added above the call buttons and swallowed the tap on Hold. The overlay now sits in the same layout as the buttons, underneath them and the full-screen pill.

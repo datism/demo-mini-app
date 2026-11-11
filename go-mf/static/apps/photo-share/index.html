@@ -342,6 +342,10 @@ $('btnDecline').onclick = () => {
 const MAP_SIGNALS = ['map.invite', 'map.ringing', 'map.accept', 'map.decline', 'map.busy', 'map.cancel', 'map.close'];
 const mapMsg = (t, id) => ({ t, version: 1, id });
 let mapRetry = null;
+/* Native gọi window.onCallHold(true|false): khi cuộc gọi đang giữ, kênh dữ liệu tạm dừng (tin nhắn được giữ lại
+ * và gửi/nhận khi tiếp tục) — không gửi lại lời mời bản đồ, không tính thời gian chờ ảnh trong lúc giữ. */
+let callHeld = false;
+window.onCallHold = function (held) { callHeld = !!held; };
 function stopMapRetry() { clearInterval(mapRetry); mapRetry = null; }
 function startMapShare() {
   if (state.s) { toast('Hãy kết thúc chia sẻ ảnh/video/màn hình trước.'); return; }
@@ -355,6 +359,7 @@ function startMapShare() {
   const tx = () => {
     const s = state.s;
     if (!s || s.id !== id || s.rung) { stopMapRetry(); return; }
+    if (callHeld) return; // đang giữ máy: không gửi lại, không tính lượt
     if (++tries > 12) { stopMapRetry(); toast('Máy kia chưa phản hồi'); endSession(); return; }
     sendJson(mapMsg('map.invite', id));
   };
@@ -544,7 +549,14 @@ function fetchNext() {
   if (!id) return;
   fetching = id;
   sendJson({ t: 'fetch', id });
-  setTimeout(() => { if (fetching === id) { fetching = null; fetchNext(); } }, 30000); // đề phòng mất gói
+  armFetchTimeout(id);
+}
+function armFetchTimeout(id) { // đề phòng mất gói; thời gian giữ máy không tính
+  setTimeout(() => {
+    if (fetching !== id) return;
+    if (callHeld) { armFetchTimeout(id); return; }
+    fetching = null; fetchNext();
+  }, 30000);
 }
 function onFetch(msg) {
   const p = state.photos[msg.id];
