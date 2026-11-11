@@ -2101,6 +2101,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onReInviteReceived = null
         sipManager.onRemoteHoldChanged = null
         com.demo.imsdc.call.CallHold.active = false
+        holdLayer?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+        holdLayer = null
         sipManager.onReInviteFailed = null
         sipManager.onHeldReInviteCancelled = null
         if (::miniAppManager.isInitialized) { miniAppManager.resetShare(); miniAppManager.resetRequests() }
@@ -2219,44 +2221,83 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
-    private var holdOverlay: android.widget.TextView? = null
+    private var holdLayer: android.widget.FrameLayout? = null
 
     /**
-     * While on hold the mini-apps are suspended too: a dim layer over everything but the call buttons
-     * swallows touches, so nothing is played or drawn that the other side would never receive.
+     * The hold screen, as on a Samsung phone: no dark curtain. In a plain call the frozen video is replaced by
+     * the caller's avatar, name and "Đang giữ"; over a mini-app the page stays visible but faded, with a small
+     * "Đang giữ" chip. Either way the layer takes the taps (nothing is exchanged on hold), and sits in the same
+     * layout as the call buttons and the full-screen pill, which stay above it (Resume and End keep working).
      */
-    private fun showHoldOverlay(show: Boolean, text: String) {
-        // Same parent as the call buttons (and the full-screen pill), so they can sit above it: a layer added
-        // to the window root covered them and Hold could not be pressed again to resume.
+    private fun showHoldUi(held: Boolean, mine: Boolean) {
+        holdLayer?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+        holdLayer = null
+        binding.webviewMiniapp.alpha = 1f
+        if (!held) return
+
         val parent = binding.layoutBottomControls.parent as android.view.ViewGroup
-        if (!show) {
-            holdOverlay?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
-            holdOverlay = null
-            return
-        }
-        val v = holdOverlay ?: android.widget.TextView(this).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#B3000000"))
-            setTextColor(android.graphics.Color.WHITE)
-            textSize = 18f
-            gravity = android.view.Gravity.CENTER
-            isClickable = true // swallow touches meant for the page
+        val dp = resources.displayMetrics.density
+        val label = if (mine) "Đang giữ" else "Cuộc gọi đang chờ"
+        val overApp = binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != HOME_APP
+        val layer = android.widget.FrameLayout(this).apply {
+            isClickable = true // swallow touches meant for the page or the video
             isFocusable = true
             elevation = 30f
-            val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0).apply {
-                val p = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                topToTop = p; bottomToBottom = p; startToStart = p; endToEnd = p
-            }
-            parent.addView(this, lp)
-            holdOverlay = this
         }
-        v.text = "⏸️\n$text"
-        v.bringToFront()
-        // The call buttons stay usable above it (Hold again resumes, End ends the call).
+        if (overApp) {
+            binding.webviewMiniapp.alpha = 0.45f
+            layer.addView(android.widget.TextView(this).apply {
+                text = "⏸️ $label"
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 14f
+                setBackgroundResource(R.drawable.bg_call_pill_fullscreen)
+                setPadding((14 * dp).toInt(), (6 * dp).toInt(), (14 * dp).toInt(), (6 * dp).toInt())
+            }, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = (16 * dp).toInt()
+            })
+        } else {
+            layer.setBackgroundResource(R.drawable.gradient_call_bg)
+            val col = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+            }
+            col.addView(android.widget.TextView(this).apply {
+                text = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 40f
+                gravity = android.view.Gravity.CENTER
+                setBackgroundResource(R.drawable.bg_call_avatar)
+            }, android.widget.LinearLayout.LayoutParams((110 * dp).toInt(), (110 * dp).toInt()))
+            col.addView(android.widget.TextView(this).apply {
+                text = peerName
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 24f
+                gravity = android.view.Gravity.CENTER
+            }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (16 * dp).toInt() })
+            col.addView(android.widget.TextView(this).apply {
+                text = label
+                setTextColor(android.graphics.Color.parseColor("#B3FFFFFF"))
+                textSize = 16f
+                gravity = android.view.Gravity.CENTER
+            }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (6 * dp).toInt() })
+            layer.addView(col, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER))
+        }
+        val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0).apply {
+            val p = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            topToTop = p; bottomToBottom = p; startToStart = p; endToEnd = p
+        }
+        parent.addView(layer, lp)
+        holdLayer = layer
         for (c in listOf<View>(binding.layoutBottomControls, binding.layoutCallPill)) {
             c.elevation = 31f
             c.bringToFront()
         }
-        binding.layoutBottomControls.visibility = View.VISIBLE
+    }
+
+    /** The Hold button shows Resume (▶) while this phone holds the call; the held phone cannot resume it. */
+    private fun setHoldButtonResume(on: Boolean) {
+        binding.btnKeypadCircle.setImageResource(if (on) android.R.drawable.ic_media_play else R.drawable.ic_hold)
+        binding.btnKeypadCircle.contentDescription = if (on) "Tiếp tục cuộc gọi" else "Giữ cuộc gọi"
     }
 
     /**
@@ -2272,12 +2313,13 @@ class CallActivity : AppCompatActivity() {
         com.demo.imsdc.call.CallHold.active = held
         rtpMediaManager?.onHold = held
         if (changed && ::miniAppManager.isInitialized) miniAppManager.onCallHoldChanged(held)
-        showHoldOverlay(held, if (mine) "Bạn đang giữ cuộc gọi" else "$peerName đang giữ cuộc gọi")
+        if (changed || held) showHoldUi(held, mine)
         setCallButtonOn(binding.btnKeypadCircle, mine)
+        setHoldButtonResume(mine)
         binding.tvCallStatus.visibility = View.VISIBLE
         binding.tvCallStatus.text = when {
-            mine -> "⏸️ Đang giữ cuộc gọi"
-            theirs -> "⏸️ $peerName đang giữ máy"
+            mine -> "⏸️ Đang giữ"
+            theirs -> "⏸️ Cuộc gọi đang chờ"
             else -> "✅ Đã kết nối"
         }
     }
