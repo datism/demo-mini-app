@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Hold screen: a mini-app is now also replaced by the caller's avatar, name and status on the call background, like the video. The camera and remote video tiles are hidden while on hold and restored on resume. The page keeps its state underneath.
 - Hold screen is now Samsung-like instead of a dark full-screen overlay. The status reads "Đang giữ" or "Cuộc gọi đang chờ", and the Hold button turns into Resume (▶) on the holding phone. In a plain call, the frozen video is replaced by the caller's avatar and name. Over a mini-app, the page is faded with a small "Đang giữ" chip, and taps stay blocked.
 - Hold: the call could not be resumed, because the hold overlay was added above the call buttons and swallowed the tap on Hold. The overlay now sits in the same layout as the buttons, underneath them and the full-screen pill.
 - Hold now suspends everything, as 3GPP TS 24.186 clause 10.20 describes for data channel lines marked a=inactive. Mini-app messages on the data channels are neither sent nor delivered. Photo transfers wait, new app launches are refused, and a shared video or screen pauses (its m=video/audio slides lines also go a=inactive). A dim overlay covers the mini-app while the call buttons stay usable. Everything continues where it was on resume.

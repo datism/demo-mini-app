@@ -2224,64 +2224,61 @@ class CallActivity : AppCompatActivity() {
     private var holdLayer: android.widget.FrameLayout? = null
 
     /**
-     * The hold screen, as on a Samsung phone: no dark curtain. In a plain call the frozen video is replaced by
-     * the caller's avatar, name and "Đang giữ"; over a mini-app the page stays visible but faded, with a small
-     * "Đang giữ" chip. Either way the layer takes the taps (nothing is exchanged on hold), and sits in the same
+     * The hold screen, as on a Samsung phone: the video and any mini-app are replaced by the caller's avatar,
+     * name and "Đang giữ" / "Cuộc gọi đang chờ" on the call background. The layer takes the taps (nothing is
+     * exchanged on hold; the page underneath keeps its state for the resume), and sits in the same
      * layout as the call buttons and the full-screen pill, which stay above it (Resume and End keep working).
      */
+    /** Video tiles hidden for the hold screen, with the visibility each had, put back on resume. */
+    private val hiddenForHold = mutableMapOf<View, Int>()
+
     private fun showHoldUi(held: Boolean, mine: Boolean) {
         holdLayer?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
         holdLayer = null
-        binding.webviewMiniapp.alpha = 1f
+        hiddenForHold.forEach { (v, vis) -> v.visibility = vis }
+        hiddenForHold.clear()
         if (!held) return
+
+        // My camera tile is a media-overlay surface, drawn above every ordinary view: hide it (and the
+        // other person's small tile with the restore buttons) so the hold screen is not punched through.
+        for (v in listOf<View>(binding.localVideoView, binding.remoteTileView, binding.btnRemoteRestore, binding.btnCameraRestore)) {
+            hiddenForHold[v] = v.visibility
+            v.visibility = View.GONE
+        }
 
         val parent = binding.layoutBottomControls.parent as android.view.ViewGroup
         val dp = resources.displayMetrics.density
         val label = if (mine) "Đang giữ" else "Cuộc gọi đang chờ"
-        val overApp = binding.webviewMiniapp.visibility == View.VISIBLE && currentAppId != HOME_APP
         val layer = android.widget.FrameLayout(this).apply {
             isClickable = true // swallow touches meant for the page or the video
             isFocusable = true
             elevation = 30f
         }
-        if (overApp) {
-            binding.webviewMiniapp.alpha = 0.45f
-            layer.addView(android.widget.TextView(this).apply {
-                text = "⏸️ $label"
-                setTextColor(android.graphics.Color.WHITE)
-                textSize = 14f
-                setBackgroundResource(R.drawable.bg_call_pill_fullscreen)
-                setPadding((14 * dp).toInt(), (6 * dp).toInt(), (14 * dp).toInt(), (6 * dp).toInt())
-            }, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = (16 * dp).toInt()
-            })
-        } else {
-            layer.setBackgroundResource(R.drawable.gradient_call_bg)
-            val col = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                gravity = android.view.Gravity.CENTER_HORIZONTAL
-            }
-            col.addView(android.widget.TextView(this).apply {
-                text = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-                setTextColor(android.graphics.Color.WHITE)
-                textSize = 40f
-                gravity = android.view.Gravity.CENTER
-                setBackgroundResource(R.drawable.bg_call_avatar)
-            }, android.widget.LinearLayout.LayoutParams((110 * dp).toInt(), (110 * dp).toInt()))
-            col.addView(android.widget.TextView(this).apply {
-                text = peerName
-                setTextColor(android.graphics.Color.WHITE)
-                textSize = 24f
-                gravity = android.view.Gravity.CENTER
-            }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (16 * dp).toInt() })
-            col.addView(android.widget.TextView(this).apply {
-                text = label
-                setTextColor(android.graphics.Color.parseColor("#B3FFFFFF"))
-                textSize = 16f
-                gravity = android.view.Gravity.CENTER
-            }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (6 * dp).toInt() })
-            layer.addView(col, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER))
+        layer.setBackgroundResource(R.drawable.gradient_call_bg)
+        val col = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
         }
+        col.addView(android.widget.TextView(this).apply {
+            text = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 40f
+            gravity = android.view.Gravity.CENTER
+            setBackgroundResource(R.drawable.bg_call_avatar)
+        }, android.widget.LinearLayout.LayoutParams((110 * dp).toInt(), (110 * dp).toInt()))
+        col.addView(android.widget.TextView(this).apply {
+            text = peerName
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 24f
+            gravity = android.view.Gravity.CENTER
+        }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (16 * dp).toInt() })
+        col.addView(android.widget.TextView(this).apply {
+            text = label
+            setTextColor(android.graphics.Color.parseColor("#B3FFFFFF"))
+            textSize = 16f
+            gravity = android.view.Gravity.CENTER
+        }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = (6 * dp).toInt() })
+        layer.addView(col, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.CENTER))
         val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0).apply {
             val p = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
             topToTop = p; bottomToBottom = p; startToStart = p; endToEnd = p
