@@ -332,7 +332,7 @@ object SdpHelper {
     // in every SDP, as port 0 while no content is shared, so the m-line order never changes.
     if (slides.mode != SlidesState.Mode.OFF) {
         val closed = slides.mode == SlidesState.Mode.CLOSED
-        val dir = when (slides.mode) {
+        val dir = if (isCallHoldActive) "a=inactive" else when (slides.mode) {
             SlidesState.Mode.SEND -> "a=sendonly"
             SlidesState.Mode.RECV -> "a=recvonly"
             else -> "a=inactive"

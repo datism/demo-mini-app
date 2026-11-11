@@ -166,6 +166,9 @@ class PhotoShareTransport(
                 val n = readFull(fis, payload)
                 if (n <= 0) break
 
+                // On hold: the data channels are suspended; the transfer waits and continues on resume.
+                while (com.demo.imsdc.call.CallHold.active) kotlinx.coroutines.delay(200)
+
                 // Flow control: chờ cống rãnh thông thoáng trước khi nhét thêm.
                 var waited = 0
                 while (adc.bufferedAmount() > HIGH_WATER_MARK && waited < 30_000) {
