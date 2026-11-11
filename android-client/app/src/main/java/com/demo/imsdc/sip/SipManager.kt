@@ -31,6 +31,8 @@ private const val IP_CHECK_DELAY_MS = 1500L
 /** Registration lifetime asked for in REGISTER, and when it is renewed (half way, so a lost refresh still has time). */
 private const val REGISTER_EXPIRES_S = 7200
 private const val REGISTER_REFRESH_MS = REGISTER_EXPIRES_S * 1000L / 2
+/** No 200 OK to a REGISTER within this time: the connection is taken as dead and reopened. */
+private const val REGISTER_REPLY_TIMEOUT_MS = 4000L
 
 /**
  * SipManager — SIP stack tối giản cho PoC IMS DC
@@ -59,6 +61,15 @@ class SipManager(
     companion object {
         var shared: SipManager? = null
         var appContext: Context? = null
+
+        /** The SIP manager for [username] on [server], as the app sets it up (password "password<user>"). */
+        fun create(server: String, username: String) = SipManager(
+            sipServerHost = server,
+            sipServerPort = 5060,
+            localUsername = username,
+            localPort = 0,
+            password = "password$username"
+        )
     }
 
     // ─── Callbacks ──────────────────────────────────────────────────────────
@@ -116,6 +127,13 @@ class SipManager(
     private var ipCheckJob: kotlinx.coroutines.Job? = null
     /** Renews the registration before it expires: during a long call no screen does it (MainActivity only on resume). */
     private var registerRefreshJob: kotlinx.coroutines.Job? = null
+    private var registerWatchdogJob: kotlinx.coroutines.Job? = null
+    /** When the last REGISTER 200 OK arrived (System.currentTimeMillis). */
+    @Volatile var lastRegisterOkMs = 0L
+        private set
+    /** A reconnect started by [forceReconnect] is in progress (cleared by the next REGISTER OK, or after 30 s). */
+    private val reconnecting = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var reconnectStartedMs = 0L
     // IP announced in the current call's SDP; the call's RTP is tied to it.
     private var callLocalIp: String? = null
 
@@ -252,6 +270,36 @@ class SipManager(
         }
     }
 
+    /** Re-registers; if the connection turns out dead (no reply), the REGISTER watchdog reconnects. */
+    fun ensureConnected(reason: String) {
+        if (!isRunning) return
+        Log.i(TAG, "ensureConnected: $reason")
+        sipScope.launch {
+            try { register() } catch (e: Exception) { Log.w(TAG, "ensureConnected register failed: ${e.message}") }
+        }
+    }
+
+    /** Drops the current connection and opens a new one (which registers again). One at a time. */
+    private fun forceReconnect(reason: String) {
+        val now = System.currentTimeMillis()
+        if (reconnecting.get() && now - reconnectStartedMs < 30_000) return
+        reconnecting.set(true)
+        reconnectStartedMs = now
+        Log.w(TAG, "$reason: connection is dead, reconnecting")
+        initialRegRetryJob?.cancel()
+        authRetryJob?.cancel()
+        sipScope.launch(Dispatchers.IO) {
+            synchronized(this@SipManager) {
+                // Detach the old socket first: its receive loop then sees a different socket and exits
+                // instead of starting a second reconnect when the close makes its read fail.
+                val old = tcpSocket
+                tcpSocket = null
+                try { old?.close() } catch (_: Exception) {}
+                reconnect()
+            }
+        }
+    }
+
     /** Registers again right away (used when the server says it lost our registration). */
     fun reRegisterNow(reason: String) {
         if (!isRunning) return
@@ -264,6 +312,8 @@ class SipManager(
     fun stop() {
         registerRefreshJob?.cancel()
         registerRefreshJob = null
+        registerWatchdogJob?.cancel()
+        registerWatchdogJob = null
         isRunning = false
         unwatchNetwork()
         keepAliveThread?.interrupt()
@@ -542,6 +592,8 @@ class SipManager(
             when (statusCode) {
                 200 -> {
                     Log.i(TAG, "✅ REGISTER OK")
+                    lastRegisterOkMs = System.currentTimeMillis()
+                    reconnecting.set(false)
                     initialRegRetryJob?.cancel()
                     authRetryJob?.cancel()
                     scheduleRegisterRefresh()
@@ -888,6 +940,15 @@ class SipManager(
             appendLine("Content-Length: 0")
             append("\r\n")
         }.replace("\r\n", "\n").replace("\n", "\r\n")
+
+        // A REGISTER that gets no answer means the TCP connection is dead (after sleep, a NAT drop, a server
+        // restart): writes into a half-dead socket still "succeed", so only the missing reply shows it.
+        val sentAt = System.currentTimeMillis()
+        registerWatchdogJob?.cancel()
+        registerWatchdogJob = sipScope.launch {
+            delay(REGISTER_REPLY_TIMEOUT_MS)
+            if (isRunning && lastRegisterOkMs < sentAt) forceReconnect("no reply to REGISTER in ${REGISTER_REPLY_TIMEOUT_MS / 1000} s")
+        }
 
         initialRegRetryJob?.cancel()
         initialRegRetryJob = sipScope.launch(Dispatchers.IO) {

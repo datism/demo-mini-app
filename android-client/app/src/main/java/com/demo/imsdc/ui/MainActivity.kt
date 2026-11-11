@@ -292,7 +292,53 @@ class MainActivity : AppCompatActivity() {
         binding.btnAddToContacts.visibility = vis
     }
 
+    /**
+     * Once: asks for what standby needs to ring with the screen off. Battery optimisation off keeps the network
+     * in Doze; full-screen intents (Android 14+) let the call screen show over the lock screen.
+     */
+    private var pendingFullScreenSetting = false
+
+    private fun askStandbyPermissions() {
+        val prefs = getSharedPreferences("ims_dc_prefs", MODE_PRIVATE)
+        if (prefs.getBoolean("standby_prompted", false)) return
+        prefs.edit().putBoolean("standby_prompted", true).apply()
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val needBattery = !pm.isIgnoringBatteryOptimizations(packageName)
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        val needFullScreen = android.os.Build.VERSION.SDK_INT >= 34 && !nm.canUseFullScreenIntent()
+        if (!needBattery && !needFullScreen) return
+        fun openFullScreenSetting() {
+            if (!needFullScreen) return
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    android.net.Uri.parse("package:$packageName")))
+            } catch (e: Exception) { Log.w(TAG, "Full-screen intent setting: ${e.message}") }
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Nhận cuộc gọi khi tắt màn hình")
+            .setMessage(buildString {
+                append("Để luôn nhận được cuộc gọi khi ứng dụng đóng hoặc màn hình tắt, hãy cho phép:")
+                if (needBattery) append("\n• Không hạn chế pin cho ứng dụng")
+                if (needFullScreen) append("\n• Hiển thị cuộc gọi toàn màn hình")
+            })
+            .setPositiveButton("Cho phép") { _, _ ->
+                if (needBattery) {
+                    try {
+                        @android.annotation.SuppressLint("BatteryLife")
+                        val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            android.net.Uri.parse("package:$packageName"))
+                        startActivity(i)
+                    } catch (e: Exception) { Log.w(TAG, "Battery optimisation request: ${e.message}") }
+                    // The full-screen setting opens after the battery prompt, when the user comes back.
+                    pendingFullScreenSetting = needFullScreen
+                } else openFullScreenSetting()
+            }
+            .setNegativeButton("Để sau", null)
+            .show()
+    }
+
     private fun doLogout() {
+        com.demo.imsdc.call.StandbyService.stop(this)
         sipManager?.stop()
         dialDigits = ""
         showDigits()
@@ -427,6 +473,8 @@ class MainActivity : AppCompatActivity() {
                         binding.layoutDialer.visibility = View.VISIBLE
                         
                         Toast.makeText(this@MainActivity, "Đăng ký thành công!", Toast.LENGTH_SHORT).show()
+                        com.demo.imsdc.call.StandbyService.start(this@MainActivity)
+                        askStandbyPermissions()
 
                         val autoCall = intent.getStringExtra("call")
                         if (!autoCall.isNullOrEmpty()) {
@@ -509,14 +557,15 @@ class MainActivity : AppCompatActivity() {
             val sipServer = binding.etSipServer.text.toString().trim()
             val username  = binding.etUsername.text.toString().trim()
             
-            lifecycleScope.launch(Dispatchers.IO) {
+            if (pendingFullScreenSetting && android.os.Build.VERSION.SDK_INT >= 34) {
+                pendingFullScreenSetting = false
                 try {
-                    sm.register(localIp)
-                    Log.i(TAG, "Refreshed SIP registration on resume")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to refresh registration on resume: ${e.message}")
-                }
+                    startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                        android.net.Uri.parse("package:$packageName")))
+                } catch (e: Exception) { Log.w(TAG, "Full-screen intent setting: ${e.message}") }
             }
+            // Re-registers; after a long sleep the connection may be dead, and the REGISTER watchdog then reconnects.
+            sm.ensureConnected("app resumed")
             
             sm.onIncomingInvite = { fromUser, sdpBody, callId, rawMsg, rawSdp ->
                 lifecycleScope.launch(Dispatchers.Main) {
@@ -555,34 +604,13 @@ class MainActivity : AppCompatActivity() {
         // Clear callbacks to prevent Activity memory leak
         SipManager.shared?.apply {
             onRegistered = null
-            onIncomingInvite = null
+            // Calls keep arriving after this screen is gone: standby rings through the incoming-call notification.
+            if (!CallActivity.isCallActive) com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, this)
         }
         // DO NOT stop SipManager.shared here since onDestroy is called on configuration changes
     }
 
-    private fun saveRecentCall(remoteUser: String, isIncoming: Boolean) {
-        val sp = getSharedPreferences("ims_dc_history", MODE_PRIVATE)
-        val historyStr = sp.getString("history", "[]") ?: "[]"
-        try {
-            val arr = org.json.JSONArray(historyStr)
-            val item = org.json.JSONObject().apply {
-                put("number", remoteUser)
-                put("isIncoming", isIncoming)
-                put("timestamp", System.currentTimeMillis())
-            }
-            
-            val newArr = org.json.JSONArray()
-            newArr.put(item)
-            for (i in 0 until arr.length()) {
-                if (newArr.length() >= 50) break
-                newArr.put(arr.getJSONObject(i))
-            }
-            
-            sp.edit().putString("history", newArr.toString()).apply()
-        } catch (e: Exception) {
-            Log.e(TAG, "Lỗi lưu lịch sử: ${e.message}")
-        }
-    }
+    private fun saveRecentCall(remoteUser: String, isIncoming: Boolean) = CallHistory.save(this, remoteUser, isIncoming)
 
     private data class RecentCallItem(
         val number: String,

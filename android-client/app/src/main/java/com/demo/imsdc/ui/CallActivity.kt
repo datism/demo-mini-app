@@ -2077,6 +2077,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onCallEnded = null
         sipManager.onIpChangedDuringCall = null
         sipManager.onAckWithSdp = null
+        // Incoming calls go back to standby (this screen's handler dies with it); MainActivity takes over on resume.
+        com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
         sipManager.onReInviteReceived = null
         sipManager.onReInviteFailed = null
         sipManager.onHeldReInviteCancelled = null
