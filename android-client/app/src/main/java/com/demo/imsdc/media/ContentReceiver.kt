@@ -35,8 +35,12 @@ class ContentReceiver(
     private val mfIp: String,
     private val mfAudioPort: Int,
     private val mfVideoPort: Int,
-    private val surface: Surface
+    private val surface: Surface,
+    /** Size of the picture as it should be shown (after rotation), each time it changes. */
+    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> }
 ) {
+    /** Clockwise rotation the sender's video needs, from the RTP header extension (0 when absent). */
+    @Volatile private var rotation = 0
     @Volatile private var running = false
     @Volatile private var muted = false
     private var videoSocket: DatagramSocket? = null
@@ -112,7 +116,7 @@ class ContentReceiver(
      * keyframe). If the decoder falls this far behind, the backlog is dropped and decoding restarts at
      * the next keyframe, so the picture stays live instead of lagging further.
      */
-    private class Picture(val data: ByteArray, val rtpTs: Long)
+    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean)
     private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
@@ -181,7 +185,7 @@ class ContentReceiver(
             }
             if (keyframe) sawKey = true
             if (!sawKey) return // decoding can only start at a keyframe
-            val pic = Picture(picture, rtpTs)
+            val pic = Picture(picture, rtpTs, keyframe)
             if (!pictures.offer(pic)) {
                 Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
                 pictures.clear()
@@ -206,7 +210,9 @@ class ContentReceiver(
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
             if (expected < 0) expected = seq
             if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
-            pending[seq] = buf.copyOf(n)
+            val (packet, rot) = stripExtension(buf, n)
+            if (rot != null) rotation = rot
+            pending[seq] = packet
             drain()
             if (pending.size > REORDER_WINDOW) {
                 // Still missing after a window of later packets: it is lost. Skip to the oldest one held.
@@ -224,9 +230,19 @@ class ContentReceiver(
         val clock = PlayoutClock(PLAYOUT_DELAY_MS * 1000L)
         var lastTs = -1L
         var ptsBaseUs = 0L
+        var codecRotation = 0
+        var shownW = 0; var shownH = 0
         while (running) {
             val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
-            val c = codec ?: (if (picture != null) startDecoder(sps, pps) else null)
+            if (codec != null && codecRotation != rotation) {
+                // The rotation is set when the decoder starts: restart it, from the next keyframe.
+                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°: restarting the decoder")
+                try { codec?.stop() } catch (_: Exception) {}
+                try { codec?.release() } catch (_: Exception) {}
+                codec = null
+            }
+            if (codec == null && picture != null && !picture.key) continue
+            val c = codec ?: (if (picture != null) startDecoder(sps, pps, rotation)?.also { codecRotation = rotation } else null)
             if (c == null) continue
             try {
                 if (picture != null) {
@@ -247,6 +263,14 @@ class ContentReceiver(
                 while (true) {
                     val oi = c.dequeueOutputBuffer(info, 0)
                     if (oi >= 0) c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, System.nanoTime() / 1000) * 1000)
+                    else if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val (w, h) = shownSize(c.outputFormat, codecRotation)
+                        if (w > 0 && h > 0 && (w != shownW || h != shownH)) {
+                            shownW = w; shownH = h
+                            Log.i(TAG, "Shared video ${w}x$h (rotation $codecRotation°)")
+                            onVideoSize(w, h)
+                        }
+                    }
                     else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
                 }
             } catch (e: Exception) {
@@ -255,17 +279,28 @@ class ContentReceiver(
         }
     }
 
-    private fun startDecoder(sps: ByteArray?, pps: ByteArray?): MediaCodec? {
+    /** The decoded picture's visible size, turned for a 90/270 rotation. */
+    private fun shownSize(f: MediaFormat, rotation: Int): Pair<Int, Int> {
+        var w = f.getInteger(MediaFormat.KEY_WIDTH)
+        var h = f.getInteger(MediaFormat.KEY_HEIGHT)
+        if (f.containsKey("crop-right") && f.containsKey("crop-left")) w = f.getInteger("crop-right") - f.getInteger("crop-left") + 1
+        if (f.containsKey("crop-bottom") && f.containsKey("crop-top")) h = f.getInteger("crop-bottom") - f.getInteger("crop-top") + 1
+        return if (rotation % 180 == 90) h to w else w to h
+    }
+
+    private fun startDecoder(sps: ByteArray?, pps: ByteArray?, rotation: Int): MediaCodec? {
         if (sps == null || pps == null) return null
         return try {
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
             format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + sps))
             format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(startCode + pps))
+            // Turns the picture as it is drawn on the surface (portrait phone video arrives as landscape frames).
+            if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, rotation)
             val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             c.configure(format, surface, null, 0)
             c.start()
             codec = c
-            Log.i(TAG, "Video decoder started")
+            Log.i(TAG, "Video decoder started (rotation $rotation°)")
             c
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start video decoder: ${e.message}", e)
@@ -305,6 +340,43 @@ class ContentReceiver(
         private const val PICTURE_QUEUE = 30
         /** How far playback runs behind the stream, to absorb network jitter. */
         const val PLAYOUT_DELAY_MS = 200L
+
+        /**
+         * Returns the packet with a plain 12-byte header (CSRCs and header extension removed, so the payload
+         * starts at byte 12) and the rotation found in its extension, if any.
+         */
+        fun stripExtension(buf: ByteArray, n: Int): Pair<ByteArray, Int?> {
+            val cc = buf[0].toInt() and 0x0F
+            val hasExt = (buf[0].toInt() and 0x10) != 0
+            if (cc == 0 && !hasExt) return buf.copyOf(n) to null
+            var off = 12 + 4 * cc
+            var rotation: Int? = null
+            if (hasExt) {
+                if (off + 4 > n) return buf.copyOf(n) to null
+                val profile = ((buf[off].toInt() and 0xFF) shl 8) or (buf[off + 1].toInt() and 0xFF)
+                val words = ((buf[off + 2].toInt() and 0xFF) shl 8) or (buf[off + 3].toInt() and 0xFF)
+                val end = off + 4 + 4 * words
+                if (end > n) return buf.copyOf(n) to null
+                if (profile == 0xBEDE) { // one-byte elements: id(4) len-1(4) data...
+                    var i = off + 4
+                    while (i < end) {
+                        val b = buf[i].toInt() and 0xFF
+                        if (b == 0) { i++; continue } // padding
+                        val id = b shr 4
+                        val len = (b and 0x0F) + 1
+                        if (id == 15 || i + 1 + len > end) break
+                        if (id == H264RtpSender.ROTATION_EXT_ID) rotation = (buf[i + 1].toInt() and 3) * 90
+                        i += 1 + len
+                    }
+                }
+                off = end
+            }
+            val out = ByteArray(12 + n - off)
+            System.arraycopy(buf, 0, out, 0, 12)
+            out[0] = (out[0].toInt() and 0xE0).toByte() // clear X and CC
+            System.arraycopy(buf, off, out, 12, n - off)
+            return out to rotation
+        }
         /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
         private const val REORDER_WINDOW = 64
     }

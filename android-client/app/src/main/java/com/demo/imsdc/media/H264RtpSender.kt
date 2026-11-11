@@ -20,6 +20,8 @@ class H264RtpSender(
     private val ssrc = Random.nextInt()
     @Volatile var closed = false
     private var nextSendNs = 0L
+    /** Clockwise rotation (0/90/180/270) the picture needs for display; sent in every packet when not 0. */
+    @Volatile var rotation = 0
 
     /** Sends one NAL (without start code); [marker] goes on the last packet of the picture. */
     fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) {
@@ -45,8 +47,10 @@ class H264RtpSender(
         }
     }
 
-    private fun header(ts: Long, marker: Boolean): ByteArray =
-        RtpMediaManager.buildRtpHeader(97.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
+    private fun header(ts: Long, marker: Boolean): ByteArray {
+        val h = RtpMediaManager.buildRtpHeader(97.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
+        return if (rotation == 0) h else withRotation(h, rotation)
+    }
 
     /**
      * Spaces packets [PACE_GAP_NS] apart. A phone keyframe is hundreds of packets; sent in one burst they
@@ -70,6 +74,20 @@ class H264RtpSender(
     }
 
     companion object {
+        /** RFC 8285 one-byte header extension id carrying the video orientation (as IMS CVO does). */
+        const val ROTATION_EXT_ID = 1
+
+        /** [header] (12 bytes, no CSRC) with the X bit set and a rotation extension appended. */
+        fun withRotation(header: ByteArray, rotation: Int): ByteArray {
+            val out = header.copyOf(12 + 8)
+            out[0] = (out[0].toInt() or 0x10).toByte()
+            out[12] = 0xBE.toByte(); out[13] = 0xDE.toByte() // one-byte header profile
+            out[14] = 0; out[15] = 1                         // one 32-bit word follows
+            out[16] = (ROTATION_EXT_ID shl 4).toByte()        // id 1, 1 byte of data
+            out[17] = ((rotation / 90) and 3).toByte()
+            return out                                        // [18], [19]: padding
+        }
+
         private const val MAX_SINGLE = 1200
         private const val MAX_FRAGMENT = 1180
         /** 0.25 ms between packets: at most ~4.8 MB/s (~38 Mbps), a 300-packet keyframe over ~75 ms. */

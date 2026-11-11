@@ -1606,10 +1606,23 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
+    /** Sizes the shared-video surface to the picture's shape, centred, instead of stretching it full screen. */
+    private fun fitContentSurface(w: Int, h: Int) {
+        val sv = contentSurface ?: return
+        val parent = sv.parent as? android.view.View ?: return
+        val pw = parent.width; val ph = parent.height
+        if (w <= 0 || h <= 0 || pw <= 0 || ph <= 0) return
+        val scale = minOf(pw.toFloat() / w, ph.toFloat() / h)
+        val lp = android.widget.FrameLayout.LayoutParams((w * scale).toInt(), (h * scale).toInt(), android.view.Gravity.CENTER)
+        sv.layoutParams = lp
+        Log.i(TAG, "Shared video ${w}x$h shown at ${lp.width}x${lp.height}")
+    }
+
     private fun startReceiver(ep: SdpHelper.SlidesEndpoint) {
         withContentSurface { surface ->
             receiver?.stop()
-            receiver = ContentReceiver(RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort, surface).also { it.setMuted(shareMuted); it.start() }
+            receiver = ContentReceiver(RtpPorts.slidesAudio, RtpPorts.slidesVideo, ep.ip, ep.audioPort, ep.videoPort, surface,
+                onVideoSize = { w, h -> activity.runOnUiThread { fitContentSurface(w, h) } }).also { it.setMuted(shareMuted); it.start() }
         }
     }
 
@@ -1640,6 +1653,7 @@ class MiniAppManager(val activity: CallActivity) {
                     preview = android.media.MediaPlayer().apply {
                         setDataSource(activity, uri)
                         setSurface(surface)
+                        setOnVideoSizeChangedListener { _, w, h -> fitContentSurface(w, h) }
                         val v = if (shareMuted) 0f else com.demo.imsdc.media.SHARED_VIDEO_VOLUME
                         setVolume(v, v)
                         setOnPreparedListener { it.start() }
