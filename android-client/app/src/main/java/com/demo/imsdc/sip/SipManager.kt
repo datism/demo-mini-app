@@ -667,6 +667,13 @@ class SipManager(
                         // again now; the caller retries the Re-INVITE once (MiniAppManager).
                         if (statusCode == 430) reRegisterNow("430 on Re-INVITE")
                         onReInviteFailed?.invoke(statusCode, getCSeqNumber(msg))
+                        // 481: the other side no longer has this call (it hung up and its BYE was lost or
+                        // crossed): the call is over here too (RFC 3261 12.2.1.2).
+                        if (statusCode == 481) {
+                            Log.w(TAG, "Re-INVITE got 481: the other side has ended the call, ending it here")
+                            resetCallState()
+                            onCallEnded?.invoke()
+                        }
                     } else {
                         Log.w(TAG, "INVITE response: $statusCode")
                         onInviteResponse?.invoke(statusCode, null, "", null)
@@ -715,6 +722,17 @@ class SipManager(
                 busyCallIds.add(callId)
             } catch (e: Exception) {
                 Log.e(TAG, "486 send error: ${e.message}")
+            }
+            return
+        }
+
+        // An INVITE with a To-tag belongs to an existing dialog (a re-INVITE: hold, mute, opening an app).
+        // With no call up, that dialog is gone (the other side already hung up, or its BYE crossed this
+        // re-INVITE): answer 481 (RFC 3261 12.2.2) instead of treating it as a new call and ringing.
+        if (!newDialog && !inCall) {
+            Log.i(TAG, "→ 481 to a re-INVITE from $fromUser for a call that has ended (call=$callId)")
+            try { sendRaw(buildResponse(msg, 481, "Call/Transaction Does Not Exist", "Content-Length: 0\r\n")) } catch (e: Exception) {
+                Log.e(TAG, "481 send error: ${e.message}")
             }
             return
         }

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- SIP: a re-INVITE (hold, mute, opening an app) that arrives after the call has ended no longer rings as a new call. It is answered 481 Call/Transaction Does Not Exist, and the phone that sent it ends its side of the call on that 481.
 - Call screen: Hold is greyed out while dialing or ringing and enabled once the call connects, as on a real phone. End, Mute and Speaker work throughout.
 - Video sharing: vertical phone videos now show upright on the other phone. The sender passes the file's rotation tag in an RTP header extension, and the receiver's decoder applies it. Both phones also show the shared video at its real shape, centred, instead of stretched to full screen.
 - Video sharing: smoother playback. The receiver now shows each frame at its own time, 200 ms behind the stream, with the sound delayed to match. The sender spreads each frame's packets out instead of bursting a whole keyframe, which used to be lost and freeze the picture.
