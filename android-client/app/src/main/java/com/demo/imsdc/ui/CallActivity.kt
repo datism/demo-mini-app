@@ -2226,9 +2226,11 @@ class CallActivity : AppCompatActivity() {
      * swallows touches, so nothing is played or drawn that the other side would never receive.
      */
     private fun showHoldOverlay(show: Boolean, text: String) {
-        val root = binding.root as android.view.ViewGroup
+        // Same parent as the call buttons (and the full-screen pill), so they can sit above it: a layer added
+        // to the window root covered them and Hold could not be pressed again to resume.
+        val parent = binding.layoutBottomControls.parent as android.view.ViewGroup
         if (!show) {
-            holdOverlay?.let { root.removeView(it) }
+            holdOverlay?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
             holdOverlay = null
             return
         }
@@ -2240,15 +2242,21 @@ class CallActivity : AppCompatActivity() {
             isClickable = true // swallow touches meant for the page
             isFocusable = true
             elevation = 30f
-            root.addView(this, android.view.ViewGroup.LayoutParams(-1, -1))
+            val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(0, 0).apply {
+                val p = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                topToTop = p; bottomToBottom = p; startToStart = p; endToEnd = p
+            }
+            parent.addView(this, lp)
             holdOverlay = this
         }
         v.text = "⏸️\n$text"
         v.bringToFront()
         // The call buttons stay usable above it (Hold again resumes, End ends the call).
+        for (c in listOf<View>(binding.layoutBottomControls, binding.layoutCallPill)) {
+            c.elevation = 31f
+            c.bringToFront()
+        }
         binding.layoutBottomControls.visibility = View.VISIBLE
-        binding.layoutBottomControls.bringToFront()
-        binding.layoutBottomControls.elevation = 31f
     }
 
     /**
