@@ -1001,6 +1001,10 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** An app-opening Re-INVITE of ours is waiting for the other phone's user (180 seen or expected). */
     @Volatile private var awaitingPeerDecision = false
+    /** Our pending invite was withdrawn because the call went on hold (not by the user, not unanswered). */
+    @Volatile private var endedByHold = false
+    /** How a request waiting for our answer is turned down: 603 by the user, 480 when the call went on hold. */
+    @Volatile private var heldDeclineCode = 603
     @Volatile private var ringingToastShown = false
 
     /** 180 for one of our Re-INVITEs: if it opens an app, the other phone is asking its user. */
@@ -1236,6 +1240,8 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Roll back the App slot only. Home ADC and BDC are untouched. */
     private fun rollbackMessage(result: ReInviteOutcome): String = when {
+        result is ReInviteOutcome.Failed && result.code == 487 && endedByHold -> { endedByHold = false; "Đã hủy lời mời vì cuộc gọi đang giữ" }
+        result is ReInviteOutcome.Failed && result.code == 480 -> "${activity.peerName} đang giữ cuộc gọi, lời mời đã hủy"
         result is ReInviteOutcome.Failed && result.code == 603 -> "${activity.peerName} đã từ chối mở ứng dụng"
         result is ReInviteOutcome.Failed && result.code == 487 -> "${activity.peerName} không trả lời"
         result == ReInviteOutcome.Timeout -> "${activity.peerName} không trả lời"
@@ -1345,7 +1351,11 @@ class MiniAppManager(val activity: CallActivity) {
                     when {
                         result is ReInviteOutcome.Answered -> emitShareEvent("accepted")
                         result is ReInviteOutcome.Failed && result.code == 603 -> { shareState = ShareState.NONE; emitShareEvent("declined") }
-                        result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> shareState = ShareState.NONE
+                        result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> {
+                            shareState = ShareState.NONE
+                            // Withdrawn for the hold, not by the page's Cancel button: the page must be told.
+                            if (endedByHold) { endedByHold = false; emitShareEvent("failed", """{"code":480,"reason":"hold"}""") }
+                        }
                         result is ReInviteOutcome.Failed && result.code == 491 && attempt < MAX_GLARE_ATTEMPTS && !shareCancelRequested -> {
                             delay(reInviteRetryDelayMs(isCallIdOwner = activity.sipManager.isCallIdOwner))
                             attempt++
@@ -1512,7 +1522,9 @@ class MiniAppManager(val activity: CallActivity) {
             val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
             if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
             if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
-            activity.sipManager.sendReInviteReject(rawMsg, 603, "Decline")
+            val code = heldDeclineCode
+            heldDeclineCode = 603
+            activity.sipManager.sendReInviteReject(rawMsg, code, if (code == 480) "Temporarily Unavailable" else "Decline")
             if (accepted == null) dismiss() // no answer: close the sheet / dialog
             return false
         } finally {
@@ -1759,10 +1771,22 @@ class MiniAppManager(val activity: CallActivity) {
     /** Hold on/off: a shared video file stops where it is and continues from there on resume. */
     fun onCallHoldChanged(held: Boolean) {
         if (held) {
-            // A yes/no that cannot be answered while nothing flows ends cleanly on both sides.
-            if (shareState == ShareState.INVITING) { Log.i(TAG, "Hold: cancelling our pending share request"); cancelShare() }
+            // A pending invite cannot outlive the hold: the hold Re-INVITE cannot go out while another waits for
+            // its answer (RFC 3261 14.1). It ends on both phones, and both say it was because of the hold.
+            if (shareState == ShareState.INVITING) {
+                Log.i(TAG, "Hold: cancelling our pending share request")
+                endedByHold = true
+                cancelShare()
+            }
+            if (awaitingPeerDecision) {
+                Log.i(TAG, "Hold: cancelling our pending app request")
+                endedByHold = true
+                val cs = pending.peek()
+                if (cs > 0) activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+            }
             heldDecision?.let { decision ->
-                Log.i(TAG, "Hold: declining the request waiting for our answer")
+                Log.i(TAG, "Hold: ending the request waiting for our answer (480, not a decline)")
+                heldDeclineCode = 480
                 heldDismiss?.invoke()
                 decision.complete(false)
             }

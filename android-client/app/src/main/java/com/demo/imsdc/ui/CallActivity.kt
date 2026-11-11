@@ -2310,10 +2310,10 @@ class CallActivity : AppCompatActivity() {
         // Everything is suspended (TS 24.186 10.20): call media, data channels, shared content.
         com.demo.imsdc.call.CallHold.active = held
         rtpMediaManager?.onHold = held
-        if (changed && ::miniAppManager.isInitialized) miniAppManager.onCallHoldChanged(held)
-        // Pages can pause their own timers (resends, fetch timeouts) while nothing flows.
+        // The page first (it pauses its timers, and knows a cancel that follows is due to the hold), then native.
         if (changed) binding.webviewMiniapp.evaluateJavascript(
             "if (typeof window.onCallHold === 'function') window.onCallHold($held);", null)
+        if (changed && ::miniAppManager.isInitialized) miniAppManager.onCallHoldChanged(held)
         if (changed || held) showHoldUi(held, mine)
         setCallButtonOn(binding.btnKeypadCircle, mine)
         setHoldButtonResume(mine)
