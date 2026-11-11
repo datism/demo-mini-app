@@ -966,11 +966,24 @@
     flushDraft(stroke);
     localDrafts.delete(pointerId);
     stopIdleFlush();
+    fitStrokeMessage(stroke);
     state.strokes.push(stroke);
     sendJson({ t: 'stroke', id: stroke.id, photoId: stroke.photoId,
       color: stroke.color, w: stroke.w, pts: stroke.pts });
     updateToolbar();
     redraw();
+  }
+
+  /* Kênh dữ liệu nhận tối đa 64 KB một tin: một nét rất dài được lược bớt điểm (bỏ 1 điểm mỗi 2, giữ điểm cuối)
+   * tới khi vừa. Nét trên máy mình đổi theo, để hai máy giữ đúng cùng một nét. */
+  const MAX_STROKE_MSG = 60000;
+  function fitStrokeMessage(stroke) {
+    const size = () => JSON.stringify({ t: 'stroke', id: stroke.id, photoId: stroke.photoId, color: stroke.color, w: stroke.w, pts: stroke.pts }).length;
+    while (stroke.pts.length > 2 && size() > MAX_STROKE_MSG) {
+      const last = stroke.pts[stroke.pts.length - 1];
+      stroke.pts = stroke.pts.filter((_, i) => i % 2 === 0);
+      if (stroke.pts[stroke.pts.length - 1] !== last) stroke.pts.push(last);
+    }
   }
 
   function eraseAt(pointerId, x, y) {
@@ -1236,7 +1249,9 @@
     state.strokes = [];
     redraw();
     updateToolbar();
-    sendJson({ t: 'clear', backup: backup.map(s => ({ id: s.id, mine: s.mine, color: s.color, w: s.w, pts: s.pts })) });
+    // Không gửi kèm toàn bộ nét: với nhiều nét, tin nhắn vượt giới hạn 64 KB của kênh dữ liệu và bị bỏ (máy kia
+    // không xóa). Máy kia có cùng bản vẽ nên tự sao lưu nét của nó để Hoàn tác.
+    sendJson({ t: 'clear', backup: true });
     toast('Đã xóa toàn bộ nét — bấm Hoàn tác để khôi phục');
     buzz([10, 40, 10]);
   }
@@ -1489,7 +1504,11 @@
               redraw();
             }
             state.lastBackup = null;
-          } else if (msg.backup) {
+          } else if (msg.backup === true) {
+            state.lastBackup = { kind: 'strokes', strokes: state.strokes.map(s => ({ ...s })) };
+            state.strokes = [];
+            redraw();
+          } else if (Array.isArray(msg.backup)) { // trang cũ: bản sao lưu đi kèm tin nhắn
             state.lastBackup = { kind: 'strokes', strokes: msg.backup.map(s => ({ ...s })) };
             state.strokes = [];
             redraw();
