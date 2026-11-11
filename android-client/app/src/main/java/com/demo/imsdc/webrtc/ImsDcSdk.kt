@@ -54,6 +54,14 @@ class ImsDcSdk(
     }
 
     fun sendOrQueueAdc(bytes: ByteArray) {
+        if (bytes.size > MAX_DC_MESSAGE) {
+            // Over the negotiated max message size the send fails and WebRTC closes the channel: the page would
+            // lose it for the rest of the call (seen with the drawing app's old "clear" carrying every stroke).
+            Log.e(TAG, "ADC message too large (${bytes.size} bytes > $MAX_DC_MESSAGE): not sent, the channel would close")
+            return
+        }
+        // On hold the data channels are suspended: the message waits and goes out on resume, in order.
+        if (com.demo.imsdc.call.CallHold.active) { dcManager.holdOutgoing { sendOrQueueAdc(bytes) }; return }
         val adc = webRtcManager.foregroundAdcChannel
         if (adc != null && adc.state() == org.webrtc.DataChannel.State.OPEN) {
             val buffer = org.webrtc.DataChannel.Buffer(java.nio.ByteBuffer.wrap(bytes), true)
