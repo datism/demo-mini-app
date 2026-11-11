@@ -345,7 +345,24 @@ let mapRetry = null;
 /* Native gọi window.onCallHold(true|false): khi cuộc gọi đang giữ, kênh dữ liệu tạm dừng (tin nhắn được giữ lại
  * và gửi/nhận khi tiếp tục) — không gửi lại lời mời bản đồ, không tính thời gian chờ ảnh trong lúc giữ. */
 let callHeld = false;
-window.onCallHold = function (held) { callHeld = !!held; };
+/* Lời mời đang chờ không thể tồn tại qua lúc giữ máy (SIP không cho 2 re-INVITE cùng lúc): nó bị hủy ở cả hai
+ * máy. Thông báo được để dành tới khi tiếp tục, vì lúc giữ máy trang bị màn hình giữ máy che. */
+let endedOnHold = false, lastCancelAt = 0;
+function noteEnd(msg) { if (callHeld) endedOnHold = true; else toast(msg); }
+window.onCallHold = function (held) {
+  callHeld = !!held;
+  if (callHeld) {
+    if (Date.now() - lastCancelAt < 3000) endedOnHold = true; // CANCEL của máy kia đến ngay trước re-INVITE giữ máy
+    const s = state.s;
+    if (s && s.kind === 'map') { // lời mời bản đồ đang chờ: hủy ở cả hai bên
+      if (s.role === 'sender') sendJson(mapMsg('map.cancel', s.id)); // được giữ lại, tới máy kia khi tiếp tục
+      stopMapRetry(); endSession(); endedOnHold = true;
+    }
+  } else if (endedOnHold) {
+    endedOnHold = false;
+    toast('Lời mời trước đã hủy vì cuộc gọi được giữ', 3500);
+  }
+};
 function stopMapRetry() { clearInterval(mapRetry); mapRetry = null; }
 function startMapShare() {
   if (state.s) { toast('Hãy kết thúc chia sẻ ảnh/video/màn hình trước.'); return; }
@@ -388,7 +405,7 @@ function onMapSignal(m) {
     case 'map.accept': if (mine && s.role === 'sender') { stopMapRetry(); state.s = null; window.HanoiViewer.open(false); } return;
     case 'map.decline': if (mine && s.role === 'sender') { stopMapRetry(); toast(peerLabel() + ' đã từ chối'); endSession(); } return;
     case 'map.busy': if (mine && s.role === 'sender') { stopMapRetry(); toast(peerLabel() + ' đang bận'); endSession(); } return;
-    case 'map.cancel': if (mine && s.role === 'receiver') { toast(peerLabel() + ' đã hủy chia sẻ'); endSession(); } return;
+    case 'map.cancel': if (mine && s.role === 'receiver') { noteEnd(peerLabel() + ' đã hủy chia sẻ'); endSession(); } return;
     case 'map.close': if (!$('mapView').hidden) { window.HanoiViewer.close(); toast(peerLabel() + ' đã đóng chia sẻ vị trí'); } return;
   }
 }
@@ -425,10 +442,10 @@ window.shareEvent = function (name, arg) {
         if (s.kind === 'photo') pickPhotos(); else if (s.kind === 'screen') call('startScreen'); else call('pickVideo');
       }
       break;
-    case 'declined': toast(peerLabel() + ' đã từ chối'); endSession(); break;
-    case 'cancelled': if (s) { toast(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
+    case 'declined': noteEnd(peerLabel() + ' đã từ chối'); endSession(); break;
+    case 'cancelled': if (s) { lastCancelAt = Date.now(); noteEnd(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
     case 'closed': if (s) { toast(peerLabel() + (streamed(s.kind) ? ' đã dừng chia sẻ' : ' đã kết thúc chia sẻ')); endSession(); } break;
-    case 'failed': toast(a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : a.code === 505 ? 'Máy kia chưa hỗ trợ chia sẻ nội dung' : 'Không thể chia sẻ lúc này'); endSession(); break;
+    case 'failed': noteEnd(a.code === 480 ? 'Đã hủy lời mời vì cuộc gọi đang giữ' : a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : a.code === 505 ? 'Máy kia chưa hỗ trợ chia sẻ nội dung' : 'Không thể chia sẻ lúc này'); endSession(); break;
     case 'videoReady': onVideoReady(a); break;
     case 'videoTime': if (state.video) { renderTime(a.t); sendJson({ t: 'vtime', v: a.t }); } break;
     case 'stopped': if (s) { toast('Đã dừng chia sẻ'); endSession(); } break; // nút trên thông báo
