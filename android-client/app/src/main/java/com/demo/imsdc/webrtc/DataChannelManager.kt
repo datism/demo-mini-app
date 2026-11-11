@@ -35,6 +35,9 @@ private const val TAG = "DataChannelManager"
  *   - BDC tương ứng với "Bootstrap Data Channel" phục vụ DCAR
  *   - ADC tương ứng với "Application Data Channel" phục vụ P2A2P
  */
+/** Max size of one data channel message, as negotiated with the MF (a=max-message-size, go-mf MaxMessageSize). */
+private const val MAX_DC_MESSAGE = 65_536
+
 class DataChannelManager(
     private val webRtcManager: WebRtcManager,
     private val scope: CoroutineScope
@@ -729,9 +732,15 @@ class DataChannelManager(
                 return
             }
             val bytes = jsonData.toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_DC_MESSAGE) {
+                // Over the negotiated max message size the send fails and WebRTC closes the channel: the page
+                // would lose it for the rest of the call. Refuse this one message instead.
+                Log.e(TAG, "ADC (stream $streamId) message too large (${bytes.size} bytes > $MAX_DC_MESSAGE): not sent, the channel would close")
+                return
+            }
             val buf = ByteBuffer.wrap(bytes)
             val success = adc.send(DataChannel.Buffer(buf, false))
-            Log.i(TAG, "ADC (stream $streamId) sent ($success): $jsonData")
+            Log.i(TAG, "ADC (stream $streamId) sent ($success, ${bytes.size} B): ${jsonData.take(300)}")
         } catch (e: Exception) {
             Log.e(TAG, "Error sending via ADC (channel might be disposed): ${e.message}")
         }
@@ -751,9 +760,15 @@ class DataChannelManager(
                 return
             }
             val bytes = jsonData.toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_DC_MESSAGE) {
+                // Over the negotiated max message size the send fails and WebRTC closes the channel: the page
+                // would lose it for the rest of the call. Refuse this one message instead.
+                Log.e(TAG, "ADC2 (stream $streamId) message too large (${bytes.size} bytes > $MAX_DC_MESSAGE): not sent, the channel would close")
+                return
+            }
             val buf = ByteBuffer.wrap(bytes)
             val success = adc2.send(DataChannel.Buffer(buf, false))
-            Log.i(TAG, "ADC2 (stream $streamId) sent ($success): $jsonData")
+            Log.i(TAG, "ADC2 (stream $streamId) sent ($success, ${bytes.size} B): ${jsonData.take(300)}")
         } catch (e: Exception) {
             Log.e(TAG, "Error sending via ADC2: ${e.message}")
         }
