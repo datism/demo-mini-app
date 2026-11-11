@@ -35,8 +35,12 @@ class ContentReceiver(
     private val mfIp: String,
     private val mfAudioPort: Int,
     private val mfVideoPort: Int,
-    private val surface: Surface
+    private val surface: Surface,
+    /** Size of the picture as it should be shown (after rotation), each time it changes. */
+    private val onVideoSize: (width: Int, height: Int) -> Unit = { _, _ -> }
 ) {
+    /** Clockwise rotation the sender's video needs, from the RTP header extension (0 when absent). */
+    @Volatile private var rotation = 0
     @Volatile private var running = false
     @Volatile private var muted = false
     private var videoSocket: DatagramSocket? = null
@@ -112,9 +116,13 @@ class ContentReceiver(
      * keyframe). If the decoder falls this far behind, the backlog is dropped and decoding restarts at
      * the next keyframe, so the picture stays live instead of lagging further.
      */
-    private val pictures = java.util.concurrent.LinkedBlockingQueue<ByteArray>(PICTURE_QUEUE)
+    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean)
+    private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
+    @Volatile private var vps: ByteArray? = null // H.265 only
+    /** The stream is H.265 (payload type 98) rather than H.264 (97). */
+    @Volatile private var hevc = false
 
     private fun videoLoop() {
         val socket = videoSocket ?: return
@@ -131,18 +139,58 @@ class ContentReceiver(
 
         fun addNal(nal: ByteArray, off: Int, len: Int) {
             if (len <= 0) return
-            val type = nal[off].toInt() and 0x1F
-            if (type == 7) sps = nal.copyOfRange(off, off + len)
-            if (type == 8) pps = nal.copyOfRange(off, off + len)
-            if (type == 5) hasIdr = true
+            if (hevc) {
+                val type = (nal[off].toInt() shr 1) and 0x3F
+                when (type) {
+                    32 -> vps = nal.copyOfRange(off, off + len)
+                    33 -> sps = nal.copyOfRange(off, off + len)
+                    34 -> pps = nal.copyOfRange(off, off + len)
+                }
+                if (isHevcKey(type)) hasIdr = true
+            } else {
+                val type = nal[off].toInt() and 0x1F
+                if (type == 7) sps = nal.copyOfRange(off, off + len)
+                if (type == 8) pps = nal.copyOfRange(off, off + len)
+                if (type == 5) hasIdr = true
+            }
             frame.write(startCode); frame.write(nal, off, len)
+        }
+
+        /** H.265 payloads (RFC 7798): single NAL, aggregation packet (48), fragmentation unit (49). */
+        fun handleHevc(p: ByteArray, n: Int) {
+            if (n < 14) return
+            when ((p[12].toInt() shr 1) and 0x3F) {
+                48 -> {
+                    var i = 14
+                    while (i + 2 <= n) {
+                        val size = ((p[i].toInt() and 0xFF) shl 8) or (p[i + 1].toInt() and 0xFF)
+                        if (size <= 0 || i + 2 + size > n) break
+                        addNal(p, i + 2, size)
+                        i += 2 + size
+                    }
+                }
+                49 -> if (n > 15) {
+                    val fu = p[14].toInt()
+                    if ((fu and 0x80) != 0) {
+                        val type = fu and 0x3F
+                        if (isHevcKey(type)) hasIdr = true
+                        frame.write(startCode)
+                        frame.write((p[12].toInt() and 0x81) or (type shl 1))
+                        frame.write(p[13].toInt())
+                    }
+                    frame.write(p, 15, n - 15)
+                }
+                else -> addNal(p, 12, n - 12)
+            }
         }
 
         fun handle(p: ByteArray) {
             val n = p.size
+            val rtpTs = ((p[4].toLong() and 0xFF) shl 24) or ((p[5].toLong() and 0xFF) shl 16) or
+                ((p[6].toLong() and 0xFF) shl 8) or (p[7].toLong() and 0xFF)
             val marker = (p[1].toInt() and 0x80) != 0
             val type = p[12].toInt() and 0x1F
-            when {
+            if (hevc) handleHevc(p, n) else when {
                 type in 1..23 -> addNal(p, 12, n - 12)
                 type == 24 -> { // STAP-A: several NAL units in one packet
                     var i = 13
@@ -178,11 +226,12 @@ class ContentReceiver(
             }
             if (keyframe) sawKey = true
             if (!sawKey) return // decoding can only start at a keyframe
-            if (!pictures.offer(picture)) {
+            val pic = Picture(picture, rtpTs, keyframe)
+            if (!pictures.offer(pic)) {
                 Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
                 pictures.clear()
                 sawKey = keyframe
-                if (keyframe) pictures.offer(picture)
+                if (keyframe) pictures.offer(pic)
             }
         }
 
@@ -198,11 +247,21 @@ class ContentReceiver(
             val pkt = DatagramPacket(buf, buf.size)
             socket.receive(pkt)
             val n = pkt.length
-            if (n < 13 || (buf[1].toInt() and 0x7F) != 97) continue
+            val pt = buf[1].toInt() and 0x7F
+            if (n < 13 || (pt != H264RtpSender.PT_H264 && pt != H264RtpSender.PT_H265)) continue
+            if ((pt == H264RtpSender.PT_H265) != hevc) {
+                // Codec changed (or the first packet): start over, parameter sets and all.
+                hevc = pt == H264RtpSender.PT_H265
+                sps = null; pps = null; vps = null
+                frame.reset(); sawKey = false; hasIdr = false
+                Log.i(TAG, "Shared video is ${if (hevc) "H.265" else "H.264"}")
+            }
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
             if (expected < 0) expected = seq
             if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
-            pending[seq] = buf.copyOf(n)
+            val (packet, rot) = stripExtension(buf, n)
+            if (rot != null) rotation = rot
+            pending[seq] = packet
             drain()
             if (pending.size > REORDER_WINDOW) {
                 // Still missing after a window of later packets: it is lost. Skip to the oldest one held.
@@ -217,23 +276,52 @@ class ContentReceiver(
 
     private fun decodeLoop() {
         val info = MediaCodec.BufferInfo()
+        val clock = PlayoutClock(PLAYOUT_DELAY_MS * 1000L)
+        var lastTs = -1L
+        var ptsBaseUs = 0L
+        var codecRotation = 0
+        var codecHevc = false
+        var shownW = 0; var shownH = 0
         while (running) {
             val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
-            val c = codec ?: (if (picture != null) startDecoder(sps, pps) else null)
+            if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
+                // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
+                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
+                try { codec?.stop() } catch (_: Exception) {}
+                try { codec?.release() } catch (_: Exception) {}
+                codec = null
+            }
+            if (codec == null && picture != null && !picture.key) continue
+            val c = codec ?: (if (picture != null) startDecoder(rotation)?.also { codecRotation = rotation; codecHevc = hevc } else null)
             if (c == null) continue
             try {
                 if (picture != null) {
+                    // RTP time (90 kHz, wraps at 2^32) to a steadily increasing presentation time.
+                    if (lastTs >= 0) ptsBaseUs += ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
+                        if (it >= 0x80000000L) it - 0x100000000L else it
+                    } * 100 / 9
+                    lastTs = picture.rtpTs
                     val ii = c.dequeueInputBuffer(20_000)
                     if (ii >= 0) {
                         val ib = c.getInputBuffer(ii)!!
-                        ib.clear(); ib.put(picture)
-                        c.queueInputBuffer(ii, 0, picture.size, System.nanoTime() / 1000, 0)
+                        ib.clear(); ib.put(picture.data)
+                        c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
                     }
                 }
-                // Show every decoded picture as soon as it is ready, not when the next one arrives.
+                // Each decoded picture is shown at its own time, a fixed delay behind the stream, so network
+                // jitter is absorbed instead of showing up as uneven motion.
                 while (true) {
                     val oi = c.dequeueOutputBuffer(info, 0)
-                    if (oi >= 0) c.releaseOutputBuffer(oi, true) else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                    if (oi >= 0) c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, System.nanoTime() / 1000) * 1000)
+                    else if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val (w, h) = shownSize(c.outputFormat, codecRotation)
+                        if (w > 0 && h > 0 && (w != shownW || h != shownH)) {
+                            shownW = w; shownH = h
+                            Log.i(TAG, "Shared video ${w}x$h (rotation $codecRotation°)")
+                            onVideoSize(w, h)
+                        }
+                    }
+                    else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
                 }
             } catch (e: Exception) {
                 if (running) Log.w(TAG, "Decode error: ${e.message}")
@@ -241,17 +329,35 @@ class ContentReceiver(
         }
     }
 
-    private fun startDecoder(sps: ByteArray?, pps: ByteArray?): MediaCodec? {
-        if (sps == null || pps == null) return null
+    /** The decoded picture's visible size, turned for a 90/270 rotation. */
+    private fun shownSize(f: MediaFormat, rotation: Int): Pair<Int, Int> {
+        var w = f.getInteger(MediaFormat.KEY_WIDTH)
+        var h = f.getInteger(MediaFormat.KEY_HEIGHT)
+        if (f.containsKey("crop-right") && f.containsKey("crop-left")) w = f.getInteger("crop-right") - f.getInteger("crop-left") + 1
+        if (f.containsKey("crop-bottom") && f.containsKey("crop-top")) h = f.getInteger("crop-bottom") - f.getInteger("crop-top") + 1
+        return if (rotation % 180 == 90) h to w else w to h
+    }
+
+    private fun startDecoder(rotation: Int): MediaCodec? {
+        val sps = sps; val pps = pps; val vps = vps; val hevc = hevc
+        if (sps == null || pps == null || (hevc && vps == null)) return null
         return try {
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
-            format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + sps))
-            format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(startCode + pps))
-            val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val mime = if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+            val format = MediaFormat.createVideoFormat(mime, 1280, 720)
+            if (hevc) {
+                // H.265: VPS, SPS and PPS all go in csd-0.
+                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + vps!! + startCode + sps + startCode + pps))
+            } else {
+                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + sps))
+                format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(startCode + pps))
+            }
+            // Turns the picture as it is drawn on the surface (portrait phone video arrives as landscape frames).
+            if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, rotation)
+            val c = MediaCodec.createDecoderByType(mime)
             c.configure(format, surface, null, 0)
             c.start()
             codec = c
-            Log.i(TAG, "Video decoder started")
+            Log.i(TAG, "Video decoder started (${if (hevc) "hevc" else "avc"}, rotation $rotation°)")
             c
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start video decoder: ${e.message}", e)
@@ -267,12 +373,14 @@ class ContentReceiver(
         val t = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(8000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-            .setBufferSizeInBytes(maxOf(minBuf, 3200) * 2)
+            .setBufferSizeInBytes(maxOf(minBuf, 6400))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
         t.setVolume(if (muted) 0f else SHARED_VIDEO_VOLUME)
         t.play()
+        // Delay the sound as much as the picture's playout buffer, so they stay in step.
+        t.write(ShortArray((8 * PLAYOUT_DELAY_MS).toInt()), 0, (8 * PLAYOUT_DELAY_MS).toInt())
         val buf = ByteArray(2048)
         while (running) {
             val pkt = DatagramPacket(buf, buf.size)
@@ -287,7 +395,74 @@ class ContentReceiver(
     companion object {
         /** About a second of video at 30 fps. */
         private const val PICTURE_QUEUE = 30
+        /** How far playback runs behind the stream, to absorb network jitter. */
+        const val PLAYOUT_DELAY_MS = 200L
+
+        /** H.265 random-access (IRAP) pictures: BLA, IDR, CRA. Decoding can start there. */
+        fun isHevcKey(type: Int) = type in 16..21
+
+        /**
+         * Returns the packet with a plain 12-byte header (CSRCs and header extension removed, so the payload
+         * starts at byte 12) and the rotation found in its extension, if any.
+         */
+        fun stripExtension(buf: ByteArray, n: Int): Pair<ByteArray, Int?> {
+            val cc = buf[0].toInt() and 0x0F
+            val hasExt = (buf[0].toInt() and 0x10) != 0
+            if (cc == 0 && !hasExt) return buf.copyOf(n) to null
+            var off = 12 + 4 * cc
+            var rotation: Int? = null
+            if (hasExt) {
+                if (off + 4 > n) return buf.copyOf(n) to null
+                val profile = ((buf[off].toInt() and 0xFF) shl 8) or (buf[off + 1].toInt() and 0xFF)
+                val words = ((buf[off + 2].toInt() and 0xFF) shl 8) or (buf[off + 3].toInt() and 0xFF)
+                val end = off + 4 + 4 * words
+                if (end > n) return buf.copyOf(n) to null
+                if (profile == 0xBEDE) { // one-byte elements: id(4) len-1(4) data...
+                    var i = off + 4
+                    while (i < end) {
+                        val b = buf[i].toInt() and 0xFF
+                        if (b == 0) { i++; continue } // padding
+                        val id = b shr 4
+                        val len = (b and 0x0F) + 1
+                        if (id == 15 || i + 1 + len > end) break
+                        if (id == H264RtpSender.ROTATION_EXT_ID) rotation = (buf[i + 1].toInt() and 3) * 90
+                        i += 1 + len
+                    }
+                }
+                off = end
+            }
+            val out = ByteArray(12 + n - off)
+            System.arraycopy(buf, 0, out, 0, 12)
+            out[0] = (out[0].toInt() and 0xE0).toByte() // clear X and CC
+            System.arraycopy(buf, off, out, 12, n - off)
+            return out to rotation
+        }
         /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
         private const val REORDER_WINDOW = 64
+    }
+}
+
+/**
+ * Maps a picture's presentation time to when it should be on screen: [delayUs] behind the first picture,
+ * then at the stream's own pace. A picture far late (a stall) or far off (pause, seek, a new stream)
+ * starts the timeline again from that picture.
+ */
+class PlayoutClock(private val delayUs: Long) {
+    private var baseWallUs = Long.MIN_VALUE
+    private var basePtsUs = 0L
+
+    fun renderAtUs(ptsUs: Long, nowUs: Long): Long {
+        var at = if (baseWallUs == Long.MIN_VALUE) Long.MIN_VALUE else baseWallUs + (ptsUs - basePtsUs)
+        if (at == Long.MIN_VALUE || at < nowUs - LATE_RESET_US || at > nowUs + delayUs + EARLY_RESET_US) {
+            baseWallUs = nowUs + delayUs
+            basePtsUs = ptsUs
+            at = baseWallUs
+        }
+        return at
+    }
+
+    companion object {
+        const val LATE_RESET_US = 100_000L
+        const val EARLY_RESET_US = 1_000_000L
     }
 }

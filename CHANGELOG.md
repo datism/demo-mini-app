@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Video sharing: vertical phone videos now show upright on the other phone. The sender passes the file's rotation tag in an RTP header extension, and the receiver's decoder applies it. Both phones also show the shared video at its real shape, centred, instead of stretched to full screen.
+- Video sharing: smoother playback. The receiver now shows each frame at its own time, 200 ms behind the stream, with the sound delayed to match. The sender spreads each frame's packets out instead of bursting a whole keyframe, which used to be lost and freeze the picture.
 - Call: the full-screen pill (green dot + timer) is bigger, darker and labelled "▲ Nút cuộc gọi", so it is clear that tapping it brings back the call buttons and the way out of the app.
 - Dialer: the app opens on the phone tab with the keypad down and no leftover number; tapping a recent call or contact calls directly; after a call the screen returns to where it started (keypad cleared, recents, or contacts).
 - **Apps would not open after ~2 h in a call (430):** the SIP registration (Expires 7200) was only renewed when the home screen resumed, so during a long call it expired and every Re-INVITE got 430 "Registration Lost". SipManager now renews it every hour on its own, re-registers at once on a 430, and opening an app retries the Re-INVITE once after that.
@@ -22,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- Video sharing: H.265 (HEVC) videos can now be shared as they are, without conversion (RTP payload type 98, RFC 7798). The MF relay needs no change; both phones decode H.265 in hardware.
 - Home screen restyled like the One UI Phone app: floating pill tabs Bàn phím · Gần đây · Danh bạ, a full-screen keypad, a large "5G New Calling" title, and rounded card lists grouped by day (recents, with "(n)" for repeated calls) or by letter (contacts).
 - **Camera drag only on the call screen:** my camera tile can be dragged only on the call screen itself (emote home). Inside any app (Chia sẻ and everything in it, Vẽ, Caro, …) it stays where the app puts it; tapping still folds it where folding is allowed.
 - **Chia sẻ vị trí back:** pressing back on the map now closes it on the other phone too (`map.close` over the ADC, toast "… đã đóng chia sẻ vị trí"), like stopping a photo/video share.
