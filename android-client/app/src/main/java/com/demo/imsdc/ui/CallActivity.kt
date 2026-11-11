@@ -806,7 +806,18 @@ class CallActivity : AppCompatActivity() {
 
     // --- UI Setup ------------------------------------------------------------
 
+    /**
+     * Hold works only on a connected call, as on a real phone: greyed out while dialing or ringing (End, Mute
+     * and Speaker still work), enabled once the call is up.
+     */
+    private fun setHoldAvailable(on: Boolean) {
+        binding.btnKeypadCircle.isEnabled = on
+        binding.btnKeypadCircle.alpha = if (on) 1f else 0.35f
+        binding.btnKeypadCircle.contentDescription = if (on) "Giữ cuộc gọi" else "Giữ cuộc gọi (khả dụng khi đã kết nối)"
+    }
+
     private fun setupUI() {
+        setHoldAvailable(false)
         binding.tvRemoteUser.text = peerName
         val initial = peerName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         binding.tvTopAvatar.text = initial
@@ -1806,6 +1817,7 @@ class CallActivity : AppCompatActivity() {
 
     private fun showCallActiveUi() {
         lifecycleScope.launch(Dispatchers.Main) {
+            setHoldAvailable(true)
             binding.tvCallStatus.visibility = View.VISIBLE
             if (currentAppId == "operator-menu") {
                 binding.tvCallStatus.text = "🟢 Cuộc gọi thoại & video đã kết nối"
@@ -2077,6 +2089,8 @@ class CallActivity : AppCompatActivity() {
         sipManager.onCallEnded = null
         sipManager.onIpChangedDuringCall = null
         sipManager.onAckWithSdp = null
+        // Incoming calls go back to standby (this screen's handler dies with it); MainActivity takes over on resume.
+        com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
         sipManager.onReInviteReceived = null
         sipManager.onReInviteFailed = null
         sipManager.onHeldReInviteCancelled = null
@@ -2180,6 +2194,7 @@ class CallActivity : AppCompatActivity() {
     // --- Helpers ------------------------------------------------------------
 
     private fun toggleCallHold() {
+        if (!isCallActiveUiShown) return // not connected yet: nothing to hold
         val nextHoldState = !sipManager.isCallHoldActive
         sipManager.isCallHoldActive = nextHoldState
 
