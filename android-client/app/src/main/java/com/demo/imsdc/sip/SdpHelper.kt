@@ -65,6 +65,23 @@ object SdpHelper {
     /** True when an SDP asks for the content-share stream (a=dcmap:1002), i.e. the far end wants to share. */
     fun hasContentShare(sdp: String?): Boolean = sdp?.contains("a=dcmap:1002") == true
 
+    /**
+     * The direction attribute (sendrecv / sendonly / recvonly / inactive) of the first audio line of [sdp]:
+     * "inactive" or "sendonly" there means the far end put the call on hold (RFC 3264 8.4, RFC 6337).
+     */
+    fun audioDirection(sdp: String?): String {
+        var inAudio = false
+        for (raw in sdp?.lines() ?: return "sendrecv") {
+            val l = raw.trim()
+            if (l.startsWith("m=")) {
+                if (inAudio) break
+                inAudio = l.startsWith("m=audio")
+            } else if (inAudio && l in DIRECTIONS) return l.removePrefix("a=")
+        }
+        return "sendrecv"
+    }
+    private val DIRECTIONS = setOf("a=sendrecv", "a=sendonly", "a=recvonly", "a=inactive")
+
     fun tlsIdFor(label: String, fingerprintLine: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest("$label|$fingerprintLine".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }

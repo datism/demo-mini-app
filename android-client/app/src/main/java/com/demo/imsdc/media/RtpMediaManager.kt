@@ -61,6 +61,19 @@ class RtpMediaManager(
      *  sends audio all call long (silence too), so a long gap means it is gone: CallActivity's media watchdog. */
     @Volatile var lastAudioRxMs = 0L
         private set
+
+    /**
+     * The call is on hold (either side): audio still goes out every 20 ms but as silence (keeps the far end's
+     * media watchdog, the NAT and the timestamps going), received audio is not played, and no video is sent.
+     * Turning it off asks the encoder for a keyframe so the picture comes back at once.
+     */
+    @Volatile var onHold = false
+        set(value) {
+            if (field == value) return
+            field = value
+            Log.i(TAG, if (value) "⏸️ Media on hold" else "▶️ Media resumed")
+            if (!value) { lastKeyframeForcedAt = 0L; forceKeyframe() }
+        }
     private var videoReceiverThread: Thread? = null
 
     // State
@@ -107,6 +120,9 @@ class RtpMediaManager(
 
     // G.711 A-law encoding utilities
     companion object {
+        /** A-law code for a zero sample. */
+        val ALAW_SILENCE: Byte = 0xD5.toByte()
+
         fun linearToAlaw(sample: Short): Byte {
             val s = sample.toInt()
             var sign = 0
@@ -490,9 +506,10 @@ class RtpMediaManager(
                 val read = audioRecord?.read(pcmBuffer, 0, pcmBuffer.size) ?: -1
                 if (read <= 0) continue
 
-                // Encode to A-law (PCMA)
+                // Encode to A-law (PCMA); silence while on hold
+                val hold = onHold
                 for (i in 0 until read) {
-                    rtpPayload[i] = linearToAlaw(pcmBuffer[i])
+                    rtpPayload[i] = if (hold) ALAW_SILENCE else linearToAlaw(pcmBuffer[i])
                 }
 
                 // Fill silence if read was short
@@ -610,7 +627,7 @@ class RtpMediaManager(
                         pcmOutput[i] = alawToLinear(packetBuf[12 + i])
                     }
 
-                    val track = audioTrack
+                    val track = if (onHold) null else audioTrack
                     if (track != null) {
                         val w = track.write(pcmOutput, 0, decodeSamples, AudioTrack.WRITE_NON_BLOCKING)
                         if (w in 0 until decodeSamples) {
@@ -736,6 +753,10 @@ class RtpMediaManager(
                             val naluBytes = ByteArray(bufferInfo.size)
                             outputBuffer.position(bufferInfo.offset)
                             outputBuffer.get(naluBytes)
+                            if (onHold && (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                                encoder.releaseOutputBuffer(outputBufferIndex, false)
+                                continue // on hold: no video goes out (SPS/PPS are still kept)
+                            }
 
                             // Find and packetize H.264 NALUs from the byte stream
                             val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Call hold now really holds the call. The holding phone sends silence, plays nothing and stops its video. The other phone recognises the hold offer (audio a=inactive/sendonly), answers a=inactive, does the same, and shows "<name> đang giữ máy". Resume brings the sound back and the picture with a fresh keyframe. If the other side rejects a hold or resume, the change is rolled back.
 - SIP: a re-INVITE (hold, mute, opening an app) that arrives after the call has ended no longer rings as a new call. It is answered 481 Call/Transaction Does Not Exist, and the phone that sent it ends its side of the call on that 481.
 - Call screen: Hold is greyed out while dialing or ringing and enabled once the call connects, as on a real phone. End, Mute and Speaker work throughout.
 - Video sharing: vertical phone videos now show upright on the other phone. The sender passes the file's rotation tag in an RTP header extension, and the receiver's decoder applies it. Both phones also show the shared video at its real shape, centred, instead of stretched to full screen.
