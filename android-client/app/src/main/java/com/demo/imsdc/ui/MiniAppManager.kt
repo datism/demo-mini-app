@@ -1296,6 +1296,8 @@ class MiniAppManager(val activity: CallActivity) {
     /** Sender: the user picked Ảnh/Video. Sends the Re-INVITE and tells the page how it ended. */
     fun requestShare(kind: String) {
         if (kind != "photo" && kind != "video" && kind != "screen") { emitShareEvent("failed", """{"code":501}"""); return }
+        // On hold nothing can be asked of the other side: the page shows "Thử lại sau".
+        if (com.demo.imsdc.call.CallHold.active) { emitShareEvent("failed", """{"code":491}"""); return }
         if (shareState != ShareState.NONE) { emitShareEvent("failed", """{"code":486}"""); return }
         val video = kind != "photo" // a screen goes over the same shared-content video line as a video file
         shareState = ShareState.INVITING
@@ -1489,6 +1491,12 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
     private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
+        if (com.demo.imsdc.call.CallHold.active) {
+            // A request that crossed our hold: it cannot be answered now. 491 makes the other side say "try later".
+            Log.i(TAG, "Request \"$notice\" while on hold: 491")
+            activity.sipManager.sendReInviteReject(rawMsg, 491, "Request Pending")
+            return false
+        }
         val decision = CompletableDeferred<Boolean>()
         heldCancelled = false
         heldDecision = decision
@@ -1636,8 +1644,9 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sender: opens the gallery to choose the video once the other person accepted. */
     fun pickVideo() {
+        if (com.demo.imsdc.call.CallHold.active) { runOrDefer { pickVideo() }; return }
         activity.launchVideoPicker { uri ->
-            if (uri == null) emitShareEvent("videoEnded") else startStreaming(uri)
+            if (uri == null) emitShareEvent("videoEnded") else runOrDefer { startStreaming(uri) }
         }
     }
 
@@ -1689,8 +1698,15 @@ class MiniAppManager(val activity: CallActivity) {
      * the call service to media projection (Android 14 needs that first), then streams the screen.
      */
     fun startScreen() {
+        if (com.demo.imsdc.call.CallHold.active) { runOrDefer { startScreen() }; return }
         activity.launchScreenCapture { data ->
             if (data == null) { emitShareEvent("videoEnded"); return@launchScreenCapture }
+            runOrDefer { startScreenWith(data) }
+        }
+    }
+
+    private fun startScreenWith(data: android.content.Intent) {
+        run {
             activity.lifecycleScope.launch(Dispatchers.Main) {
                 val ep = sharedEndpoint
                 if (ep == null) { emitShareEvent("videoEnded"); return@launch }
@@ -1742,9 +1758,30 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Hold on/off: a shared video file stops where it is and continues from there on resume. */
     fun onCallHoldChanged(held: Boolean) {
+        if (held) {
+            // A yes/no that cannot be answered while nothing flows ends cleanly on both sides.
+            if (shareState == ShareState.INVITING) { Log.i(TAG, "Hold: cancelling our pending share request"); cancelShare() }
+            heldDecision?.let { decision ->
+                Log.i(TAG, "Hold: declining the request waiting for our answer")
+                heldDismiss?.invoke()
+                decision.complete(false)
+            }
+        } else {
+            activity.dcManager.flushHeld()
+            deferredAction?.let { action -> deferredAction = null; Log.i(TAG, "Resume: running the action held back during hold"); action() }
+        }
         if (streamer == null) return
         if (held) applyVideoPause(true)
         else if (!userPausedVideo) applyVideoPause(false)
+    }
+
+    /** Something the user finished during hold (picked a video, allowed screen capture): it runs on resume. */
+    private var deferredAction: (() -> Unit)? = null
+
+    /** Runs [action] now, or on resume if the call is on hold. */
+    private fun runOrDefer(action: () -> Unit) {
+        if (com.demo.imsdc.call.CallHold.active) { deferredAction = action; Log.i(TAG, "Call on hold: action deferred to resume") }
+        else action()
     }
 
     /** Sender: pause or resume the stream and the local preview together. */

@@ -465,7 +465,7 @@ class DataChannelManager(
             override fun onStateChange() { Log.i(TAG, "Share channel state: ${ch.state()}") }
             private var rx = 0
             override fun onMessage(buffer: DataChannel.Buffer?) {
-                    if (com.demo.imsdc.call.CallHold.active) { Log.i(TAG, "Call on hold: data channel message dropped"); return }
+                    if (com.demo.imsdc.call.CallHold.active) { holdIncoming(this, buffer); return }
                 try {
                     buffer ?: return
                     val bb = buffer.data
@@ -522,7 +522,7 @@ class DataChannelManager(
                 }
 
                 override fun onMessage(buffer: DataChannel.Buffer?) {
-                    if (com.demo.imsdc.call.CallHold.active) { Log.i(TAG, "Call on hold: data channel message dropped"); return }
+                    if (com.demo.imsdc.call.CallHold.active) { holdIncoming(this, buffer); return }
                     try {
                         buffer ?: return
                         if (isHome && !webRtcManager.foregroundIsHome) {
@@ -644,7 +644,7 @@ class DataChannelManager(
                     }
                 }
                 override fun onMessage(buffer: DataChannel.Buffer?) {
-                    if (com.demo.imsdc.call.CallHold.active) { Log.i(TAG, "Call on hold: data channel message dropped"); return }
+                    if (com.demo.imsdc.call.CallHold.active) { holdIncoming(this, buffer); return }
                     try {
                         if (buffer == null) return
                         val bytes = ByteArray(buffer.data.remaining())
@@ -677,8 +677,46 @@ class DataChannelManager(
      *
      * Được gọi bởi AndroidBridgeInterface khi JS gọi AndroidBridge.sendData().
      */
+    // ─── Hold: data channels are suspended (a=inactive), nothing is lost ─────
+
+    /** A message that arrived on hold, with the observer that would have handled it. */
+    private class HeldIn(val observer: DataChannel.Observer, val bytes: ByteArray, val binary: Boolean)
+    private val heldIn = HeldQueue<HeldIn>()
+    private val heldOut = HeldQueue<() -> Unit>()
+
+    /** On hold the page messages wait instead of being lost; [flushHeld] runs them through the same handler. */
+    private fun holdIncoming(observer: DataChannel.Observer, buffer: DataChannel.Buffer?) {
+        buffer ?: return
+        val d = buffer.data.duplicate()
+        val bytes = ByteArray(d.remaining()).also { d.get(it) }
+        heldIn.add(HeldIn(observer, bytes, buffer.binary))
+        if (heldIn.size == 1 || heldIn.size % 50 == 0) Log.i(TAG, "Call on hold: ${heldIn.size} incoming data channel message(s) waiting")
+    }
+
+    /**
+     * Call resumed: messages that arrived on hold go to the page first (in order), then what the page sent on
+     * hold goes out (in order), as if the hold had been a pause.
+     */
+    fun flushHeld() {
+        val inDropped = heldIn.dropped
+        val incoming = heldIn.drain()
+        val outDropped = heldOut.dropped
+        val outgoing = heldOut.drain()
+        if (incoming.isEmpty() && outgoing.isEmpty()) return
+        Log.i(TAG, "Call resumed: delivering ${incoming.size} held message(s), sending ${outgoing.size}" +
+            (if (inDropped + outDropped > 0) " (${inDropped + outDropped} oldest dropped: hold too long)" else ""))
+        incoming.forEach {
+            try { it.observer.onMessage(DataChannel.Buffer(ByteBuffer.wrap(it.bytes), it.binary)) }
+            catch (e: Exception) { Log.e(TAG, "Held message delivery failed: ${e.message}") }
+        }
+        outgoing.forEach { try { it() } catch (e: Exception) { Log.e(TAG, "Held message send failed: ${e.message}") } }
+    }
+
+    /** Call ended: nothing held is delivered any more. */
+    fun dropHeld() { heldIn.clear(); heldOut.clear() }
+
     fun sendViaADC(jsonData: String, streamId: Int = 1000) {
-        if (com.demo.imsdc.call.CallHold.active) { Log.i(TAG, "Call on hold: ADC message not sent"); return }
+        if (com.demo.imsdc.call.CallHold.active) { heldOut.add { sendViaADC(jsonData, streamId) }; return }
         val adc = webRtcManager.foregroundAdcChannel
         if (adc == null) {
             Log.e(TAG, "ADC (stream $streamId) is null")
@@ -700,7 +738,7 @@ class DataChannelManager(
     }
 
     fun sendViaADC2(jsonData: String, streamId: Int = 1001) {
-        if (com.demo.imsdc.call.CallHold.active) { Log.i(TAG, "Call on hold: ADC2 message not sent"); return }
+        if (com.demo.imsdc.call.CallHold.active) { heldOut.add { sendViaADC2(jsonData, streamId) }; return }
         val adc2 = webRtcManager.adc2Channel
         if (adc2 == null) {
             Log.e(TAG, "ADC2 (stream $streamId) is null")

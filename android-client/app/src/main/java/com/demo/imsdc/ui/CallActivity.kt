@@ -2101,6 +2101,7 @@ class CallActivity : AppCompatActivity() {
         sipManager.onReInviteReceived = null
         sipManager.onRemoteHoldChanged = null
         com.demo.imsdc.call.CallHold.active = false
+        if (::dcManager.isInitialized) dcManager.dropHeld()
         holdLayer?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
         holdLayer = null
         sipManager.onReInviteFailed = null
@@ -2310,6 +2311,9 @@ class CallActivity : AppCompatActivity() {
         com.demo.imsdc.call.CallHold.active = held
         rtpMediaManager?.onHold = held
         if (changed && ::miniAppManager.isInitialized) miniAppManager.onCallHoldChanged(held)
+        // Pages can pause their own timers (resends, fetch timeouts) while nothing flows.
+        if (changed) binding.webviewMiniapp.evaluateJavascript(
+            "if (typeof window.onCallHold === 'function') window.onCallHold($held);", null)
         if (changed || held) showHoldUi(held, mine)
         setCallButtonOn(binding.btnKeypadCircle, mine)
         setHoldButtonResume(mine)
