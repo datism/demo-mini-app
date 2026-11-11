@@ -1246,6 +1246,12 @@ class CallActivity : AppCompatActivity() {
             lifecycleScope.launch(Dispatchers.Main) { miniAppManager.onHeldReInviteCancelled() }
         }
 
+        sipManager.onRemoteHoldChanged = { held ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                applyHoldState()
+                Toast.makeText(this@CallActivity, if (held) "$peerName đã giữ cuộc gọi" else "$peerName đã tiếp tục cuộc gọi", Toast.LENGTH_SHORT).show()
+            }
+        }
         sipManager.onReInviteReceived = { sdp, rawMsg ->
             Log.i(TAG, "Handling incoming Re-INVITE automatically...")
             lifecycleScope.launch(Dispatchers.Main) {
@@ -2092,6 +2098,7 @@ class CallActivity : AppCompatActivity() {
         // Incoming calls go back to standby (this screen's handler dies with it); MainActivity takes over on resume.
         com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
         sipManager.onReInviteReceived = null
+        sipManager.onRemoteHoldChanged = null
         sipManager.onReInviteFailed = null
         sipManager.onHeldReInviteCancelled = null
         if (::miniAppManager.isInitialized) { miniAppManager.resetShare(); miniAppManager.resetRequests() }
@@ -2197,23 +2204,35 @@ class CallActivity : AppCompatActivity() {
         if (!isCallActiveUiShown) return // not connected yet: nothing to hold
         val nextHoldState = !sipManager.isCallHoldActive
         sipManager.isCallHoldActive = nextHoldState
-
-        setCallButtonOn(binding.btnKeypadCircle, nextHoldState)
-
-        Toast.makeText(this, if (nextHoldState) "\u0110ang gi\u1eef cu\u1ed9c g\u1ecdi..." else "\u0110ang kh\u00f4i ph\u1ee5c cu\u1ed9c g\u1ecdi...", Toast.LENGTH_SHORT).show()
-
-        lifecycleScope.launch(Dispatchers.Main) {
-            try {
-                binding.tvCallStatus.text = if (nextHoldState) "\u23f8\ufe0f \u0110ang gi\u1eef" else "\u2705 \u0110\u00e3 k\u1ebft n\u1ed1i"
-                // Serialised with app changes; its answer/failure is matched by CSeq, never taken for an app request.
-                miniAppManager.sendHoldReInvite()
-            } catch (e: Exception) {
-                Log.e(TAG, "L?i thay d?i tr?ng th�i Hold/Resume: ${e.message}")
+        applyHoldState()
+        Toast.makeText(this, if (nextHoldState) "Đang giữ cuộc gọi..." else "Đang tiếp tục cuộc gọi...", Toast.LENGTH_SHORT).show()
+        // Serialised with app changes; its answer/failure is matched by CSeq, never taken for an app request.
+        miniAppManager.sendHoldReInvite { accepted ->
+            if (!accepted && sipManager.isCallHoldActive == nextHoldState) {
+                // The other side did not take it: back to how the call was.
+                sipManager.isCallHoldActive = !nextHoldState
+                applyHoldState()
+                Toast.makeText(this, if (nextHoldState) "Không giữ được cuộc gọi" else "Không tiếp tục được cuộc gọi", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-
+    /**
+     * Applies hold to the media and the screen. Either side holding stops the call's sound and picture both
+     * ways (silence still flows, so the media watchdog does not end the call); Hold is lit only when this side holds.
+     */
+    private fun applyHoldState() {
+        val mine = sipManager.isCallHoldActive
+        val theirs = sipManager.remoteHoldActive
+        rtpMediaManager?.onHold = mine || theirs
+        setCallButtonOn(binding.btnKeypadCircle, mine)
+        binding.tvCallStatus.visibility = View.VISIBLE
+        binding.tvCallStatus.text = when {
+            mine -> "⏸️ Đang giữ cuộc gọi"
+            theirs -> "⏸️ $peerName đang giữ máy"
+            else -> "✅ Đã kết nối"
+        }
+    }
 
     // Messenger-style toggle: white circle with a dark icon when on, translucent with a white icon when off.
     private fun setCallButtonOn(btn: android.widget.ImageView, on: Boolean) {

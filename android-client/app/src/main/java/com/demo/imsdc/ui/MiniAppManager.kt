@@ -1175,7 +1175,7 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /** Hold/resume: one Re-INVITE with the current slots, serialised with the app changes, re-offered on 491. */
-    fun sendHoldReInvite() {
+    fun sendHoldReInvite(onDone: (accepted: Boolean) -> Unit = {}) {
         activity.lifecycleScope.launch(Dispatchers.Main) {
             var attempt = 1
             try {
@@ -1193,12 +1193,14 @@ class MiniAppManager(val activity: CallActivity) {
                         continue
                     }
                     if (result !is ReInviteOutcome.Answered) Log.w(TAG, "Hold/resume Re-INVITE not accepted: $result")
+                    onDone(result is ReInviteOutcome.Answered)
                     break
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Log.d(TAG, "Hold/resume Re-INVITE cancelled (call ended)")
             } catch (e: Exception) {
                 Log.e(TAG, "Hold/resume Re-INVITE failed: ${e.message}")
+                onDone(false)
             }
         }
     }

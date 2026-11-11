@@ -114,6 +114,10 @@ class SipManager(
     @Volatile private var heldReInviteMsg: String? = null
     var isCallHoldActive: Boolean = false
     var onReInviteReceived: ((String, String) -> Unit)? = null
+    /** The far end put the call on hold (true) or resumed it (false), from the direction in its re-INVITE. */
+    var onRemoteHoldChanged: ((Boolean) -> Unit)? = null
+    /** The far end has the call on hold: our answers say a=inactive. */
+    @Volatile var remoteHoldActive = false
     var onReInviteFailed: ((code: Int, cseq: Int) -> Unit)? = null
     /** True when this side sent the initial INVITE (owns the Call-ID), RFC 3261 14.1. */
     @Volatile var isCallIdOwner = false
@@ -762,6 +766,12 @@ class SipManager(
             } catch (e: Exception) {
                 Log.e(TAG, "Trying send error for Re-INVITE: ${e.message}")
             }
+            val held = SdpHelper.audioDirection(sdp).let { it == "inactive" || it == "sendonly" }
+            if (sdp != null && held != remoteHoldActive) {
+                remoteHoldActive = held
+                Log.i(TAG, if (held) "⏸️ $fromUser put the call on hold" else "▶️ $fromUser resumed the call")
+                onRemoteHoldChanged?.invoke(held)
+            }
             val translatedSdp = sdp?.let { SdpHelper.translateSipAnswerToWebRtcAnswer(it) } ?: ""
             onReInviteReceived?.invoke(translatedSdp, msg)
             return
@@ -910,6 +920,7 @@ class SipManager(
 
     fun resetCallState() {
         isCallActive = false
+        remoteHoldActive = false
         activeToHeader = null
         homeReqApp = null
         appReqApp = null
@@ -1206,7 +1217,8 @@ class SipManager(
             val localIp = getLocalIp()
             lastLocalIp = localIp
             callLocalIp = localIp
-            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
+            // A hold offer is answered inactive (RFC 6337); so is any offer while we hold the call.
+            val translatedAnswer = SdpHelper.translateWebRtcOfferToSipOffer(sdpAnswer, localIp, homeReqApp = homeReqApp, isCallHoldActive = isCallHoldActive || remoteHoldActive, localAudioPort = RtpPorts.current().first, localVideoPort = RtpPorts.current().second, appReqApp = appReqApp, appSlotUsed = appSlotUsed, shareStream = shareStream, slides = slides)
             val contentLength = translatedAnswer.toByteArray(Charsets.UTF_8).size
             val response = buildResponse(
                 originalInvite, 200, "OK",
