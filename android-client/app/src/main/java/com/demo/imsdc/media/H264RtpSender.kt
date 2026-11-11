@@ -7,15 +7,19 @@ import java.net.InetAddress
 import kotlin.random.Random
 
 /**
- * Sends H.264 NAL units as RTP payload type 97 (RFC 6184): small ones whole, large ones as FU-A fragments.
+ * Sends H.264 NAL units as RTP payload type 97 (RFC 6184), or H.265 as 98 (RFC 7798): small ones whole,
+ * large ones as FU fragments.
  * One instance per stream: it owns the sequence number and SSRC. Used by the video-file and screen shares.
  */
 class H264RtpSender(
     private val socket: DatagramSocket,
     private val to: InetAddress,
     private val port: Int,
-    private val tag: String
+    private val tag: String,
+    /** H.265 (RFC 7798, payload type 98) instead of H.264 (RFC 6184, payload type 97). */
+    private val hevc: Boolean = false
 ) {
+    private val payloadType = if (hevc) PT_H265 else PT_H264
     private var seq = Random.nextInt(0xFFFF)
     private val ssrc = Random.nextInt()
     @Volatile var closed = false
@@ -31,6 +35,7 @@ class H264RtpSender(
             send(header(ts, marker), nal)
             return
         }
+        if (hevc) { sendHevcFragments(nal, ts, marker); return }
         // FU-A: the NAL header is rebuilt in every fragment's two prefix bytes
         val indicator = ((nal[0].toInt() and 0xE0) or 28).toByte()
         var pos = 1
@@ -47,8 +52,27 @@ class H264RtpSender(
         }
     }
 
+    /** H.265 FU (type 49): 2-byte payload header + FU header, then the NAL after its own 2-byte header. */
+    private fun sendHevcFragments(nal: ByteArray, ts: Long, marker: Boolean) {
+        val type = (nal[0].toInt() shr 1) and 0x3F
+        val h0 = ((nal[0].toInt() and 0x81) or (49 shl 1)).toByte()
+        val h1 = nal[1]
+        var pos = 2
+        while (pos < nal.size) {
+            val len = minOf(MAX_FRAGMENT, nal.size - pos)
+            val first = pos == 2
+            val last = pos + len >= nal.size
+            val payload = ByteArray(3 + len)
+            payload[0] = h0; payload[1] = h1
+            payload[2] = ((if (first) 0x80 else 0) or (if (last) 0x40 else 0) or type).toByte()
+            System.arraycopy(nal, pos, payload, 3, len)
+            send(header(ts, marker && last), payload)
+            pos += len
+        }
+    }
+
     private fun header(ts: Long, marker: Boolean): ByteArray {
-        val h = RtpMediaManager.buildRtpHeader(97.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
+        val h = RtpMediaManager.buildRtpHeader(payloadType.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
         return if (rotation == 0) h else withRotation(h, rotation)
     }
 
@@ -76,6 +100,8 @@ class H264RtpSender(
     companion object {
         /** RFC 8285 one-byte header extension id carrying the video orientation (as IMS CVO does). */
         const val ROTATION_EXT_ID = 1
+        const val PT_H264 = 97
+        const val PT_H265 = 98
 
         /** [header] (12 bytes, no CSRC) with the X bit set and a rotation extension appended. */
         fun withRotation(header: ByteArray, rotation: Int): ByteArray {

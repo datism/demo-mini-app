@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Added log lines on the photo path (share channel attach/receive, `streamFile start`, `photo assembled`, share events sent to the page) to locate where a transfer stops.
 
 ### Added & Enhanced
+- Video sharing: H.265 (HEVC) videos can now be shared as they are, without conversion (RTP payload type 98, RFC 7798). The MF relay needs no change; both phones decode H.265 in hardware.
 - Home screen restyled like the One UI Phone app: floating pill tabs Bàn phím · Gần đây · Danh bạ, a full-screen keypad, a large "5G New Calling" title, and rounded card lists grouped by day (recents, with "(n)" for repeated calls) or by letter (contacts).
 - **Camera drag only on the call screen:** my camera tile can be dragged only on the call screen itself (emote home). Inside any app (Chia sẻ and everything in it, Vẽ, Caro, …) it stays where the app puts it; tapping still folds it where folding is allowed.
 - **Chia sẻ vị trí back:** pressing back on the map now closes it on the other phone too (`map.close` over the ADC, toast "… đã đóng chia sẻ vị trí"), like stopping a photo/video share.

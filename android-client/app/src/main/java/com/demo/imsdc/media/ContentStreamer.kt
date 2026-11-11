@@ -18,8 +18,8 @@ import kotlin.random.Random
 private const val TAG = "ContentStreamer"
 
 /**
- * Sends a video file from the phone as shared content (a=content:slides): its H.264 samples go out as
- * RTP payload type 97 exactly as stored (no re-encode), its audio track is decoded and sent as PCMA
+ * Sends a video file from the phone as shared content (a=content:slides): its H.264 / H.265 samples go out as
+ * RTP payload type 97 / 98 exactly as stored (no re-encode), its audio track is decoded and sent as PCMA
  * (payload type 8, 8 kHz mono). Both go to the MF's content-share ports, which forward them to the other phone.
  *
  * Video and audio run on their own threads against one wall clock, so they stay in step; [pause] stops
@@ -53,14 +53,14 @@ class ContentStreamer(
         return try {
             ex.setDataSource(context, uri, null)
             var durationUs = 0L
-            var avc = false
+            var supported = false
             for (i in 0 until ex.trackCount) {
                 val f = ex.getTrackFormat(i)
                 val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
                 if (f.containsKey(MediaFormat.KEY_DURATION)) durationUs = maxOf(durationUs, f.getLong(MediaFormat.KEY_DURATION))
-                if (mime == MediaFormat.MIMETYPE_VIDEO_AVC) avc = true
+                if (mime in SUPPORTED_VIDEO) supported = true
             }
-            Info(displayName(), durationUs / 1000, if (avc) null else "Video không được hỗ trợ (cần H.264)")
+            Info(displayName(), durationUs / 1000, if (supported) null else "Video không được hỗ trợ (cần H.264 hoặc H.265)")
         } catch (e: Exception) {
             Log.e(TAG, "Cannot read video: ${e.message}", e)
             Info(displayName(), 0, "Không đọc được video")
@@ -148,19 +148,20 @@ class ContentStreamer(
         try {
             ex.setDataSource(context, uri, null)
             val track = (0 until ex.trackCount).firstOrNull {
-                ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_VIDEO_AVC
+                ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME) in SUPPORTED_VIDEO
             } ?: return
             ex.selectTrack(track)
             val fmt = ex.getTrackFormat(track)
-            val sps = parameterSet(fmt, "csd-0")
-            val pps = parameterSet(fmt, "csd-1")
+            val hevc = fmt.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_VIDEO_HEVC
+            // H.264: csd-0 = SPS, csd-1 = PPS. H.265: csd-0 = VPS + SPS + PPS together.
+            val paramSets = listOf("csd-0", "csd-1").flatMap { parameterSets(fmt, it) }
             val buf = ByteBuffer.allocate(4 * 1024 * 1024)
-            val rtp = H264RtpSender(socket, target, mfVideoPort, TAG)
+            val rtp = H264RtpSender(socket, target, mfVideoPort, TAG, hevc)
             // Phones store portrait video as landscape frames plus a rotation tag; the frames go out as stored,
             // so the tag goes with them (RTP header extension) for the other phone to apply.
             val rotation = if (fmt.containsKey("rotation-degrees")) ((fmt.getInteger("rotation-degrees") % 360 + 360) % 360) / 90 * 90 else 0
             rtp.rotation = rotation
-            Log.i(TAG, "video rotation $rotation°")
+            Log.i(TAG, "video ${if (hevc) "H.265" else "H.264"}, rotation $rotation°, ${paramSets.size} parameter sets")
             fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) { if (running) rtp.sendNal(nal, tsUs, marker) }
             var frames = 0
             var lastLogNs = 0L
@@ -183,7 +184,7 @@ class ContentStreamer(
                     lastLogNs = System.nanoTime()
                 }
                 val nals = nalUnits(data)
-                if (sync) { sps?.let { sendNal(it, ptsUs, false) }; pps?.let { sendNal(it, ptsUs, false) } }
+                if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
                 nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
                 ex.advance()
             }
@@ -192,11 +193,12 @@ class ContentStreamer(
         }
     }
 
-    private fun parameterSet(fmt: MediaFormat, key: String): ByteArray? {
-        val bb = fmt.getByteBuffer(key) ?: return null
+    /** The NAL units stored in a codec-specific-data buffer (Annex-B, or a single bare NAL). */
+    private fun parameterSets(fmt: MediaFormat, key: String): List<ByteArray> {
+        val bb = fmt.getByteBuffer(key) ?: return emptyList()
         val all = ByteArray(bb.remaining()).also { bb.duplicate().get(it) }
-        val skip = if (all.size > 4 && all[2].toInt() == 0 && all[3].toInt() == 1) 4 else if (all.size > 3 && all[2].toInt() == 1) 3 else 0
-        return all.copyOfRange(skip, all.size)
+        if (all.isEmpty()) return emptyList()
+        return H264RtpSender.splitAnnexB(all).ifEmpty { listOf(all) }
     }
 
     // ───────────────────────────── audio ─────────────────────────────
@@ -292,6 +294,8 @@ class ContentStreamer(
     }
 
     companion object {
+        private val SUPPORTED_VIDEO = setOf(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC)
+
         /**
          * The NAL units of one stored sample: MP4 keeps them length-prefixed (4 bytes); a file that stores
          * start codes instead is split on them.

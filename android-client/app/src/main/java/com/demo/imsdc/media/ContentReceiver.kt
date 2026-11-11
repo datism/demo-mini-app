@@ -120,6 +120,9 @@ class ContentReceiver(
     private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
+    @Volatile private var vps: ByteArray? = null // H.265 only
+    /** The stream is H.265 (payload type 98) rather than H.264 (97). */
+    @Volatile private var hevc = false
 
     private fun videoLoop() {
         val socket = videoSocket ?: return
@@ -136,11 +139,49 @@ class ContentReceiver(
 
         fun addNal(nal: ByteArray, off: Int, len: Int) {
             if (len <= 0) return
-            val type = nal[off].toInt() and 0x1F
-            if (type == 7) sps = nal.copyOfRange(off, off + len)
-            if (type == 8) pps = nal.copyOfRange(off, off + len)
-            if (type == 5) hasIdr = true
+            if (hevc) {
+                val type = (nal[off].toInt() shr 1) and 0x3F
+                when (type) {
+                    32 -> vps = nal.copyOfRange(off, off + len)
+                    33 -> sps = nal.copyOfRange(off, off + len)
+                    34 -> pps = nal.copyOfRange(off, off + len)
+                }
+                if (isHevcKey(type)) hasIdr = true
+            } else {
+                val type = nal[off].toInt() and 0x1F
+                if (type == 7) sps = nal.copyOfRange(off, off + len)
+                if (type == 8) pps = nal.copyOfRange(off, off + len)
+                if (type == 5) hasIdr = true
+            }
             frame.write(startCode); frame.write(nal, off, len)
+        }
+
+        /** H.265 payloads (RFC 7798): single NAL, aggregation packet (48), fragmentation unit (49). */
+        fun handleHevc(p: ByteArray, n: Int) {
+            if (n < 14) return
+            when ((p[12].toInt() shr 1) and 0x3F) {
+                48 -> {
+                    var i = 14
+                    while (i + 2 <= n) {
+                        val size = ((p[i].toInt() and 0xFF) shl 8) or (p[i + 1].toInt() and 0xFF)
+                        if (size <= 0 || i + 2 + size > n) break
+                        addNal(p, i + 2, size)
+                        i += 2 + size
+                    }
+                }
+                49 -> if (n > 15) {
+                    val fu = p[14].toInt()
+                    if ((fu and 0x80) != 0) {
+                        val type = fu and 0x3F
+                        if (isHevcKey(type)) hasIdr = true
+                        frame.write(startCode)
+                        frame.write((p[12].toInt() and 0x81) or (type shl 1))
+                        frame.write(p[13].toInt())
+                    }
+                    frame.write(p, 15, n - 15)
+                }
+                else -> addNal(p, 12, n - 12)
+            }
         }
 
         fun handle(p: ByteArray) {
@@ -149,7 +190,7 @@ class ContentReceiver(
                 ((p[6].toLong() and 0xFF) shl 8) or (p[7].toLong() and 0xFF)
             val marker = (p[1].toInt() and 0x80) != 0
             val type = p[12].toInt() and 0x1F
-            when {
+            if (hevc) handleHevc(p, n) else when {
                 type in 1..23 -> addNal(p, 12, n - 12)
                 type == 24 -> { // STAP-A: several NAL units in one packet
                     var i = 13
@@ -206,7 +247,15 @@ class ContentReceiver(
             val pkt = DatagramPacket(buf, buf.size)
             socket.receive(pkt)
             val n = pkt.length
-            if (n < 13 || (buf[1].toInt() and 0x7F) != 97) continue
+            val pt = buf[1].toInt() and 0x7F
+            if (n < 13 || (pt != H264RtpSender.PT_H264 && pt != H264RtpSender.PT_H265)) continue
+            if ((pt == H264RtpSender.PT_H265) != hevc) {
+                // Codec changed (or the first packet): start over, parameter sets and all.
+                hevc = pt == H264RtpSender.PT_H265
+                sps = null; pps = null; vps = null
+                frame.reset(); sawKey = false; hasIdr = false
+                Log.i(TAG, "Shared video is ${if (hevc) "H.265" else "H.264"}")
+            }
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
             if (expected < 0) expected = seq
             if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
@@ -231,18 +280,19 @@ class ContentReceiver(
         var lastTs = -1L
         var ptsBaseUs = 0L
         var codecRotation = 0
+        var codecHevc = false
         var shownW = 0; var shownH = 0
         while (running) {
             val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (codec != null && codecRotation != rotation) {
-                // The rotation is set when the decoder starts: restart it, from the next keyframe.
-                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°: restarting the decoder")
+            if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
+                // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
+                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
                 try { codec?.stop() } catch (_: Exception) {}
                 try { codec?.release() } catch (_: Exception) {}
                 codec = null
             }
             if (codec == null && picture != null && !picture.key) continue
-            val c = codec ?: (if (picture != null) startDecoder(sps, pps, rotation)?.also { codecRotation = rotation } else null)
+            val c = codec ?: (if (picture != null) startDecoder(rotation)?.also { codecRotation = rotation; codecHevc = hevc } else null)
             if (c == null) continue
             try {
                 if (picture != null) {
@@ -288,19 +338,26 @@ class ContentReceiver(
         return if (rotation % 180 == 90) h to w else w to h
     }
 
-    private fun startDecoder(sps: ByteArray?, pps: ByteArray?, rotation: Int): MediaCodec? {
-        if (sps == null || pps == null) return null
+    private fun startDecoder(rotation: Int): MediaCodec? {
+        val sps = sps; val pps = pps; val vps = vps; val hevc = hevc
+        if (sps == null || pps == null || (hevc && vps == null)) return null
         return try {
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
-            format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + sps))
-            format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(startCode + pps))
+            val mime = if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+            val format = MediaFormat.createVideoFormat(mime, 1280, 720)
+            if (hevc) {
+                // H.265: VPS, SPS and PPS all go in csd-0.
+                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + vps!! + startCode + sps + startCode + pps))
+            } else {
+                format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(startCode + sps))
+                format.setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(startCode + pps))
+            }
             // Turns the picture as it is drawn on the surface (portrait phone video arrives as landscape frames).
             if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, rotation)
-            val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val c = MediaCodec.createDecoderByType(mime)
             c.configure(format, surface, null, 0)
             c.start()
             codec = c
-            Log.i(TAG, "Video decoder started (rotation $rotation°)")
+            Log.i(TAG, "Video decoder started (${if (hevc) "hevc" else "avc"}, rotation $rotation°)")
             c
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start video decoder: ${e.message}", e)
@@ -340,6 +397,9 @@ class ContentReceiver(
         private const val PICTURE_QUEUE = 30
         /** How far playback runs behind the stream, to absorb network jitter. */
         const val PLAYOUT_DELAY_MS = 200L
+
+        /** H.265 random-access (IRAP) pictures: BLA, IDR, CRA. Decoding can start there. */
+        fun isHevcKey(type: Int) = type in 16..21
 
         /**
          * Returns the packet with a plain 12-byte header (CSRCs and header extension removed, so the payload
