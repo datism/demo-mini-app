@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- 1900 SkyLotus: each caller now has their own points and booking history (DCAS strips MF's `@ip` route from the call id before looking up the caller); a booking must have a seat for every passenger, which also fixes Lịch sử đặt vé not opening.
 - Chia sẻ vị trí is now asked and accepted like the other shares, through a SIP share request (`requestShare('map')`, data-channel only like a photo share) instead of page-only `map.*` messages. It gets the native accept popup, Hold greyed out while pending, the hold cancel and 480/491 handling, and back closes it on both phones through `stopShare`. Live location data still flows over the data channel.
 - Busy callee: the called phone now answers 480 Temporarily Unavailable instead of 486 when it's already in a call or called by itself, so the IMS-AS plays the network's "không liên lạc được" announcement. The caller's local "Người dùng đang bận" TTS/busy tone is removed; a 486 now just shows the status and closes.
 - Call screen: Hold is greyed out while an app or share invite waits for an answer, on both the inviting phone and the phone being asked. It comes back once the invite is accepted, declined, cancelled or times out, because a hold re-INVITE can't go out while another is pending.

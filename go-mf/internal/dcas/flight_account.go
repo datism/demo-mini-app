@@ -166,11 +166,17 @@ func (s *DCASServer) flightCaller(sessionID string) string {
 	if callID == "" || redisClient == nil {
 		return flightGuest
 	}
-	data, err := redisClient.Get(ctx, "imsas:session:"+flightBaseCallID(callID)).Result()
-	if err != nil {
-		return flightGuest
+	// MF sends "<Call-ID>@<MF ip>". Try the id as is first, in case the SIP
+	// Call-ID itself contains '@', then without the MF route.
+	for _, id := range []string{flightTrimSlot(callID), flightBaseCallID(callID)} {
+		data, err := redisClient.Get(ctx, "imsas:session:"+id).Result()
+		if err == nil {
+			if caller := flightCallerFromSession(data); caller != flightGuest {
+				return caller
+			}
+		}
 	}
-	return flightCallerFromSession(data)
+	return flightGuest
 }
 
 // flightCallerFromSession reads the caller out of the IMS-AS session JSON.
@@ -184,9 +190,17 @@ func flightCallerFromSession(data string) string {
 	return s.Caller
 }
 
-// flightBaseCallID drops the "-app"/"-adc" suffix of an ADC slot context so the
-// id matches the call the IMS-AS stored.
+// flightBaseCallID drops MF's "@<ip>" route and the "-app"/"-adc" suffix of an
+// ADC slot context so the id matches the call the IMS-AS stored.
 func flightBaseCallID(callID string) string {
+	if i := strings.LastIndex(callID, "@"); i >= 0 {
+		callID = callID[:i]
+	}
+	return flightTrimSlot(callID)
+}
+
+// flightTrimSlot drops the "-app"/"-adc" suffix of an ADC slot context.
+func flightTrimSlot(callID string) string {
 	callID = strings.TrimSuffix(callID, "-app")
 	return strings.TrimSuffix(callID, "-adc")
 }
