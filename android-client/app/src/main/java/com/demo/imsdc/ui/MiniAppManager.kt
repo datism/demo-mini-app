@@ -1318,11 +1318,13 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sender: the user picked Ảnh/Video. Sends the Re-INVITE and tells the page how it ended. */
     fun requestShare(kind: String) {
-        if (kind != "photo" && kind != "video" && kind != "screen") { emitShareEvent("failed", """{"code":501}"""); return }
+        if (kind != "photo" && kind != "video" && kind != "screen" && kind != "map") { emitShareEvent("failed", """{"code":501}"""); return }
         // On hold nothing can be asked of the other side: the page shows "Thử lại sau".
         if (com.demo.imsdc.call.CallHold.active) { emitShareEvent("failed", """{"code":491}"""); return }
         if (shareState != ShareState.NONE) { emitShareEvent("failed", """{"code":486}"""); return }
-        val video = kind != "photo" // a screen goes over the same shared-content video line as a video file
+        // A screen goes over the same shared-content video line as a video file; a photo or location share is
+        // data channel only (the content-share stream), with no RTP lines.
+        val video = kind == "video" || kind == "screen"
         shareState = ShareState.INVITING
         shareCancelRequested = false
         activity.lifecycleScope.launch(Dispatchers.Main) {
