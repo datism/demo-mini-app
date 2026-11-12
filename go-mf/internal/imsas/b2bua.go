@@ -550,7 +550,12 @@ func (b *B2BUA) handleErrorResponse(msg *SIPMessage, callID, data string) {
 				session.AnnouncementCallID = callID
 				b.saveSession(session)
 
-				go b.handleUnreachableAnnouncement(session)
+				// 404: the number does not exist ("số không đúng"); 480: it exists but cannot be reached now.
+				file := "unreachable"
+				if msg.StatusCode == 404 {
+					file = "invalid_number"
+				}
+				go b.handleUnreachableAnnouncement(session, file)
 				return // DO NOT forward 480 now, DO NOT delete session now
 			}
 		}
@@ -656,9 +661,9 @@ func (b *B2BUA) callAnnouncementStop(session *CallSession) {
 	log.Printf("[IMS-AS] Announcement stopped and resources released for call %s", session.CallID)
 }
 
-func (b *B2BUA) handleUnreachableAnnouncement(session *CallSession) {
+func (b *B2BUA) handleUnreachableAnnouncement(session *CallSession, file string) {
 	callID := session.CallID
-	log.Printf("[IMS-AS] Starting unreachable announcement workflow for call %s", callID)
+	log.Printf("[IMS-AS] Starting %s announcement workflow for call %s", file, callID)
 
 	// Clean up initial MF Context if any
 	if session.ContextID != "" {
@@ -701,7 +706,7 @@ func (b *B2BUA) handleUnreachableAnnouncement(session *CallSession) {
 	playReq := map[string]string{
 		"call_id":      callID,
 		"sdp_offer":    session.OrigMsg.Body,
-		"file":         "unreachable",
+		"file":         file,
 		"callback_url": callbackURL,
 	}
 	reqData, _ := json.Marshal(playReq)

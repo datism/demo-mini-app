@@ -408,9 +408,18 @@ route_scscf(Msg, FromIP, FromPort, State) ->
                         {ok, _} ->
                             forward_down_to_pcscf(Msg, State);
                         error ->
-                            io_format("[S-CSCF] ❌ Callee ~s is offline/not registered. Replying 480 Temporarily Unavailable.~n", [ToUser]),
-                            Response = sip_parser:build_error_response(Msg, 480, "Temporarily Unavailable"),
-                            send_sip_response(Response, FromIP, FromPort, State)
+                            %% Not registered: a provisioned user is unreachable now (480, "không liên lạc được"); a number
+                            %% that does not exist at all is 404 ("số không đúng"). The IMS-AS plays the matching announcement.
+                            case lookup_user_password(ToUser) of
+                                {ok, _} ->
+                                    io_format("[S-CSCF] ❌ Callee ~s is offline/not registered. Replying 480 Temporarily Unavailable.~n", [ToUser]),
+                                    Response = sip_parser:build_error_response(Msg, 480, "Temporarily Unavailable"),
+                                    send_sip_response(Response, FromIP, FromPort, State);
+                                error ->
+                                    io_format("[S-CSCF] ❌ Callee ~p does not exist. Replying 404 Not Found.~n", [ToUser]),
+                                    Response = sip_parser:build_error_response(Msg, 404, "Not Found"),
+                                    send_sip_response(Response, FromIP, FromPort, State)
+                            end
                     end;
                 {false, true, true} ->
                     %% Initial INVITE matching iFC check.

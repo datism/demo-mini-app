@@ -31,5 +31,6 @@ COPY static/video.h264 ./video.h264
 COPY static/video.pcma ./video.pcma
 COPY static/agent.pcma ./agent.pcma
 COPY static/unreachable.pcma ./unreachable.pcma
+COPY static/invalid_number.pcma ./invalid_number.pcma
 
 EXPOSE 8080 8081 8082 8083 8084 8085 8095 5060/udp 40000/udp
