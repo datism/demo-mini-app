@@ -671,6 +671,10 @@ class CallActivity : AppCompatActivity() {
         })
 
         miniAppManager = MiniAppManager(this)
+        miniAppManager.onInvitePendingChanged = { pending ->
+            invitePending = pending
+            refreshHoldAvailable()
+        }
 
         // Wake screen + show on lockscreen for incoming calls
         if (isIncoming) {
@@ -813,8 +817,17 @@ class CallActivity : AppCompatActivity() {
     private fun setHoldAvailable(on: Boolean) {
         binding.btnKeypadCircle.isEnabled = on
         binding.btnKeypadCircle.alpha = if (on) 1f else 0.35f
-        binding.btnKeypadCircle.contentDescription = if (on) "Giữ cuộc gọi" else "Giữ cuộc gọi (khả dụng khi đã kết nối)"
+        binding.btnKeypadCircle.contentDescription = when {
+            on -> "Giữ cuộc gọi"
+            invitePending -> "Giữ cuộc gọi (đang chờ phản hồi lời mời)"
+            else -> "Giữ cuộc gọi (khả dụng khi đã kết nối)"
+        }
     }
+
+    /** An app or share invite is waiting for an answer: Hold waits too (no second Re-INVITE meanwhile). */
+    private var invitePending = false
+
+    private fun refreshHoldAvailable() = setHoldAvailable(isCallActiveUiShown && !invitePending)
 
     private fun setupUI() {
         setHoldAvailable(false)
@@ -1824,7 +1837,6 @@ class CallActivity : AppCompatActivity() {
 
     private fun showCallActiveUi() {
         lifecycleScope.launch(Dispatchers.Main) {
-            setHoldAvailable(true)
             binding.tvCallStatus.visibility = View.VISIBLE
             if (currentAppId == "operator-menu") {
                 binding.tvCallStatus.text = "🟢 Cuộc gọi thoại & video đã kết nối"
@@ -1840,6 +1852,7 @@ class CallActivity : AppCompatActivity() {
 
             if (!isCallActiveUiShown) {
                 isCallActiveUiShown = true
+                refreshHoldAvailable() // connected: Hold works (unless an invite is still waiting)
                 startOngoingCallService()
                 startMediaWatchdog()
                 val hotlineAppId = hotlineApp(remoteUser)
@@ -2207,6 +2220,10 @@ class CallActivity : AppCompatActivity() {
 
     private fun toggleCallHold() {
         if (!isCallActiveUiShown) return // not connected yet: nothing to hold
+        if (invitePending && !sipManager.isCallHoldActive) {
+            Toast.makeText(this, "Đang chờ phản hồi lời mời", Toast.LENGTH_SHORT).show()
+            return
+        }
         val nextHoldState = !sipManager.isCallHoldActive
         sipManager.isCallHoldActive = nextHoldState
         applyHoldState()
