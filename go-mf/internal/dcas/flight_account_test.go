@@ -149,7 +149,7 @@ func TestFlightCallerFromIMSSession(t *testing.T) {
 }
 
 func TestFlightBaseCallID(t *testing.T) {
-	cases := map[string]string{"abc": "abc", "abc-app": "abc", "abc-adc": "abc", "app-abc": "app-abc", "": "", "abc@10.0.0.5": "abc", "abc-app@10.0.0.5": "abc", "x@host@10.0.0.5": "x@host"}
+	cases := map[string]string{"abc": "abc", "abc-app": "abc", "abc-adc": "abc", "app-abc": "app-abc", "": "", "abc@10.0.0.5": "abc", "abc-app@10.0.0.5": "abc", "x@host@10.0.0.5": "x@host", "ab12@imsdc-app@10.0.0.5": "ab12@imsdc"}
 	for in, want := range cases {
 		if got := flightBaseCallID(in); got != want {
 			t.Errorf("flightBaseCallID(%q) = %q, want %q", in, got, want)
@@ -171,5 +171,14 @@ func TestFlightConfirmNeedsEverySeat(t *testing.T) {
 	after, bookings := accts.profile("1001")
 	if after != before || len(bookings) != len(seededFlightAccount().bookings) {
 		t.Errorf("seatless confirm changed the account: %+v -> %+v", before, after)
+	}
+}
+
+func TestStripMFRoute(t *testing.T) {
+	cases := map[string]string{"ab12@imsdc@10.0.0.5": "ab12@imsdc", "ab12@10.0.0.5": "ab12", "ab12": "ab12", "": ""}
+	for in, want := range cases {
+		if got := stripMFRoute(in); got != want {
+			t.Errorf("stripMFRoute(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
