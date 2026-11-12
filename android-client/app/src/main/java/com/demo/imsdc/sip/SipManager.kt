@@ -706,7 +706,8 @@ class SipManager(
 
         Log.i(TAG, "← Incoming INVITE from $fromUser (call=$callId)")
 
-        // A new call while one is ringing or up, or a call to ourselves: 486 Busy Here.
+        // A new call while one is ringing or up, or a call to ourselves: 480 Temporarily Unavailable, so the
+        // IMS-AS plays its "không liên lạc được" announcement to the caller (it intercepts 480/404, not 486).
         // Only an INVITE without a To-tag starts a new call (RFC 3261 12.1); one with a To-tag is a
         // re-INVITE of the current call, whatever Call-ID it carries, and must never be turned away.
         // Checked before the pending* fields below are overwritten, so the current call keeps its state.
@@ -720,12 +721,12 @@ class SipManager(
             else -> null
         }
         if (busyReason != null) {
-            Log.i(TAG, "→ 486 Busy Here to $fromUser (call=$callId): $busyReason")
+            Log.i(TAG, "→ 480 Temporarily Unavailable to $fromUser (call=$callId): $busyReason")
             try {
-                sendRaw(buildResponse(msg, 486, "Busy Here", "Content-Length: 0\r\n"))
+                sendRaw(buildResponse(msg, 480, "Temporarily Unavailable", "Content-Length: 0\r\n"))
                 busyCallIds.add(callId)
             } catch (e: Exception) {
-                Log.e(TAG, "486 send error: ${e.message}")
+                Log.e(TAG, "480 send error: ${e.message}")
             }
             return
         }
@@ -880,7 +881,7 @@ class SipManager(
         onCallEnded?.invoke()
     }
 
-    /** Call-IDs answered with 486 Busy Here. */
+    /** Call-IDs turned away while busy (answered 480). */
     private val busyCallIds = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
 
     /** A CANCEL/BYE of a call we turned away busy: it must not end the current call. */

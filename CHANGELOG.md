@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Busy callee: the called phone now answers 480 Temporarily Unavailable instead of 486 when it's already in a call or called by itself, so the IMS-AS plays the network's "không liên lạc được" announcement. The caller's local "Người dùng đang bận" TTS/busy tone is removed; a 486 now just shows the status and closes.
 - Call screen: Hold is greyed out while an app or share invite waits for an answer, on both the inviting phone and the phone being asked. It comes back once the invite is accepted, declined, cancelled or times out, because a hold re-INVITE can't go out while another is pending.
 - Data channel: the 64 KB size guard and the hold queue now also cover ImsDcSdk.sendOrQueueAdc. That is the path AndroidBridge.send/sendData actually take while the SDK is present (the drawing app and most pages); the earlier guard on sendViaADC never ran for them, so an oversized message could still close the channel.
 - Drawing app: clearing a busy board now reaches the other phone. The clear message no longer carries every stroke (it went over the data channel's 64 KB limit and was dropped); each phone backs up its own strokes for undo. A very long stroke is thinned to fit. The app also refuses to send any data channel message over 64 KB, because a failed oversized send closes the channel and the mini-app stops syncing for the rest of the call.
