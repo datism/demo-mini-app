@@ -1001,6 +1001,21 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** An app-opening Re-INVITE of ours is waiting for the other phone's user (180 seen or expected). */
     @Volatile private var awaitingPeerDecision = false
+        set(value) { field = value; notifyInvitePending() }
+
+    /** Hold is unavailable while an invite waits for an answer (a second Re-INVITE cannot go out meanwhile). */
+    var onInvitePendingChanged: ((Boolean) -> Unit)? = null
+    /** An app or share invite is waiting for an answer: ours (share or app) or the other phone's, waiting for us. */
+    val invitePending: Boolean
+        get() = shareState == ShareState.INVITING || awaitingPeerDecision || heldDecision != null
+    @Volatile private var lastInvitePending = false
+
+    private fun notifyInvitePending() {
+        val now = invitePending
+        if (now == lastInvitePending) return
+        lastInvitePending = now
+        activity.runOnUiThread { onInvitePendingChanged?.invoke(now) }
+    }
     /** Our pending invite was withdrawn because the call went on hold (not by the user, not unanswered). */
     @Volatile private var endedByHold = false
     /** How a request waiting for our answer is turned down: 603 by the user, 480 when the call went on hold. */
@@ -1262,8 +1277,10 @@ class MiniAppManager(val activity: CallActivity) {
 
     private enum class ShareState { NONE, INVITING, ACTIVE }
     @Volatile private var shareState = ShareState.NONE
+        set(value) { field = value; notifyInvitePending() }
     @Volatile private var shareCancelRequested = false
     private var heldDecision: CompletableDeferred<Boolean>? = null
+        set(value) { field = value; notifyInvitePending() }
     @Volatile private var heldCancelled = false
 
     /** Calls window.shareEvent(name, json) of the Content Sharing page. */
