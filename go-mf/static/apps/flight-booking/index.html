@@ -1674,12 +1674,11 @@
         grid += '<div class="seat-row">' + ['A', 'B', 'C'].map(c => seatBtn(n, c)).join('') + '<span class="rn tnum">' + n + '</span>' + ['D', 'E', 'F'].map(c => seatBtn(n, c)).join('') + '</div>';
       }
       const seats = state.seats, need = paxCount();
-      const missing = seats.length > 0 && seats.length < need;
+      const missing = seats.length < need; // every passenger needs a seat
       const extras = seats.filter(isExtra).length;
       const what = !seats.length ? 'Chưa chọn ghế'
         : (need > 1 ? 'Đã chọn ' + seats.length + '/' + need + ' · ' : '') + seatDesc(seats);
-      const fee = !seats.length ? 'Bỏ qua: xếp ngẫu nhiên miễn phí · Skip'
-        : missing ? 'Chọn thêm ' + (need - seats.length) + ' ghế · Pick ' + (need - seats.length) + ' more'
+      const fee = missing ? 'Chọn thêm ' + (need - seats.length) + ' ghế · Pick ' + (need - seats.length) + ' more'
           : extras ? '+' + money(extras * EXTRA_FEE) + ' · ghế rộng chân'
             : state.fare === 'flex' ? 'Miễn phí với hạng Flex' : 'Miễn phí · ghế tiêu chuẩn';
       const tip = state.seatBanner && sameSeats(seats, state.agentSeats);
@@ -1982,6 +1981,11 @@
       },
       pm: el => setState({ pm: el.dataset.k }),
       confirm: () => {
+        if (state.seats.length !== paxCount()) {
+          showToast('Vui lòng chọn ghế · Pick a seat for every passenger');
+          go('seat');
+          return;
+        }
         if (!state.name.trim()) {
           showToast('Vui lòng nhập họ và tên · Enter a name');
           return;

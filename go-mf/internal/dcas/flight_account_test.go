@@ -149,10 +149,27 @@ func TestFlightCallerFromIMSSession(t *testing.T) {
 }
 
 func TestFlightBaseCallID(t *testing.T) {
-	cases := map[string]string{"abc": "abc", "abc-app": "abc", "abc-adc": "abc", "app-abc": "app-abc", "": ""}
+	cases := map[string]string{"abc": "abc", "abc-app": "abc", "abc-adc": "abc", "app-abc": "app-abc", "": "", "abc@10.0.0.5": "abc", "abc-app@10.0.0.5": "abc", "x@host@10.0.0.5": "x@host"}
 	for in, want := range cases {
 		if got := flightBaseCallID(in); got != want {
 			t.Errorf("flightBaseCallID(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestFlightConfirmNeedsEverySeat(t *testing.T) {
+	seats, accts := newFlightSeatStore(), newFlightAccountStore()
+	before, _ := accts.profile("1001")
+	for _, req := range []FlightBookingRequest{
+		{Action: "confirm", Flight: "SL 213", From: "HAN", To: "SGN", Date: "2026-11-12", Fare: "flex", Adults: 1},
+		{Action: "confirm", Flight: "SL 213", From: "HAN", To: "SGN", Date: "2026-11-12", Fare: "flex", Seats: []string{"4A"}, Adults: 2},
+	} {
+		if r := reply(req, "1001", seats, accts); r.Status != "error" {
+			t.Errorf("confirm with %d seats for %d pax: status %q, want error", len(req.Seats), paxCount(req), r.Status)
+		}
+	}
+	after, bookings := accts.profile("1001")
+	if after != before || len(bookings) != len(seededFlightAccount().bookings) {
+		t.Errorf("seatless confirm changed the account: %+v -> %+v", before, after)
 	}
 }

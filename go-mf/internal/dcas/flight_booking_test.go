@@ -58,9 +58,9 @@ func TestFlightConfirmTotals(t *testing.T) {
 		tax  int
 	}{
 		{"flex one adult", FlightBookingRequest{Flight: "SL 213", Fare: "flex", Seat: "4A", Adults: 1}, 2370000, 480000},
-		{"saver two pax", FlightBookingRequest{Flight: "SL 213", Fare: "saver", Seat: "", Adults: 1, Children: 1}, 3540000, 960000},
+		{"saver two pax", FlightBookingRequest{Flight: "SL 213", Fare: "saver", Seats: []string{"5A", "5B"}, Adults: 1, Children: 1}, 3540000, 960000},
 		{"extra legroom", FlightBookingRequest{Flight: "SL 201", Fare: "saver", Seat: "11B", Adults: 1}, 1629000, 480000},
-		{"no pax defaults to one", FlightBookingRequest{Flight: "SL 201", Fare: "saver"}, 1479000, 480000},
+		{"no pax defaults to one", FlightBookingRequest{Flight: "SL 201", Fare: "saver", Seat: "5A"}, 1479000, 480000},
 	}
 	for _, c := range cases {
 		c.req.Action = "confirm"
@@ -128,8 +128,8 @@ func TestFlightSeatIsSharedBetweenCallers(t *testing.T) {
 		t.Errorf("another date must have its own seats, got agent=%s", other.AgentSeat)
 	}
 
-	if r := book(""); r.Status != "confirmed" {
-		t.Errorf("booking without a seat should still succeed, got %+v", r)
+	if r := book(""); r.Status != "error" {
+		t.Errorf("booking without a seat must be refused, got %+v", r)
 	}
 }
 

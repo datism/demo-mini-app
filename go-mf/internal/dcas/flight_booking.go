@@ -417,6 +417,11 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 		if len(want) > paxCount(req) {
 			return flightError(resp, "Số ghế nhiều hơn số hành khách")
 		}
+		if len(want) < paxCount(req) {
+			resp = flightError(resp, "Vui lòng chọn đủ ghế cho hành khách")
+			resp.MessageEn = "Pick a seat for every passenger"
+			return resp
+		}
 		seen := map[string]bool{}
 		for _, seat := range want {
 			if !validSeat(seat) || seen[seat] {
