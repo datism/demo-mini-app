@@ -193,10 +193,7 @@ func flightCallerFromSession(data string) string {
 // flightBaseCallID drops MF's "@<ip>" route and the "-app"/"-adc" suffix of an
 // ADC slot context so the id matches the call the IMS-AS stored.
 func flightBaseCallID(callID string) string {
-	if i := strings.LastIndex(callID, "@"); i >= 0 {
-		callID = callID[:i]
-	}
-	return flightTrimSlot(callID)
+	return flightTrimSlot(stripMFRoute(callID))
 }
 
 // flightTrimSlot drops the "-app"/"-adc" suffix of an ADC slot context.

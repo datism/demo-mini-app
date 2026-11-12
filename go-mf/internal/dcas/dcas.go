@@ -179,9 +179,7 @@ func (s *DCASServer) handleTcpMdc2Connection(conn net.Conn) {
 		if strings.HasPrefix(line, "CALL_ID:") {
 			callID = strings.TrimPrefix(line, "CALL_ID:")
 			// Strip route info if present e.g. callid@localip
-			if strings.Contains(callID, "@") {
-				callID = strings.Split(callID, "@")[0]
-			}
+			callID = stripMFRoute(callID)
 		} else if strings.HasPrefix(line, "SESSION_ID:") {
 			sessionID = strings.TrimPrefix(line, "SESSION_ID:")
 		} else if strings.HasPrefix(line, "STREAM_ID:") {
@@ -760,6 +758,16 @@ func setToRedis(key string, value string) error {
 
 func publishToRedis(channel, message string) error {
 	return redisClient.Publish(ctx, channel, message).Err()
+}
+
+// stripMFRoute drops the "@<MF ip>" MF appends to the call id. Only the last
+// '@' is the route: the SIP Call-ID itself may contain one (the phone sends
+// "xxxx@imsdc"), and the IMS-AS stores the session under the full Call-ID.
+func stripMFRoute(callID string) string {
+	if i := strings.LastIndex(callID, "@"); i >= 0 {
+		return callID[:i]
+	}
+	return callID
 }
 
 func registerSessionInRedis(callID, sessionID string) {
