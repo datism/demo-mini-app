@@ -500,11 +500,31 @@
       flex: 0 0 clamp(36px, 10vw, 44px);
     }
     input[type=file] { display: none; }
+    [hidden] { display: none !important; }
+    #photoNav { position:fixed; inset:0; pointer-events:none; z-index:28; }
+    .photo-nav-button { position:absolute; top:50%; transform:translateY(-50%); width:44px; height:44px;
+      display:grid; place-items:center; border:1px solid var(--glass-border); border-radius:50%; color:var(--text-main);
+      background:var(--glass-bg); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+      box-shadow:0 6px 18px rgba(0,0,0,.22); pointer-events:auto; touch-action:manipulation; cursor:pointer; }
+    .photo-nav-button svg { width:22px; height:22px; }
+    .photo-nav-button:active { background:var(--glass-bg-heavy); }
+    .photo-nav-button:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    #btnPhotoPrev { left:max(12px,env(safe-area-inset-left)); }
+    #btnPhotoNext { right:max(12px,env(safe-area-inset-right)); }
+    #photoCounter { position:absolute; left:50%; bottom:calc(124px + var(--safe-bottom)); transform:translateX(-50%);
+      padding:5px 10px; border-radius:999px; background:var(--glass-bg); color:var(--text-main);
+      border:1px solid var(--glass-border); font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; }
+    button.tool:disabled { opacity:.5; }
   </style>
 </head>
 <body>
 
 <canvas id="board"></canvas>
+<nav id="photoNav" aria-label="Điều hướng ảnh" hidden>
+  <button id="btnPhotoPrev" class="photo-nav-button" type="button" aria-label="Ảnh trước" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+  <span id="photoCounter" role="status" aria-live="polite"></span>
+  <button id="btnPhotoNext" class="photo-nav-button" type="button" aria-label="Ảnh tiếp theo" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
+</nav>
 
 <!-- Top HUD -->
 <div id="topBar">
@@ -646,13 +666,13 @@
   </svg>
 </button>
 
-<input type="file" id="fileInput" accept="image/*">
+<input type="file" id="fileInput" accept="image/*" multiple>
 
 <script>
   'use strict';
 
   /* ═══════════════════════════════════════════════════════════════════
-   * BẢNG VẼ (sketch-sync-app v2.2 Pro UI) — Air-gapped 5G New Calling
+   * BẢNG VẼ (sketch-sync-app v2.3 Shared Album) — Air-gapped 5G New Calling
    * Tương thích 100% giao thức ADC stream 1000 & native PhotoTransport.
    * ═══════════════════════════════════════════════════════════════════ */
 
@@ -674,6 +694,176 @@
     ? window.crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
   const newId = () => 's' + strokeClientId + '_' + (seq++).toString(36);
   const myStrokes = () => state.strokes.filter(s => s.mine);
+
+  /* ═══════════════ ALBUM ẢNH DÙNG CHUNG ═══════════════ */
+  const MAX_ALBUM_PHOTOS = 20, MAX_ALBUM_BYTES = 32 * 1024 * 1024;
+  const albumPages = new Map(); // includes removed pages, retained for Undo until call cleanup
+  const blankPage = { photo: null, strokes: [], remoteDrafts: new Map(), lastBackup: null };
+  let activePageId = null, albumClock = 0, albumSelection = { clock: 0, actor: '' };
+  let desiredPageId = null, importBusy = false, importGeneration = 0;
+  let downloadActive = null, downloadTimer = null;
+  const downloadQueue = [];
+  const stamp = () => ({ clock: ++albumClock, actor: strokeClientId });
+  const validStamp = s => s && Number.isSafeInteger(s.clock) && s.clock > 0 && typeof s.actor === 'string' && s.actor.length > 0 && s.actor.length <= 100;
+  const compareStamp = (a, b) => a.clock - b.clock || (a.actor < b.actor ? -1 : a.actor > b.actor ? 1 : 0);
+  const validPhotoId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id);
+  function albumOrder() {
+    return Array.from(albumPages.values()).filter(p => !p.deleted)
+      .sort((a,b) => compareStamp(a.order,b.order) || a.id.localeCompare(b.id)).map(p => p.id);
+  }
+  function savePage() {
+    const page = activePageId === null ? blankPage : albumPages.get(activePageId);
+    if (page) Object.assign(page, { photo: state.photo, strokes: state.strokes, remoteDrafts: state.remoteDrafts, lastBackup: state.lastBackup });
+  }
+  function updateAlbumNav() {
+    const ids = albumOrder(), index = ids.indexOf(activePageId);
+    $('photoNav').hidden = ids.length < 2 || index < 0;
+    $('btnPhotoPrev').hidden = index <= 0;
+    $('btnPhotoNext').hidden = index < 0 || index >= ids.length - 1;
+    $('photoCounter').textContent = index < 0 ? '' : (index + 1) + ' / ' + ids.length;
+    $('btnPhoto').disabled = importBusy;
+    $('btnPhoto').setAttribute('aria-busy', String(importBusy));
+  }
+  function displayPage(id) {
+    if (id !== null && (!albumPages.has(id) || albumPages.get(id).deleted)) return;
+    if (activePageId === id) { updateAlbumNav(); return; }
+    // Finish every finger on its original picture before switching; peer drafts remain on that page.
+    Array.from(localDrafts.keys()).forEach(commitStroke);
+    state.eraserCursors.clear(); pointerTools.clear();
+    savePage();
+    if (state.photo && state.photo.img) { state.photo.img.onload = null; state.photo.img = null; }
+    activePageId = id;
+    const page = id === null ? blankPage : albumPages.get(id);
+    state.strokes = page.strokes; state.remoteDrafts = page.remoteDrafts; state.lastBackup = page.lastBackup;
+    setPhotoState(page.photo, { album: true });
+    updateAlbumNav();
+    if (page.photo && !page.photo.ready) requestAlbumPhoto(page.id, true);
+  }
+  function selectPage(id, sync = true, remoteStamp = null) {
+    if (id !== null && !validPhotoId(id)) return;
+    const version = remoteStamp || stamp();
+    if (!validStamp(version)) return;
+    albumClock = Math.max(albumClock, version.clock);
+    if (compareStamp(version, albumSelection) <= 0) return;
+    albumSelection = version; desiredPageId = id;
+    if (id === null || albumPages.has(id) && !albumPages.get(id).deleted) displayPage(id);
+    if (sync) sendJson({ t:'album.select', version:1, id, stamp:version });
+  }
+  function movePhoto(delta) {
+    const ids = albumOrder(), index = ids.indexOf(activePageId), next = index + delta;
+    if (index < 0 || next < 0 || next >= ids.length) return;
+    closePopovers(); selectPage(ids[next]); buzz(6);
+  }
+  $('btnPhotoPrev').onclick = () => movePhoto(-1);
+  $('btnPhotoNext').onclick = () => movePhoto(1);
+  function addAlbumPage(meta, photo, version) {
+    if (!validPhotoId(meta.id) || !validStamp(version) || !Number.isFinite(meta.bytes) || meta.bytes <= 0 || meta.bytes > 6 * 1024 * 1024) return null;
+    albumClock = Math.max(albumClock, version.clock);
+    if (albumPages.has(meta.id)) return albumPages.get(meta.id);
+    const used = Array.from(albumPages.values()).reduce((n,p) => n + p.bytes, 0);
+    if (albumPages.size >= MAX_ALBUM_PHOTOS || used + meta.bytes > MAX_ALBUM_BYTES) { toast('Album tối đa 20 ảnh, tổng 32 MB trong cuộc gọi'); return null; }
+    // Native binary frames have a 16-bit ID. Never accept an ambiguous ID in this album.
+    if (Array.from(albumPages.keys()).some(id => hash16(id) === hash16(meta.id))) { toast('Ảnh bị trùng mã truyền. Hãy chọn lại ảnh đó.'); return null; }
+    const page = { id:meta.id, bytes:meta.bytes, order:version, mutation:version, deleted:false,
+      photo, strokes:[], remoteDrafts:new Map(), lastBackup:null };
+    albumPages.set(meta.id, page);
+    if (desiredPageId === meta.id) displayPage(meta.id);
+    updateAlbumNav(); return page;
+  }
+  function newPhotoId() {
+    let id;
+    do { id = 'p' + strokeClientId.replace(/[^A-Za-z0-9_-]/g,'') + '_' + (seq++).toString(36); }
+    while (Array.from(albumPages.keys()).some(old => hash16(old) === hash16(id)));
+    return id;
+  }
+  function removeAlbumPhoto(id, sync = true, remoteStamp = null) {
+    const page = albumPages.get(id), version = remoteStamp || stamp();
+    if (!page || !validStamp(version) || compareStamp(version,page.mutation) <= 0) return;
+    albumClock = Math.max(albumClock,version.clock);
+    const ids = albumOrder(), index = ids.indexOf(id);
+    if (activePageId === id) { Array.from(localDrafts.keys()).forEach(commitStroke); savePage(); }
+    page.deleted = true; page.mutation = version;
+    if (sync) sendJson({t:'album.remove',version:1,id,stamp:version});
+    if (activePageId === id) {
+      const remaining = albumOrder(), next = remaining[Math.min(index,remaining.length-1)] || null;
+      if (sync) selectPage(next); else { desiredPageId = next; displayPage(next); }
+      state.lastBackup = {kind:'album-remove',id};
+      savePage();
+    }
+    updateToolbar(); updateAlbumNav();
+  }
+  function restoreAlbumPhoto(id, sync = true, remoteStamp = null) {
+    const page = albumPages.get(id), version = remoteStamp || stamp();
+    if (!page || !validStamp(version) || compareStamp(version,page.mutation) <= 0) return;
+    albumClock = Math.max(albumClock,version.clock);
+    page.deleted = false; page.mutation = version; page.lastBackup = null;
+    if (sync) { sendJson({t:'album.restore',version:1,id,stamp:version}); selectPage(id); }
+    else if (desiredPageId === id) displayPage(id);
+    updateAlbumNav();
+  }
+  function requestAlbumPhoto(id, priority = false) {
+    const page = albumPages.get(id);
+    if (!page || page.deleted || page.photo.ready || downloadActive === id || downloadQueue.includes(id)) return;
+    priority ? downloadQueue.unshift(id) : downloadQueue.push(id);
+    nextAlbumDownload();
+  }
+  function nextAlbumDownload() {
+    if (!boardActive || downloadActive) return;
+    while (downloadQueue.length) {
+      const id = downloadQueue.shift(), page = albumPages.get(id);
+      if (!page || page.deleted || page.photo.ready) continue;
+      downloadActive = id; state.pendingPhoto = {id,bytes:page.bytes};
+      showProgress('Đang nhận ảnh ' + (albumOrder().indexOf(id)+1) + ' / ' + albumOrder().length);
+      downloadTimer = setTimeout(() => {
+        downloadTimer = null; downloadActive = null; state.pendingPhoto = null;
+        toast('Ảnh HD chưa tải xong. Chuyển trang hoặc chọn lại ảnh để thử lại.'); nextAlbumDownload();
+      },60000);
+      sendJson({t:'fetch',id}); return;
+    }
+    hideProgress();
+  }
+  function finishAlbumDownload(id) {
+    const index = downloadQueue.indexOf(id); if (index >= 0) downloadQueue.splice(index,1);
+    if (downloadActive === id) { clearTimeout(downloadTimer); downloadTimer = null; downloadActive = null; state.pendingPhoto = null; }
+    nextAlbumDownload();
+  }
+  function handleAlbumControl(msg) {
+    if (!['album.select','album.remove','album.restore'].includes(msg.t)) return false;
+    if (msg.version !== 1 || !validStamp(msg.stamp)) return true;
+    if (msg.t === 'album.select') selectPage(msg.id,false,msg.stamp);
+    else if (validPhotoId(msg.id) && msg.t === 'album.remove') removeAlbumPhoto(msg.id,false,msg.stamp);
+    else if (validPhotoId(msg.id)) restoreAlbumPhoto(msg.id,false,msg.stamp);
+    return true;
+  }
+  // Route late strokes/erase/clear to their picture, without temporarily showing that picture.
+  function routePageMessage(msg) {
+    const types = ['stroke.start','stroke.points','stroke.cancel','stroke','erase','clear','photo.clear'];
+    if (!types.includes(msg.t) || msg.photoId === undefined || msg.photoId === activePageId) return false;
+    const page = msg.photoId === null ? blankPage : albumPages.get(msg.photoId);
+    if (!page || page.deleted) return true;
+    const current = {photo:state.photo,strokes:state.strokes,remoteDrafts:state.remoteDrafts,lastBackup:state.lastBackup};
+    const packet = {...msg}; delete packet.photoId;
+    try {
+      Object.assign(state,{photo:page.photo,strokes:page.strokes,remoteDrafts:page.remoteDrafts,lastBackup:page.lastBackup});
+      window.receiveData(JSON.stringify(packet));
+      Object.assign(page,{photo:state.photo,strokes:state.strokes,remoteDrafts:state.remoteDrafts,lastBackup:state.lastBackup});
+    } finally { Object.assign(state,current); updateToolbar(); redraw(); }
+    return true;
+  }
+  function releaseAlbum() {
+    importGeneration++; importBusy = false;
+    clearTimeout(downloadTimer); downloadTimer = null; downloadActive = null; downloadQueue.length = 0;
+    const urls = new Set();
+    for (const page of albumPages.values()) {
+      if (page.photo && page.photo.img) { page.photo.img.onload = null; page.photo.img = null; }
+      if (page.photo && page.photo.url && page.photo.url.startsWith('blob:')) urls.add(page.photo.url);
+      page.remoteDrafts.clear(); page.strokes.length = 0; page.lastBackup = null;
+    }
+    for (const url of urls) URL.revokeObjectURL(url);
+    albumPages.clear(); activePageId = null; desiredPageId = null;
+    blankPage.photo = null; blankPage.strokes = []; blankPage.remoteDrafts.clear(); blankPage.lastBackup = null;
+    ignoredStrokeIds.clear();
+  }
 
   /* ─────────────── Bridge helpers ─────────────── */
   function sendJson(obj) {
@@ -860,7 +1050,7 @@
       const from = stroke.sentPointCount;
       const pts = stroke.pts.slice(from, from + 64);
       stroke.sentPointCount += pts.length;
-      sendJson({ t: 'stroke.points', id: stroke.id, from, pts });
+      sendJson({ t: 'stroke.points', id: stroke.id, photoId: stroke.photoId, from, pts });
     }
   }
 
@@ -884,7 +1074,7 @@
     const draft = localDrafts.get(pointerId);
     localDrafts.delete(pointerId);
     stopIdleFlush();
-    if (draft && sync) sendJson({ t: 'stroke.cancel', id: draft.id });
+    if (draft && sync) sendJson({ t: 'stroke.cancel', id: draft.id, photoId: draft.photoId });
   }
 
   function resetLiveStrokes(sync = false) {
@@ -907,7 +1097,7 @@
   function onStrokeStart(msg) {
     if (!msg.id || ignoredStrokeIds.has(msg.id) || !matchesPhoto(msg) || !validStrokePoints(msg.pts)) return;
     if (state.strokes.some(s => s.id === msg.id) || state.remoteDrafts.has(msg.id)) return;
-    state.remoteDrafts.set(msg.id, { id: msg.id, mine: false, color: msg.color, w: msg.w, pts: msg.pts.slice() });
+    state.remoteDrafts.set(msg.id, { id: msg.id, photoId: msg.photoId === undefined ? (state.photo ? state.photo.id : null) : msg.photoId, mine: false, color: msg.color, w: msg.w, pts: msg.pts.slice() });
     redraw();
     updateToolbar();
   }
@@ -925,7 +1115,7 @@
     state.remoteDrafts.delete(msg.id);
     if (ignoredStrokeIds.has(msg.id)) { redraw(); return; }
     if (!matchesPhoto(msg) || !validStrokePoints(msg.pts)) { redraw(); return; }
-    const stroke = { id: msg.id || newId(), mine: false, color: msg.color, w: msg.w, pts: msg.pts };
+    const stroke = { id: msg.id || newId(), photoId: msg.photoId === undefined ? (state.photo ? state.photo.id : null) : msg.photoId, mine: false, color: msg.color, w: msg.w, pts: msg.pts };
     const index = state.strokes.findIndex(s => s.id === stroke.id);
     if (index < 0) state.strokes.push(stroke);
     else state.strokes[index] = stroke;
@@ -1117,7 +1307,7 @@
     if (i < 0) return;
     state.strokes.splice(i, 1);
     redraw();
-    if (sync) sendJson({ t: 'erase', id });
+    if (sync) sendJson({ t: 'erase', id, photoId: state.photo ? state.photo.id : null });
     updateToolbar();
   }
 
@@ -1130,6 +1320,7 @@
     $('stylePreviewDot').style.background = state.color;
     $('chipColorRing').style.borderColor = state.color;
     $('styleSizeBadge').textContent = state.penW;
+    updateAlbumNav();
   }
 
   function setTool(id) {
@@ -1186,6 +1377,10 @@
   /** Hoàn tác: nét của mình gần nhất; hết thì hoàn tác clear/photo-clear vừa rồi. */
   $('btnUndo').onclick = () => {
     closePopovers();
+    const albumBackup = state.lastBackup;
+    if (albumBackup && albumBackup.kind === 'album-remove') {
+      state.lastBackup = null; restoreAlbumPhoto(albumBackup.id); redraw(); updateToolbar(); return;
+    }
     const mine = myStrokes();
     if (mine.length) {
       removeStroke(mine[mine.length - 1].id, true);
@@ -1197,7 +1392,7 @@
     state.lastBackup = null;
     if (b.kind === 'strokes') {
       state.strokes = b.strokes.map(s => ({ ...s }));
-      sendJson({ t: 'clear', backup: null });
+      sendJson({ t: 'clear', photoId: state.photo ? state.photo.id : null, backup: null });
     } else {
       restorePhoto(b.photo);
       sendJson({ t: 'photo.clear', backup: null });
@@ -1251,7 +1446,7 @@
     updateToolbar();
     // Không gửi kèm toàn bộ nét: với nhiều nét, tin nhắn vượt giới hạn 64 KB của kênh dữ liệu và bị bỏ (máy kia
     // không xóa). Máy kia có cùng bản vẽ nên tự sao lưu nét của nó để Hoàn tác.
-    sendJson({ t: 'clear', backup: true });
+    sendJson({ t: 'clear', photoId: state.photo ? state.photo.id : null, backup: true });
     toast('Đã xóa toàn bộ nét — bấm Hoàn tác để khôi phục');
     buzz([10, 40, 10]);
   }
@@ -1259,6 +1454,7 @@
   function doPhotoClear() {
     clearArmed = true;
     if (!state.photo) { toast('Chưa có ảnh nền để gỡ'); return; }
+    if (activePageId && albumPages.has(activePageId)) { removeAlbumPhoto(activePageId); toast('Đã gỡ ảnh này · Hoàn tác để khôi phục'); return; }
     resetLiveStrokes(true);
     state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
     state.photo = null;
@@ -1324,31 +1520,41 @@
   }
 
   $('fileInput').onchange = async () => {
-    const file = ($('fileInput').files || [])[0];
+    const files = Array.from($('fileInput').files || []);
     $('fileInput').value = '';
-    if (!file) return;
-    if (!window.AndroidBridge || typeof window.AndroidBridge.importPhotoB64 !== 'function') {
-      toast('Không tìm thấy AndroidBridge');
-      return;
-    }
-    toast('Đang xử lý ảnh...');
-    let b64;
-    try { b64 = await fileToJpegB64(file); }
-    catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); return; }
-    const id = 'p' + Date.now();
-    let res;
+    if (!files.length || importBusy || !boardActive) return;
+    if (!window.AndroidBridge || typeof window.AndroidBridge.importPhotoB64 !== 'function') { toast('Không tìm thấy AndroidBridge'); return; }
+    const images = files.filter(file => !file.type || file.type.startsWith('image/'));
+    if (!images.length) { toast('Hãy chọn tệp ảnh'); return; }
+    const token = ++importGeneration;
+    importBusy = true; updateAlbumNav();
+    let added = 0, failed = files.length - images.length;
     try {
-      res = JSON.parse(window.AndroidBridge.importPhotoB64(JSON.stringify({ id: id, data: b64, type: 'image/jpeg' })) || '{}');
-    } catch (e) { toast('Lỗi khi gửi ảnh sang Android: ' + (e && e.message || e)); return; }
-    if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); return; }
-
-    if (state.strokes.length) toast('Bảng đã làm mới cho ảnh mới');
-
-    const url = window.AndroidBridge ? window.AndroidBridge.mediaUrl(id, false) : '';
-    setPhotoState({ id: id, ready: true, url: url, img: null }, { fresh: true });
-    showProgress('Đang đồng bộ ảnh');
-    const thumb = await thumbB64Of(id);
-    sendJson({ t: 'photo', id: id, bytes: res.bytes, thumb: thumb });
+      for (let index = 0; index < images.length; index++) {
+        if (!boardActive || token !== importGeneration) return;
+        if (albumPages.size >= MAX_ALBUM_PHOTOS) { failed += images.length-index; break; }
+        showProgress('Đang thêm ảnh ' + (index+1) + ' / ' + images.length);
+        try {
+          const b64 = await fileToJpegB64(images[index]);
+          if (!boardActive || token !== importGeneration) return;
+          const id = newPhotoId();
+          const res = JSON.parse(window.AndroidBridge.importPhotoB64(JSON.stringify({id,data:b64,type:'image/jpeg'})) || '{}');
+          if (!res.ok) throw new Error(res.error || 'import_failed');
+          const version = stamp(), url = window.AndroidBridge.mediaUrl(id,false);
+          const page = addAlbumPage({id,bytes:res.bytes},{id,ready:true,url,img:null},version);
+          if (!page) { failed++; continue; }
+          let thumb = await thumbB64Of(id);
+          if (thumb.length > 48000) thumb = ''; // Keep the control JSON below the 64 KB ADC limit.
+          if (!boardActive || token !== importGeneration) return;
+          sendJson({t:'photo',id,bytes:res.bytes,thumb,album:1,order:version});
+          // First successful photo from this selection becomes the shared current page.
+          if (added++ === 0) selectPage(id);
+        } catch (error) { failed++; console.warn('[SK] photo import failed', error && error.message); }
+      }
+      if (boardActive && token === importGeneration) toast(added ? 'Đã thêm ' + added + ' ảnh' + (failed ? ' · ' + failed + ' tệp chưa thêm được' : '') : 'Chưa thêm được ảnh. Hãy thử lại.');
+    } finally {
+      if (token === importGeneration) { importBusy = false; updateAlbumNav(); if (!downloadActive) hideProgress(); }
+    }
   };
 
   async function thumbB64Of(id) {
@@ -1373,7 +1579,7 @@
       state.strokes = [];
       state.lastBackup = null;
     }
-    if ((state.photo ? state.photo.id : null) !== (p ? p.id : null)) resetLiveStrokes(true);
+    if (!(opts && opts.album) && (state.photo ? state.photo.id : null) !== (p ? p.id : null)) resetLiveStrokes(true);
     if (!p) {
       state.photo = null;
       updateToolbar();
@@ -1381,7 +1587,7 @@
       return;
     }
     if (state.photo && state.photo.url && state.photo.url.startsWith('blob:') &&
-        state.photo.url !== p.url) {
+        state.photo.url !== p.url && !albumPages.has(state.photo.id)) {
       URL.revokeObjectURL(state.photo.url);
     }
     state.photo = p;
@@ -1403,36 +1609,44 @@
 
   /* ─────────────── Nhận photo từ xa ─────────────── */
   function onRemotePhoto(msg) {
+    if (!validPhotoId(msg.id)) return;
+    const version = msg.album === 1 ? msg.order : stamp();
+    if (!validStamp(version)) return;
     let thumbUrl = '';
-    if (msg.thumb) thumbUrl = msg.thumb.startsWith('data:') ? msg.thumb : 'data:image/jpeg;base64,' + msg.thumb;
-    state.pendingPhoto = { id: msg.id, bytes: msg.bytes };
-    setPhotoState({ id: msg.id, ready: false, url: thumbUrl, img: null }, { fresh: true });
-    toast('Đối phương chèn ảnh nền mới · bảng đã làm mới');
-    showProgress('Đang tải ảnh HD');
-    sendJson({ t: 'fetch', id: msg.id });
+    if (typeof msg.thumb === 'string' && msg.thumb.length < 100000) thumbUrl = msg.thumb.startsWith('data:image/') ? msg.thumb : 'data:image/jpeg;base64,' + msg.thumb;
+    const page = addAlbumPage(msg, {id:msg.id,ready:false,url:thumbUrl,img:null}, version);
+    if (!page || page.deleted) return;
+    if (msg.album !== 1) selectPage(msg.id,false,version);
+    requestAlbumPhoto(msg.id);
   }
 
   function onFetch(msg) {
-    if (!state.photo || state.photo.id !== msg.id || !window.AndroidBridge) return;
-    const res = JSON.parse(window.AndroidBridge.sendPhoto(JSON.stringify({ id: msg.id })) || '{}');
-    if (res.ok) sendJson({ t: 'begin', id: msg.id, chunks: res.chunks, bytes: res.bytes });
+    const page = albumPages.get(msg.id);
+    if (!page || !page.photo || !page.photo.ready || !window.AndroidBridge) return;
+    try {
+      const res = JSON.parse(window.AndroidBridge.sendPhoto(JSON.stringify({id:msg.id})) || '{}');
+      if (res.ok) sendJson({t:'begin',id:msg.id,chunks:res.chunks,bytes:res.bytes});
+    } catch (error) { console.warn('[SK] sendPhoto failed', error && error.message); }
   }
 
   function onPshare(idHash, b64) {
-    const pending = state.pendingPhoto;
-    if (!pending || hash16(pending.id) !== Number(idHash)) {
-      console.warn('[SK] unknown idHash', idHash);
-      return;
-    }
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
-    setPhotoState({ id: pending.id, ready: true, url: url, img: null });
-    hideProgress();
-    sendJson({ t: 'done', id: pending.id, ok: true });
-    toast('Đã nhận ảnh nền — có thể vẽ bằng nhiều ngón');
-    buzz([12, 30, 12]);
+    if (!boardActive) return;
+    const page = Array.from(albumPages.values()).find(p => hash16(p.id) === Number(idHash));
+    if (!page || page.photo.ready) return;
+    let bytes;
+    try {
+      const bin = atob(b64);
+      if (!bin.length || bin.length > 6 * 1024 * 1024) return;
+      bytes = new Uint8Array(bin.length);
+      for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    } catch (_) { return; }
+    const url = URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}));
+    const old = page.photo;
+    page.photo = {id:page.id,ready:true,url,img:null};
+    if (old && old.url && old.url.startsWith('blob:')) URL.revokeObjectURL(old.url);
+    if (activePageId === page.id && !page.deleted) setPhotoState(page.photo,{album:true});
+    sendJson({t:'done',id:page.id,ok:true});
+    finishAlbumDownload(page.id);
   }
   function hash16(s) {
     let h = 0;
@@ -1441,7 +1655,7 @@
   }
 
   /* ═══════════════ PRESENCE ═══════════════ */
-  setInterval(() => {
+  const presenceTimer = setInterval(() => {
     const live = Date.now() - state.peerActiveAt < 3000;
     $('peerDot').classList.toggle('live', live);
     $('peerLbl').textContent = live ? '· Đang tương tác' : '';
@@ -1458,6 +1672,8 @@
         return;
       }
       const msg = typeof dataStr === 'object' ? dataStr : JSON.parse(dataStr);
+      if (!boardActive || !msg) return;
+      if (handleAlbumControl(msg) || routePageMessage(msg)) return;
 
       if (msg.type === 'draw') {
         const st = legacyStroke(msg);
@@ -1476,10 +1692,9 @@
       switch (msg.t) {
         case 'photo': onRemotePhoto(msg); break;
         case 'fetch': onFetch(msg); break;
-        case 'begin': showProgress('Đang nhận ảnh'); break;
+        case 'begin': if (msg.id === downloadActive) showProgress('Đang nhận ảnh'); break;
         case 'done':
-          hideProgress();
-          if (msg.ok) toast('Đã đồng bộ xong ảnh nền');
+          if (!importBusy && !downloadActive) hideProgress();
           break;
 
         case 'stroke.start': onStrokeStart(msg); break;
@@ -1592,9 +1807,10 @@
     resetLiveStrokes();
     if (paintFrame !== null) cancelAnimationFrame(paintFrame);
     paintFrame = null;
-    clearTimeout(pillIdle);
+    clearTimeout(pillIdle); clearTimeout(clearHold); clearTimeout(toastTimer); clearInterval(presenceTimer);
     setBoardFullScreen(false);
-    if (state.photo && state.photo.url && state.photo.url.startsWith('blob:')) URL.revokeObjectURL(state.photo.url);
+    releaseAlbum();
+    hideProgress();
     state.photo = null; state.pendingPhoto = null; state.strokes = []; state.lastBackup = null;
   };
 </script>
