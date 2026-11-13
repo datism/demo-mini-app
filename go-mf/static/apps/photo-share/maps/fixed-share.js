@@ -149,7 +149,7 @@ window.HanoiFixedShare = (() => {
   function renderPeer() {
     if (disposed || !peer || !api.isVisible()) return;
     const map = api.getMap();
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !(map.hanoiLoaded || map.isStyleLoaded())) return;
     updatePeerCard();
     if (!covered(peer.fix)) { clearPeerLayers(); focusPending = false; return; }
     if (rendered !== peer.id || !map.getSource(SOURCE)) {
@@ -169,7 +169,7 @@ window.HanoiFixedShare = (() => {
   }
   function focusPeer() {
     if (disposed || !peer || !covered(peer.fix) || !api.isVisible()) return;
-    const map = api.getMap(); if (!map || !map.isStyleLoaded()) return;
+    const map = api.getMap(); if (!map || !(map.hanoiLoaded || map.isStyleLoaded())) return;
     const fix = peer.fix, config = api.getConfig();
     map.easeTo({ center: [fix.longitude,fix.latitude], zoom: Math.min(fix.accuracy > 1000 ? 12 : fix.accuracy > 200 ? 14 : 16, config.maxZoom), duration: 500 });
   }

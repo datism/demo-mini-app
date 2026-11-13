@@ -16,6 +16,8 @@ object CallHistory {
             newArr.put(org.json.JSONObject().apply {
                 put("number", number)
                 put("isIncoming", isIncoming)
+                // An incoming call counts as missed until it is answered (markAnswered).
+                if (isIncoming) put("missed", true)
                 put("timestamp", System.currentTimeMillis())
             })
             for (i in 0 until arr.length()) {
@@ -25,6 +27,26 @@ object CallHistory {
             sp.edit().putString("history", newArr.toString()).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi lưu lịch sử: ${e.message}")
+        }
+    }
+
+    /** The incoming call from [number] was answered: its newest entry is no longer a missed call. */
+    fun markAnswered(ctx: Context, number: String) {
+        val sp = ctx.getSharedPreferences("ims_dc_history", Context.MODE_PRIVATE)
+        try {
+            val arr = org.json.JSONArray(sp.getString("history", "[]") ?: "[]")
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.optBoolean("isIncoming") && o.optString("number") == number) {
+                    if (o.optBoolean("missed")) {
+                        o.put("missed", false)
+                        sp.edit().putString("history", arr.toString()).apply()
+                    }
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Lỗi cập nhật lịch sử: ${e.message}")
         }
     }
 }

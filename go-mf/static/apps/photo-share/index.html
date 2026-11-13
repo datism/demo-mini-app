@@ -331,9 +331,8 @@ $('btnAccept').onclick = () => {
   call('answerShare', true);
 };
 $('btnDecline').onclick = () => {
-  $('inviteScrim').hidden = true;
   call('answerShare', false);
-  state.s = null;
+  endSession(); // back to the menu (our own request may have been waiting when this one came in)
 };
 
 /* Chia sẻ vị trí: mời và chấp nhận như ảnh/video (requestShare('map'), popup, quy tắc giữ máy, hủy); dữ liệu vị trí
@@ -377,6 +376,8 @@ window.shareEvent = function (name, arg) {
       { const h = state.hint && Date.now() - state.hint.at < 20000 ? state.hint : null; // native nói 'photo'/'video'; gợi ý cho biết chính xác
         state.s = { kind: h && (a.kind === 'video' || h.kind === 'map') ? h.kind : a.kind, role: 'receiver' }; }
       state.hint = null;
+      // Both asked at once: theirs got through first and ours was dropped (native), so leave our wait screen.
+      if (!$('wait').hidden) show('home');
       $('inviteAvatar').textContent = String(state.peer).slice(-2);
       $('inviteTitle').textContent = peerLabel() + (state.s.kind === 'photo' ? ' muốn chia sẻ ảnh' : state.s.kind === 'screen' ? ' muốn chia sẻ màn hình' : state.s.kind === 'map' ? ' muốn chia sẻ vị trí' : ' muốn phát video');
       $('inviteScrim').hidden = false;
@@ -390,6 +391,8 @@ window.shareEvent = function (name, arg) {
         if (s.kind === 'photo') pickPhotos(); else if (s.kind === 'screen') call('startScreen'); else call('pickVideo');
       }
       break;
+    // Our user declined from the notification while the page was hidden: drop the Chấp nhận/Từ chối popup.
+    case 'dismissed': if (s && s.role === 'receiver' && !s.accepted) endSession(); break;
     case 'declined': closeMapIfOpen(); noteEnd(peerLabel() + ' đã từ chối'); endSession(); break;
     case 'cancelled': if (s) { closeMapIfOpen(); lastCancelAt = Date.now(); noteEnd(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
     case 'closed': if (s) { closeMapIfOpen(); toast(peerLabel() + (s.kind === 'map' ? ' đã đóng chia sẻ vị trí' : streamed(s.kind) ? ' đã dừng chia sẻ' : ' đã kết thúc chia sẻ')); endSession(); } break;
