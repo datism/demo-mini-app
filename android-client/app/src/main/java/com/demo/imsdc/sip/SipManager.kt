@@ -621,7 +621,7 @@ class SipManager(
             // hotline (1900) answers only after ringing for 5 s, so hanging up and calling again quickly
             // brings its 487 (or 200) in during the next call, which then ended as soon as it started.
             val respCallId = getHeader(msg, "call-id")?.trim()
-            if (!isReInvite && respCallId != null && respCallId != pendingCallId) {
+            if (!isReInvite && respCallId != null && !sameCall(respCallId, pendingCallId)) {
                 Log.w(TAG, "Ignoring $statusCode for INVITE of another call (call=$respCallId, current=$pendingCallId)")
                 if (statusCode in 200..299) endStrayDialog(msg, respCallId)
                 return
@@ -706,6 +706,13 @@ class SipManager(
             else -> Log.d(TAG, "Response $statusCode for $cseqMethod — no handler")
         }
     }
+
+    /**
+     * Same dialog, whichever leg the Call-ID is from. The IMS-AS forwards the callee's 180 / 4xx-6xx unchanged,
+     * so they carry its leg's Call-ID "b2b_<ours>"; only the 200 OK is rebuilt with ours.
+     */
+    private fun sameCall(a: String?, b: String?): Boolean =
+        a != null && b != null && a.removePrefix("b2b_") == b.removePrefix("b2b_")
 
     /** A 2xx for a call we already left: ACK it and hang it up at once (RFC 3261 13.2.2.4, 15). */
     private fun endStrayDialog(resp: String, callId: String) {
@@ -1218,7 +1225,14 @@ class SipManager(
     /** [onCSeq] gets the CSeq before the request goes out, so its final response can be matched to it. */
     suspend fun sendReInviteWithSdp(sdpBody: String, onCSeq: (Int) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
-            val callId = pendingCallId ?: randomCallId()
+            // In-dialog only. After the call ended (BYE, CANCEL, hang-up) there is no dialog to send it in:
+            // the old fallbacks made a brand-new INVITE to "unknown", which the network answered with the
+            // "số máy không đúng" announcement.
+            val callId = pendingCallId
+            if (callId == null || !isCallActive) {
+                Log.w(TAG, "Re-INVITE refused: no active call")
+                return@withContext ""
+            }
             val fromTag = pendingFromTag ?: randomTag()
             val toVal = activeToHeader ?: "<sip:${pendingRemoteUser ?: "unknown"}@$sipServerHost>"
             val cseq = cseqCounter.getAndIncrement()

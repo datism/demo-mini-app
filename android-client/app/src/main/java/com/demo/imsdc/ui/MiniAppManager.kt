@@ -1168,6 +1168,11 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sends one Re-INVITE with the current local slots and waits for its final response. Caller holds [negotiation]. */
     private suspend fun transact(timeoutMs: Long = ANSWER_TIMEOUT_MS, cancelOnTimeout: Boolean = false): ReInviteOutcome {
+        // The call is over (or ending): no re-INVITE can go out, and none must be waited for.
+        if (!activity.sipManager.isCallActive) {
+            Log.w(TAG, "No re-INVITE: the call is not active")
+            return ReInviteOutcome.Failed(481)
+        }
         val localOffer = activity.webRtcManager.createOffer()
         val result = CompletableDeferred<ReInviteOutcome>()
         outcome = result

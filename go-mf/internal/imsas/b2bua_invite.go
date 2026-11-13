@@ -86,6 +86,15 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		return
 	}
 
+	// An INVITE with a To-tag is a re-INVITE inside a dialog. With no session the dialog is gone (the call
+	// ended): answer 481 instead of setting it up as a new call, which the core rejected with 404 and the
+	// caller then heard the "số không đúng" announcement (RFC 3261 12.2.2).
+	if strings.Contains(msg.GetHeader("To"), ";tag=") {
+		log.Printf("[IMS-AS] re-INVITE for unknown call %s (CSeq %d): 481", callID, cseqVal)
+		b.sendUDP(b.BuildSIPResponse(msg, 481, "Call/Transaction Does Not Exist", nil, ""), remoteAddr)
+		return
+	}
+
 	// Resolve and hash target MF host at session initialization
 	mfHost := resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 
