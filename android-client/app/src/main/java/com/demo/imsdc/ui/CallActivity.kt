@@ -259,7 +259,7 @@ class CallActivity : AppCompatActivity() {
 
     /**
      * Opens Android's visual media picker (gallery). [acceptTypes] comes from the page's <input accept>:
-     * "image/*" shows only photos (Chia sẻ → Ảnh, Vẽ), "video/*" only videos, anything else both.
+     * image types only (accept "image/…") show only photos (Chia sẻ → Ảnh, Vẽ), video types only videos, anything else both.
      */
     fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>, acceptTypes: Array<String>? = null): Boolean {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
