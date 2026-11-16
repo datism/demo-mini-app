@@ -66,7 +66,7 @@ window.HanoiMyLocation = (() => {
   }
   function render(fix, live = false) {
     const map = api.getMap(), config = api.getConfig();
-    if (!map || !map.isStyleLoaded() || !config) throw new Error('Bản đồ chưa sẵn sàng. Bấm lại sau khi bản đồ nạp xong.');
+    if (!map || !ready() || !config) throw new Error('Bản đồ chưa sẵn sàng. Bấm lại sau khi bản đồ nạp xong.');
     const lng = fix.longitude, lat = fix.latitude, accuracy = fix.accuracy;
     const bounds = config.bounds;
     const focus = !live || !renderedLive;
@@ -98,7 +98,7 @@ window.HanoiMyLocation = (() => {
     const callback = typeof onComplete === 'function' ? onComplete : null;
     if (disposed || pending || !api.isVisible() || window.HanoiLiveShare && window.HanoiLiveShare.isActive()) { if (callback) callback({ok:false,error:'busy'}); return; }
     const map = api.getMap();
-    if (!map || !map.isStyleLoaded()) { status('Bản đồ đang nạp. Hãy bấm lại sau khi bản đồ hiển thị.', 'Bản đồ đang nạp…'); if (callback) callback({ok:false,error:'map_loading'}); return; }
+    if (!map || !ready()) { status('Bản đồ đang nạp. Hãy bấm lại sau khi bản đồ hiển thị.', 'Bản đồ đang nạp…'); if (callback) callback({ok:false,error:'map_loading'}); return; }
     const bridge = window.AndroidBridge;
     if (!bridge || typeof bridge.requestMapLocation !== 'function') {
       status('Cần cài APK hỗ trợ vị trí mới để dùng tính năng này.', 'Cần cập nhật ứng dụng', 'error'); if (callback) callback({ok:false,error:'old_apk'}); return;
@@ -136,6 +136,8 @@ window.HanoiMyLocation = (() => {
   function onVisibility() {
     if (document.hidden) { cancel(); }
   }
+  /* The viewer's "style loaded" flag (CS_29); map.isStyleLoaded() when bound without it. */
+  function ready() { const map = api && api.getMap(); return api && api.isReady ? api.isReady() : !!map && map.isStyleLoaded(); }
   function bind(options) {
     api = options;
     if (element('btnMyLocation')) element('btnMyLocation').onclick = locate;
@@ -155,7 +157,7 @@ window.HanoiMyLocation = (() => {
   function focusSelf() {
     if (!displayedFix || !api.isVisible()) return;
     const map = api.getMap(), config = api.getConfig(), fix = displayedFix;
-    if (!map || !map.isStyleLoaded() || !config) return;
+    if (!map || !ready() || !config) return;
     const b = config.bounds;
     if (fix.longitude < b[0][0] || fix.longitude > b[1][0] || fix.latitude < b[0][1] || fix.latitude > b[1][1]) return;
     map.easeTo({center:[fix.longitude,fix.latitude],zoom:Math.min(fix.accuracy>1000?12:fix.accuracy>200?14:16,config.maxZoom),duration:450});

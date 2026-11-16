@@ -110,14 +110,15 @@
 
 
     /* ── Toast & Transfer Progress ── */
+    /* Above the bottom dock, not at the top where the phone draws the camera tiles over the page (IW_26). */
     #hudAlerts {
       position: fixed;
-      top: calc(56px + var(--safe-top));
+      bottom: calc(84px + var(--safe-bottom));
       left: 50%;
       transform: translateX(-50%);
       z-index: 50;
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       align-items: center;
       gap: 8px;
       pointer-events: none;
@@ -137,7 +138,7 @@
       border: 1px solid var(--glass-border);
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
       opacity: 0;
-      transform: translateY(-10px) scale(0.94);
+      transform: translateY(10px) scale(0.94);
       transition: opacity 0.25s, transform 0.25s var(--spring);
       text-align: center;
     }
@@ -485,7 +486,7 @@
     }
     html.full .hud-spacer { display: none; }
     html.full .status-pill { max-width: 100%; flex-wrap: wrap; }
-    html.full #hudAlerts { top: calc(112px + var(--safe-top)); }
+    html.full #hudAlerts { bottom: calc(160px + var(--safe-bottom)); } /* over the dock and the photo counter */
     html.full #pill { bottom: calc(60px + var(--safe-bottom)); }
     html.full .popover { bottom: calc(128px + var(--safe-bottom)); }
     html.full #chip { bottom: calc(64px + var(--safe-bottom)); }
@@ -787,7 +788,8 @@
     if (activePageId === id) {
       const remaining = albumOrder(), next = remaining[Math.min(index,remaining.length-1)] || null;
       if (sync) selectPage(next); else { desiredPageId = next; displayPage(next); }
-      state.lastBackup = {kind:'album-remove',id};
+      // Only the phone that removed the photo can undo it (IW_28).
+      if (sync) state.lastBackup = {kind:'album-remove',id};
       savePage();
     }
     updateToolbar(); updateAlbumNav();
@@ -1313,7 +1315,7 @@
 
   /* ═══════════════ THANH CÔNG CỤ ═══════════════ */
   function updateToolbar() {
-    $('btnUndo').disabled = myStrokes().length === 0 && !state.lastBackup;
+    $('btnUndo').disabled = myStrokes().length === 0 && !(state.lastBackup && !state.lastBackup.remote);
     $('photoDot').classList.toggle('on', Boolean(state.photo));
     $('actClearStrokes').disabled = state.strokes.length === 0 && localDrafts.size === 0 && state.remoteDrafts.size === 0;
     $('actClearPhoto').disabled = !state.photo;
@@ -1388,7 +1390,7 @@
       return;
     }
     const b = state.lastBackup;
-    if (!b) return;
+    if (!b || b.remote) return;
     state.lastBackup = null;
     if (b.kind === 'strokes') {
       state.strokes = b.strokes.map(s => ({ ...s }));
@@ -1742,7 +1744,8 @@
             }
             state.lastBackup = null;
           } else if (state.photo) {
-            state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
+            // Kept so the photo comes back when the other side undoes; remote: this side cannot undo it (IW_28).
+            state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url }, remote: true };
             state.photo = null;
             state.pendingPhoto = null;
             redraw();

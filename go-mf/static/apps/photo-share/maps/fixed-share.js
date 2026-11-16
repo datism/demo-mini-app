@@ -149,7 +149,7 @@ window.HanoiFixedShare = (() => {
   function renderPeer() {
     if (disposed || !peer || !api.isVisible()) return;
     const map = api.getMap();
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !ready()) return;
     updatePeerCard();
     if (!covered(peer.fix)) { clearPeerLayers(); focusPending = false; return; }
     if (rendered !== peer.id || !map.getSource(SOURCE)) {
@@ -169,7 +169,7 @@ window.HanoiFixedShare = (() => {
   }
   function focusPeer() {
     if (disposed || !peer || !covered(peer.fix) || !api.isVisible()) return;
-    const map = api.getMap(); if (!map || !map.isStyleLoaded()) return;
+    const map = api.getMap(); if (!map || !ready()) return;
     const fix = peer.fix, config = api.getConfig();
     map.easeTo({ center: [fix.longitude,fix.latitude], zoom: Math.min(fix.accuracy > 1000 ? 12 : fix.accuracy > 200 ? 14 : 16, config.maxZoom), duration: 500 });
   }
@@ -186,6 +186,8 @@ window.HanoiFixedShare = (() => {
     peerSession = null; peerSequence = 0; disposed = true;
     node('peerLocationCard').hidden = true; if (window.HanoiMapUi) window.HanoiMapUi.peer(null, null); status('');
   }
+  /* The viewer's "style loaded" flag (CS_29); map.isStyleLoaded() when bound without it. */
+  function ready() { const map = api && api.getMap(); return api && api.isReady ? api.isReady() : !!map && map.isStyleLoaded(); }
   function bind(options) {
     api = options;
     if (!options.quickAction) node('btnSendLocation').onclick = send;

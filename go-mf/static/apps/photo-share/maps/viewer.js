@@ -1,6 +1,10 @@
 /* Offline Hanoi map: one-tap fixed and foreground live sharing on the existing ADC. */
 window.HanoiViewer = (() => {
   let api, map, config, opening, timer, pending, visible = false, disposed = false, lastError = null;
+  /* Style loaded once ('load'). map.isStyleLoaded() also turns false while any source loads — every live
+   * position update re-adds a GeoJSON source — so buttons gated on it blinked during live sharing (CS_29). */
+  let styleReady = false;
+  const isReady = () => !!map && styleReady;
   const seen = new Set();
   const status = (text, compact = text, level = 'normal') => {
     document.getElementById('mapStatus').textContent = text;
@@ -29,6 +33,7 @@ window.HanoiViewer = (() => {
       style.sources.hanoi.bounds = [config.bounds[0][0], config.bounds[0][1], config.bounds[1][0], config.bounds[1][1]];
       if (disposed) return;
       lastError = null;
+      styleReady = false;
       map = new maplibregl.Map({
         container: 'hanoiMap',
         style,
@@ -39,6 +44,7 @@ window.HanoiViewer = (() => {
       // Pinch zoom and drag keep the map free of extra navigation buttons.
       map.on('load', () => {
         if (disposed) return;
+        styleReady = true;
         if (!lastError) status('Đã nạp bản đồ chi tiết · ' + config.regionName, '');
         window.HanoiFixedShare.onMapReady();
         if (window.HanoiLiveShare) window.HanoiLiveShare.onMapReady();
@@ -102,17 +108,17 @@ window.HanoiViewer = (() => {
   }
   function close() { if (window.HanoiQuickShare) window.HanoiQuickShare.cancel(); if (window.HanoiLiveShare) window.HanoiLiveShare.onClose(); if (window.HanoiMapUi) window.HanoiMapUi.close(); window.HanoiFixedShare.onClose(); window.HanoiMyLocation.cancel(); visible = false; clearInterval(timer); timer = null; pending = null; api.show('home'); }
   function reset() { if (map && config) map.easeTo({ center: config.center, zoom: config.zoom, duration: 500 }); }
-  function destroy() { if (window.HanoiQuickShare) window.HanoiQuickShare.destroy(); if (window.HanoiLiveShare) window.HanoiLiveShare.destroy(); if (window.HanoiMapUi) window.HanoiMapUi.destroy(); window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; if (map) map.remove(); map = null; seen.clear(); }
+  function destroy() { if (window.HanoiQuickShare) window.HanoiQuickShare.destroy(); if (window.HanoiLiveShare) window.HanoiLiveShare.destroy(); if (window.HanoiMapUi) window.HanoiMapUi.destroy(); window.HanoiFixedShare.destroy(); window.HanoiMyLocation.destroy(); disposed = true; clearInterval(timer); pending = null; styleReady = false; if (map) map.remove(); map = null; seen.clear(); }
   return { bind: x => {
     api = x;
     if (window.HanoiMapUi) window.HanoiMapUi.bind({ focusSelf: () => window.HanoiMyLocation.focusSelf() });
-    window.HanoiFixedShare.bind({ getMap: () => map, getConfig: () => config,
+    window.HanoiFixedShare.bind({ getMap: () => map, getConfig: () => config, isReady,
       isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden, active: () => api.active(),
       openMap: () => open(false), send: x.send, toast: x.toast,
       onFixedPeer: () => { if (window.HanoiLiveShare) window.HanoiLiveShare.forgetPeer(); },
       quickAction: !!window.HanoiQuickShare,
       onDelivery: state => { if (window.HanoiQuickShare) window.HanoiQuickShare.onDelivery(state); } });
-    window.HanoiMyLocation.bind({ getMap: () => map, getConfig: () => config,
+    window.HanoiMyLocation.bind({ getMap: () => map, getConfig: () => config, isReady,
       isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden,
       onFix: fix => window.HanoiFixedShare.setLocalFix(fix) });
     if (window.HanoiLiveShare) window.HanoiLiveShare.bind({
@@ -124,7 +130,7 @@ window.HanoiViewer = (() => {
       canStart: () => !window.HanoiQuickShare || window.HanoiQuickShare.canStartLive()
     });
     if (window.HanoiQuickShare) window.HanoiQuickShare.bind({
-      isReady: () => !!map && map.isStyleLoaded(),
+      isReady,
       isVisible: () => visible && !disposed && !document.getElementById('mapView').hidden,
       liveActive: () => window.HanoiLiveShare && window.HanoiLiveShare.isActive(),
       locate: callback => window.HanoiMyLocation.locate(callback),
