@@ -1496,7 +1496,7 @@
         screen: 'home', minimized: false,
         member: memberFor(4800), bookings: LOCAL_BOOKINGS, viewing: 0, supportBanner: null, pointsEarned: 0,
         from: 'HAN', to: 'SGN', citySide: 'from', rot: 0, dateIdx: 0, pax: { a: 1, c: 0 },
-        flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
+        flights: LOCAL_FLIGHTS, flightBanner: null, dayFree: null, open: 'SL 213', fare: 'flex', flight: null,
         taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
         name: 'NGUYEN VAN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
       };
@@ -1514,8 +1514,33 @@
     /** "Nguyễn Văn Đạt" -> "NGUYEN VAN DAT": the name on a ticket has no diacritics (SC_11). */
     const asciiName = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'D')
       .toUpperCase().replace(/[^A-Z ]/g, '').replace(/ {2,}/g, ' ').replace(/^ /, '');
-    /** Seats still free on the plane (20 rows × 6): the passenger limit, not a fixed 9 (SC_26). */
-    const freeSeats = () => 20 * 6 - (state.taken || []).length;
+    // Passenger limit (SC_26): seats free on a flight, not a fixed 9. Every flight starts with the same
+    // seats taken; DCAS's search reply says how many are free on each flight of the day ("free").
+    const SEAT_CAPACITY = 20 * 6;
+    const flightFree = f => typeof f.free === 'number' ? f.free : SEAT_CAPACITY - LOCAL_TAKEN.length;
+    const dayKey = () => state.from + state.to + state.dateIdx;
+    /** Most free seats on one flight of the searched day (so at least one flight fits); before a search, a whole plane's. */
+    const freeSeats = () => state.dayFree && state.dayFree.key === dayKey() ? state.dayFree.max : SEAT_CAPACITY - LOCAL_TAKEN.length;
+    const fits = f => flightFree(f) >= paxCount();
+    function setDayFlights(flights) {
+      state.flights = flights;
+      state.dayFree = { key: dayKey(), max: Math.max(0, ...flights.map(flightFree)) };
+      // The open flight must have room for everyone; else open the agent's pick or the first that fits.
+      const open = flights.find(f => f.no === state.open);
+      if (!open || !fits(open)) { const f = flights.find(x => x.pick && fits(x)) || flights.find(fits); state.open = f ? f.no : null; }
+      // The agent's pick has no room for this group: suggest the flight that does.
+      const pick = flights.find(f => f.pick);
+      if (pick && !fits(pick) && state.open) {
+        state.flightBanner = { vn: 'Tổng đài viên gợi ý chuyến ' + state.open + ' · còn đủ ghế cho ' + paxCount() + ' khách',
+          en: 'Agent suggested this flight' };
+      }
+      if (!flights.some(fits)) {
+        state.flightBanner = { vn: 'Không chuyến nào đủ ' + paxCount() + ' ghế trong ngày này · nhiều nhất còn ' + state.dayFree.max + ' ghế',
+          en: 'No flight that day has ' + paxCount() + ' seats' };
+        return false;
+      }
+      return true;
+    }
     const paxCount = () => state.pax.a + state.pax.c;
     const paxText = () => state.pax.a + ' người lớn' + (state.pax.c ? ', ' + state.pax.c + ' trẻ em' : '');
     const dateText = () => DATES[state.dateIdx].wd + ', ' + DATES[state.dateIdx].d + '/' + DATES[state.dateIdx].m;
@@ -1688,11 +1713,13 @@
     function screenResults() {
       const [from, to] = route();
       const list = state.flights.map(f => {
-        const open = state.open === f.no;
-        let html = '<div class="flight' + (open ? ' open' : '') + '">' +
-          '<button class="flight-row tap" data-act="toggle" data-no="' + f.no + '" aria-expanded="' + open + '">' +
-          '<span class="info"><span class="times tnum">' + f.dep + ' → ' + f.arr + (f.pick ? '<span class="tag">Agent pick</span>' : '') + '</span>' +
-          '<span class="meta">' + f.dur + ' · Bay thẳng · ' + f.no + '</span></span>' +
+        const full = !fits(f);
+        const open = state.open === f.no && !full;
+        let html = '<div class="flight' + (open ? ' open' : '') + '"' + (full ? ' style="opacity:.45"' : '') + '>' +
+          '<button class="flight-row tap" data-act="toggle" data-no="' + f.no + '" aria-expanded="' + open + '"' + (full ? ' disabled aria-disabled="true"' : '') + '>' +
+          '<span class="info"><span class="times tnum">' + f.dep + ' → ' + f.arr + (f.pick && !full ? '<span class="tag">Agent pick</span>' : '') + '</span>' +
+          '<span class="meta">' + f.dur + ' · Bay thẳng · ' + f.no +
+          (full ? ' · Còn ' + flightFree(f) + ' ghế · không đủ cho ' + paxCount() + ' khách' : '') + '</span></span>' +
           '<span class="price"><small>từ</small><b class="tnum">' + money(f.price) + '</b></span>' +
           '<span class="chev muted">' + ICONS.down.replace('width="22" height="22"', 'width="18" height="18"') + '</span></button>';
         if (open) {
@@ -2023,15 +2050,21 @@
         sendAdcMessage({ action: 'search', from, to, date: dateIso(), adults: state.pax.a, children: state.pax.c });
         // Local copy until DCAS replies; both price the same way.
         const pick = flights.find(f => f.pick).no;
-        state.flights = flights;
         state.open = pick;
         state.flightBanner = { vn: 'Tổng đài viên gợi ý chuyến ' + pick, en: 'Agent suggested this flight' };
+        setDayFlights(flights);
         go('results');
       },
-      toggle: el => setState({ open: state.open === el.dataset.no ? null : el.dataset.no }),
+      toggle: el => {
+        const f = state.flights.find(x => x.no === el.dataset.no);
+        if (f && !fits(f)) return; // not enough seats for the group
+        setState({ open: state.open === el.dataset.no ? null : el.dataset.no });
+      },
       fare: el => setState({ fare: el.dataset.k }),
       pick: el => {
         const flight = state.flights.find(f => f.no === el.dataset.no);
+        if (!flight || !fits(flight)) { showToast('Chuyến bay chỉ còn ' + (flight ? flightFree(flight) : 0) + ' ghế trống'); return; }
+        state.taken = LOCAL_TAKEN; // this flight's own map comes with DCAS's reply
         sendAdcMessage({ action: 'select', flight: flight.no, date: dateIso(), fare: state.fare, adults: state.pax.a, children: state.pax.c });
         state.flight = flight;
         // Size the selection to the passenger count now; DCAS's reply refines it.
@@ -2167,15 +2200,22 @@
           if (!state.agentSeats.length) showToast(msg.message);
           return;
         }
+        if (msg.action === 'select' && state.screen === 'seat') {
+          // The flight filled up meanwhile: back to the list, search again for fresh counts.
+          go('results');
+          showToast(msg.message || 'Chuyến bay không đủ ghế');
+          actions.search();
+          return;
+        }
         render();
         showToast(msg.message || 'Có lỗi xảy ra');
         return;
       }
 
       if (msg.action === 'search' && Array.isArray(msg.flights) && msg.flights.length) {
-        state.flights = msg.flights;
         if (msg.agent_pick) state.open = msg.agent_pick;
         if (msg.message) state.flightBanner = { vn: msg.message, en: msg.message_en || '' };
+        setDayFlights(msg.flights);
         if (state.screen === 'results') render();
       } else if (msg.action === 'select') {
         // Only move the selection if the user has not picked another seat yet.
