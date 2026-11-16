@@ -225,3 +225,32 @@ func TestFlightConfirmRejectsBadSeatLists(t *testing.T) {
 		}
 	}
 }
+
+// SC_26: the search reports each flight's free seats for the date, and a flight without room for the
+// whole group is refused at select.
+func TestFlightFreeSeatsPerFlight(t *testing.T) {
+	store := newFlightSeatStore()
+	const date = "2026-11-20"
+	base := flightRows*6 - len(flightTakenSeats)
+	if !store.claim(flightKey("SL 213", date), "2A") {
+		t.Fatal("claim failed")
+	}
+	resp := buildFlightBookingReply(FlightBookingRequest{Action: "search", From: "HAN", To: "SGN", Date: date, Adults: 1}, fixedPNR, store)
+	for _, f := range resp.Flights {
+		want := base
+		if f.No == "SL 213" {
+			want = base - 1
+		}
+		if f.Free != want {
+			t.Errorf("%s: free=%d want %d", f.No, f.Free, want)
+		}
+	}
+	tooMany := buildFlightBookingReply(FlightBookingRequest{Action: "select", Flight: "SL 213", Date: date, Adults: base}, fixedPNR, store)
+	if tooMany.Status != "error" {
+		t.Fatalf("select for %d passengers on a flight with %d free should fail", base, base-1)
+	}
+	ok := buildFlightBookingReply(FlightBookingRequest{Action: "select", Flight: "SL 213", Date: date, Adults: base - 1}, fixedPNR, store)
+	if ok.Status != "success" || len(ok.AgentSeats) != base-1 {
+		t.Fatalf("select for %d passengers: status=%s seats=%d", base-1, ok.Status, len(ok.AgentSeats))
+	}
+}

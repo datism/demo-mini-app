@@ -2,6 +2,7 @@ package dcas
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"strconv"
@@ -49,6 +50,7 @@ type FlightOption struct {
 	Dur   string `json:"dur"`
 	Price int    `json:"price"` // Saver fare per passenger, taxes included
 	Pick  bool   `json:"pick,omitempty"`
+	Free  int    `json:"free"` // free seats on this flight for the searched date
 }
 
 type FlightBookingResponse struct {
@@ -209,6 +211,11 @@ var flightSeats = newFlightSeatStore()
 func flightKey(flight, date string) string { return flight + "|" + date }
 
 // taken returns the fixed taken seats plus the ones booked so far.
+// free is the number of seats still free on a flight and date (the whole plane, extra-legroom rows included).
+func (st *flightSeatStore) free(key string) int {
+	return flightRows*6 - len(st.taken(key))
+}
+
 func (st *flightSeatStore) taken(key string) []string {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -313,6 +320,15 @@ func (st *flightSeatStore) agentSeats(key string, n int) []string {
 			}
 		}
 	}
+	// A group bigger than the free standard seats also gets extra-legroom ones, so everyone has a seat.
+	for _, row := range flightExtraRows {
+		for _, col := range cols {
+			seat := strconv.Itoa(row) + col
+			if len(out) < n && !st.isTaken(key, seat) {
+				out = append(out, seat)
+			}
+		}
+	}
 	return out
 }
 
@@ -337,6 +353,10 @@ func requestedSeats(req FlightBookingRequest) []string {
 func agentSeatMessage(seats []string) (string, string) {
 	if len(seats) == 1 {
 		return "Tổng đài viên gợi ý ghế cửa sổ " + seats[0], "Agent suggested this seat"
+	}
+	if len(seats) > 6 { // a big group: a count and the first seats, not a list of every seat
+		return fmt.Sprintf("Tổng đài viên gợi ý %d ghế: %s … +%d ghế", len(seats), strings.Join(seats[:4], ", "), len(seats)-4),
+			fmt.Sprintf("Agent suggested %d seats", len(seats))
 	}
 	return "Tổng đài viên gợi ý ghế " + strings.Join(seats, ", ") + " ngồi cạnh nhau", "Agent suggested these seats"
 }
@@ -389,6 +409,7 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 		for i := range resp.Flights {
 			resp.Flights[i].Price = dayPrice(resp.Flights[i].Price, req.Date)
 			resp.Flights[i].Pick = resp.Flights[i].No == pick
+			resp.Flights[i].Free = seats.free(flightKey(resp.Flights[i].No, req.Date))
 		}
 		resp.AgentPick = pick
 		resp.Message = "Tổng đài viên gợi ý chuyến " + pick
@@ -398,6 +419,11 @@ func buildFlightBookingReply(req FlightBookingRequest, pnr func() string, seats 
 			return flightError(resp, "Không tìm thấy chuyến bay")
 		}
 		key := flightKey(req.Flight, req.Date)
+		if free := seats.free(key); paxCount(req) > free {
+			resp = flightError(resp, fmt.Sprintf("Chuyến bay chỉ còn %d ghế trống", free))
+			resp.MessageEn = fmt.Sprintf("Only %d seats left on this flight", free)
+			return resp
+		}
 		resp.TakenSeats = seats.taken(key)
 		resp.ExtraRows = flightExtraRows
 		resp.AgentSeats = seats.agentSeats(key, paxCount(req))

@@ -48,10 +48,19 @@ class ScreenStreamer(
     fun start() {
         if (running) return
         running = true
-        // Long side 1280, even sizes (encoders need them), the screen's aspect ratio.
+        // Long side up to 1920, even sizes (encoders need them), the screen's aspect ratio.
         val scale = minOf(1f, MAX_SIDE.toFloat() / maxOf(metrics.widthPixels, metrics.heightPixels))
         val w = (metrics.widthPixels * scale).toInt() and -2
         val h = (metrics.heightPixels * scale).toInt() and -2
+
+        val vbr = try {
+            MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).let { probe ->
+                try {
+                    probe.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).encoderCapabilities
+                        ?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR) == true
+                } finally { probe.release() }
+            }
+        } catch (_: Exception) { false }
 
         fun format(withProfile: Boolean) = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -62,7 +71,11 @@ class ScreenStreamer(
             setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L)
             if (withProfile) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
+                // Level 4.0: up to 8192 macroblocks a frame, enough for 864x1920 at 30 fps (3.1 stops at 1280x720).
+                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel4)
+                // Variable bitrate where offered: a still screen with text stays sharp instead of being
+                // starved to a constant rate. The plain retry below leaves it out.
+                if (vbr) setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
             }
         }
         val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -152,8 +165,10 @@ class ScreenStreamer(
     }
 
     companion object {
-        private const val MAX_SIDE = 1280
-        private const val FPS = 20
-        private const val BIT_RATE = 2_000_000
+        // CS_35: sharper and smoother than the first 1280 px / 20 fps / 2 Mbps. If a weak uplink stutters,
+        // lower BIT_RATE first (4 Mbps).
+        private const val MAX_SIDE = 1920
+        private const val FPS = 30
+        private const val BIT_RATE = 6_000_000
     }
 }
