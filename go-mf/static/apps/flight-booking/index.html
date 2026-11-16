@@ -1655,12 +1655,14 @@
       const side = state.citySide, other = side === 'from' ? state.to : state.from;
       const list = AIRPORT_ORDER.map(code => {
         const sel = code === state[side];
-        // A destination is offered only if it is flown from the origin (the same city is refused at search).
-        const off = side === 'to' && code !== state.from && code !== other && !flightsFor(state.from, code, 0);
+        // The city already on the other side cannot be picked (SC_21); a destination must be flown from the origin.
+        const same = code === other;
+        const off = same || (side === 'to' && !flightsFor(state.from, code, 0));
         return '<button role="option" aria-selected="' + sel + '"' + (off ? ' disabled aria-disabled="true"' : '') +
           ' class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)' + (off ? ';opacity:.4' : '') + '" data-act="setcity" data-code="' + code + '">' +
           '<span class="info"><span class="times">' + AIRPORTS[code] + (sel ? ' ✓' : '') + '</span><span class="meta">' + code + ' · Sân bay ' + AIRPORT_NAME[code] +
-          (off ? ' · Không có chuyến bay từ ' + AIRPORTS[state.from] : '') + '</span></span></button>';
+          (same ? (side === 'to' ? ' · Đang là điểm đi' : ' · Đang là điểm đến') :
+            off ? ' · Không có chuyến bay từ ' + AIRPORTS[state.from] : '') + '</span></span></button>';
       }).join('');
       return {
         main: titleRow('search', side === 'from' ? 'Điểm đi' : 'Điểm đến', side === 'from' ? 'From' : 'To') +
@@ -1972,11 +1974,11 @@
       go: el => go(el.dataset.to),
       swap: () => setState({ from: state.to, to: state.from, rot: state.rot + 180 }),
       city: el => { state.citySide = el.dataset.side; go('city'); },
-      // The same city on both sides is kept as picked and refused at search as an invalid route (SC_21);
-      // the swap button still swaps.
+      // The city on the other side is disabled in the list (SC_21); the swap button still swaps.
       setcity: el => {
         const code = el.dataset.code, side = state.citySide;
-        if (side === 'to' && code !== state.from && !flightsFor(state.from, code, 0)) return; // not flown
+        if (code === state[side === 'from' ? 'to' : 'from']) return; // same city on both sides (SC_21)
+        if (side === 'to' && !flightsFor(state.from, code, 0)) return; // not flown
         state[side] = code;
         // A new origin that does not fly to the current destination: take the first city it flies to.
         if (side === 'from' && state.from !== state.to && !flightsFor(state.from, state.to, 0)) {
