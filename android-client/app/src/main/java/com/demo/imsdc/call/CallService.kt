@@ -41,6 +41,9 @@ class CallService : Service() {
             ACTION_STOP_SHARE -> { onUserAction?.invoke(ACTION_STOP_SHARE); return START_NOT_STICKY }
             ACTION_DECLINE_REQUEST -> { onUserAction?.invoke(ACTION_DECLINE_REQUEST); return START_NOT_STICKY }
             ACTION_UNSHARE -> {
+                // The call already ended (the share was torn down after stop()): this start re-created the
+                // service, so it must not post the call notification again (CS_45).
+                if (!running) { stopSelf(); return START_NOT_STICKY }
                 // Only the notification changes: calling startForeground again from the background (the share
                 // can end while the user is in another app) may be refused, and the extra type does no harm.
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(lastPeer, false))
@@ -119,6 +122,8 @@ class CallService : Service() {
 
     override fun onDestroy() {
         cameraInBackground = false
+        // A notification posted with notify() (share ended) is not the foreground one and would outlive us.
+        try { getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID) } catch (_: Exception) {}
         try { wifiLock?.release() } catch (_: Exception) {}
         try { wakeLock?.release() } catch (_: Exception) {}
         wifiLock = null; wakeLock = null
@@ -143,6 +148,9 @@ class CallService : Service() {
         private const val NOTIFICATION_ID = 4201
         private var lastPeer = ""
 
+        /** Between start() and stop(): the call is up and its notification belongs on screen. */
+        @Volatile private var running = false
+
         /** Set by CallActivity: runs the notification's buttons (ACTION_END / ACTION_STOP_SHARE). */
         @Volatile var onUserAction: ((String) -> Unit)? = null
 
@@ -164,12 +172,14 @@ class CallService : Service() {
 
         /** Screen share off: back to the plain call notification. */
         fun stopSharing(context: Context) {
+            if (!running) return                      // call over: nothing to update, and no service to restart
             try { context.startService(Intent(context, CallService::class.java).setAction(ACTION_UNSHARE)) } catch (e: Exception) {
                 Log.w(TAG, "Cannot update the call notification: ${e.message}")
             }
         }
 
         private fun update(context: Context, peer: String?, sharing: Boolean, camera: Boolean? = null) {
+            running = true
             val i = Intent(context, CallService::class.java).putExtra(EXTRA_SHARING, sharing)
             if (camera != null) i.putExtra(EXTRA_CAMERA, camera)
             if (peer != null) i.putExtra(EXTRA_PEER, peer)
@@ -181,6 +191,7 @@ class CallService : Service() {
         }
 
         fun stop(context: Context) {
+            running = false
             onUserAction = null
             context.stopService(Intent(context, CallService::class.java))
         }

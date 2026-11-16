@@ -86,6 +86,14 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		return
 	}
 
+	// An INVITE with a To-tag belongs to an existing dialog (a re-INVITE). With no session for it the
+	// call is gone: answer 481 (RFC 3261 12.2.2) instead of setting it up as a new call to the To user.
+	if strings.Contains(msg.GetHeader("To"), ";tag=") {
+		log.Printf("[IMS-AS] re-INVITE for unknown call %s: 481", callID)
+		b.sendUDP(b.BuildSIPResponse(msg, 481, "Call/Transaction Does Not Exist", nil, ""), remoteAddr)
+		return
+	}
+
 	// Resolve and hash target MF host at session initialization
 	mfHost := resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 
