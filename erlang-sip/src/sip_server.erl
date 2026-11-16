@@ -555,13 +555,28 @@ forward_sip(Msg0, Host, Port, State) ->
     case ets:lookup(tcp_sockets, {HostIP, Port}) of
         [{{HostIP, Port}, CSock}] ->
             io_format("[DEBUG] Sending ~p bytes TCP. Last 4 chars: ~w~n", [length(Msg), lists:sublist(Msg, max(1, length(Msg)-3), 4)]),
-            case gen_tcp:send(CSock, list_to_binary(Msg)) of
-                ok ->
-                    Net1IP = sys_config:get_net1_ip(),
-                    catch hep_client:send_hep(Msg, Net1IP, State#state.sip_port, Host, Port),
+            Send = fun() ->
+                case gen_tcp:send(CSock, list_to_binary(Msg)) of
+                    ok ->
+                        Net1IP = sys_config:get_net1_ip(),
+                        catch hep_client:send_hep(Msg, Net1IP, State#state.sip_port, Host, Port),
+                        ok;
+                    {error, Reason} ->
+                        io_format("[IMS-CORE] ❌ Error forwarding TCP to ~s:~p: ~p~n", [Host, Port, Reason])
+                end
+            end,
+            %% Test hook: SIP_INVITE_DELAY_MS=8000 holds outgoing TCP INVITEs back by 8 s.
+            DelayMs = case os:getenv("SIP_INVITE_DELAY_MS") of
+                false -> 0;
+                V -> try list_to_integer(V) catch _:_ -> 0 end
+            end,
+            case {sip_parser:parse_method(Msg), DelayMs} of
+                {{ok, "INVITE"}, D} when D > 0 ->
+                    io_format("[TEST] Delaying INVITE to ~s:~p by ~p ms~n", [Host, Port, D]),
+                    spawn(fun() -> timer:sleep(D), Send() end),
                     ok;
-                {error, Reason} ->
-                    io_format("[IMS-CORE] ❌ Error forwarding TCP to ~s:~p: ~p~n", [Host, Port, Reason])
+                _ ->
+                    Send()
             end;
         [] ->
             case gen_udp:send(State#state.socket, Host, Port, list_to_binary(Msg)) of
