@@ -60,6 +60,10 @@ private const val TAG = "CallActivity"
 class CallActivity : AppCompatActivity() {
 
     companion object {
+        /** Request codes of the pickers closeOpenPickers() can close. */
+        private const val RC_MEDIA = 7101
+        private const val RC_VIDEO = 7102
+        private const val RC_SCREEN = 7103
         /** 1900 agent attempt: how long it rings, and how long "không trả lời" stays before the page returns. */
         private const val AGENT_RING_MS = 20_000L
         private const val AGENT_NO_ANSWER_MS = 2_500L
@@ -219,23 +223,36 @@ class CallActivity : AppCompatActivity() {
 
     // ─── Photo picker for <input type="file"> inside mini-apps (photo-share) ───
     // WebView shows nothing for a file input unless WebChromeClient.onShowFileChooser opens a chooser.
+    // The gallery, the video picker and the screen-recording consent are started with fixed request codes
+    // (not the Activity Result API, which hides its codes) so closeOpenPickers() can close them when the
+    // call ends or the other phone leaves the share (IW_25, CS_44, CS_53): finishActivity needs the code.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
-    private val mediaPicker = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
-    ) { uris ->
-        fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
-        fileChooserCallback = null
-    }
+    private val multiMediaContract = androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
+    private val singleMediaContract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    private val openPickers = mutableSetOf<Int>()
 
-    /** Opens Android's visual media picker (gallery) for images and videos. */
-    fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>): Boolean {
+    /**
+     * Opens Android's visual media picker (gallery) for a mini-app's file input. [acceptTypes] is the
+     * input's accept list: only images when every entry is an image type, only videos when every entry
+     * is a video type, else both (CS_2: Chia sẻ, Ảnh must not list videos).
+     */
+    fun launchPhotoPicker(
+        callback: android.webkit.ValueCallback<Array<android.net.Uri>>,
+        acceptTypes: Array<String>? = null
+    ): Boolean {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
         fileChooserCallback = callback
+        val types = acceptTypes.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        val mediaType = when {
+            types.isNotEmpty() && types.all { it.startsWith("image/") } ->
+                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+            types.isNotEmpty() && types.all { it.startsWith("video/") } ->
+                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly
+            else -> androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo
+        }
         return try {
-            val request = androidx.activity.result.PickVisualMediaRequest.Builder()
-                .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                .build()
-            mediaPicker.launch(request)
+            val request = androidx.activity.result.PickVisualMediaRequest.Builder().setMediaType(mediaType).build()
+            launchPicker(RC_MEDIA, multiMediaContract.createIntent(this, request))
             true
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Cannot open visual media picker: ${e.message}", e)
@@ -244,19 +261,14 @@ class CallActivity : AppCompatActivity() {
             false
         }
     }
+
     /** Content Sharing: the system's "start recording/casting" consent; [onResult] gets null when refused. */
     private var screenCaptureCallback: ((android.content.Intent?) -> Unit)? = null
-    private val screenCapture = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { r ->
-        screenCaptureCallback?.invoke(if (r.resultCode == RESULT_OK) r.data else null)
-        screenCaptureCallback = null
-    }
     fun launchScreenCapture(onResult: (android.content.Intent?) -> Unit) {
         screenCaptureCallback = onResult
         try {
             val pm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
-            screenCapture.launch(pm.createScreenCaptureIntent())
+            launchPicker(RC_SCREEN, pm.createScreenCaptureIntent())
         } catch (e: Exception) {
             Log.e(TAG, "Cannot ask for screen capture: ${e.message}", e)
             screenCaptureCallback = null
@@ -265,28 +277,69 @@ class CallActivity : AppCompatActivity() {
     }
 
     private var videoPickerCallback: ((android.net.Uri?) -> Unit)? = null
-    private val videoPicker = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        videoPickerCallback?.invoke(uri)
-        videoPickerCallback = null
-    }
 
     /** Content Sharing: opens the gallery for one video; [onPicked] gets null when the user backs out. */
     fun launchVideoPicker(onPicked: (android.net.Uri?) -> Unit) {
         videoPickerCallback = onPicked
         try {
-            videoPicker.launch(
-                androidx.activity.result.PickVisualMediaRequest.Builder()
-                    .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly)
-                    .build()
-            )
+            val request = androidx.activity.result.PickVisualMediaRequest.Builder()
+                .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly)
+                .build()
+            launchPicker(RC_VIDEO, singleMediaContract.createIntent(this, request))
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Cannot open the video picker: ${e.message}", e)
             videoPickerCallback = null
             onPicked(null)
         }
     }
+
+    @Suppress("DEPRECATION")
+    private fun launchPicker(requestCode: Int, intent: android.content.Intent) {
+        startActivityForResult(intent, requestCode)
+        openPickers.add(requestCode)
+    }
+
+    @Deprecated("Results of the pickers started by launchPicker")
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data) // the registerForActivityResult users
+        if (!openPickers.remove(requestCode)) return
+        when (requestCode) {
+            RC_MEDIA -> {
+                val uris = multiMediaContract.parseResult(resultCode, data)
+                fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+                fileChooserCallback = null
+            }
+            RC_VIDEO -> {
+                videoPickerCallback?.invoke(singleMediaContract.parseResult(resultCode, data))
+                videoPickerCallback = null
+            }
+            RC_SCREEN -> {
+                screenCaptureCallback?.invoke(if (resultCode == RESULT_OK) data else null)
+                screenCaptureCallback = null
+            }
+        }
+    }
+
+    /**
+     * Closes a picker or the screen-recording consent this screen opened, and tells its waiting caller
+     * "nothing picked". Used when the call ends and when the other phone leaves the share.
+     */
+    fun closeOpenPickers() {
+        if (openPickers.isEmpty()) return
+        Log.i(TAG, "Closing open pickers $openPickers")
+        openPickers.toList().forEach { code -> try { finishActivity(code) } catch (_: Exception) {} }
+        openPickers.clear()
+        fileChooserCallback?.onReceiveValue(null); fileChooserCallback = null
+        videoPickerCallback?.invoke(null); videoPickerCallback = null
+        screenCaptureCallback?.invoke(null); screenCaptureCallback = null
+    }
+
+    override fun finish() {
+        closeOpenPickers()
+        super.finish()
+    }
+
     private var pendingInviteMsg: String? = null  // B-side: luu INVITE g?c d? g?i 200 OK
     private var eglBase: org.webrtc.EglBase? = null
     private var rtpMediaManager: RtpMediaManager? = null
@@ -1171,6 +1224,10 @@ class CallActivity : AppCompatActivity() {
             lifecycleScope.launch(Dispatchers.Main) {
                 isEndingCall = true
                 sipManager.markCallEnding()
+                // Close a gallery / consent left open (IW_25) and drop the share now, not in 1.5 s at
+                // onDestroy: a picker closing meanwhile must not try to renegotiate a call that is over.
+                closeOpenPickers()
+                if (::miniAppManager.isInitialized) miniAppManager.resetShare()
                 stopRingbackTone()
                 binding.tvCallStatus.text = "Cuộc gọi kết thúc"
                 delay(1500)
@@ -1660,6 +1717,8 @@ class CallActivity : AppCompatActivity() {
      *   Erlang s? anchor SDP Answer ny vo MF-B, r?i g?i v? A
      */
     private fun handleIncomingCall(remoteSdp: String, incomingCallId: String, rawSdp: String) {
+        // Answered: Gần đây shows it as an incoming call, not a missed one (GD_16).
+        if (::remoteUser.isInitialized) CallHistory.markAnswered(this, remoteUser)
         // Stop ringtone when processing incoming call
         try { ringtone?.stop() } catch (_: Exception) {}
         IncomingCallNotificationManager.dismiss(this)
