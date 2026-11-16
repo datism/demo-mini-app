@@ -311,7 +311,7 @@ class MiniAppManager(val activity: CallActivity) {
             ): Boolean {
                 filePathCallback ?: return false
                 Log.i(TAG, "WebView file chooser requested (accept=${fileChooserParams?.acceptTypes?.joinToString()})")
-                return activity.launchPhotoPicker(filePathCallback, fileChooserParams?.acceptTypes)
+                return activity.launchPhotoPicker(filePathCallback)
             }
         }
 
@@ -1168,11 +1168,6 @@ class MiniAppManager(val activity: CallActivity) {
 
     /** Sends one Re-INVITE with the current local slots and waits for its final response. Caller holds [negotiation]. */
     private suspend fun transact(timeoutMs: Long = ANSWER_TIMEOUT_MS, cancelOnTimeout: Boolean = false): ReInviteOutcome {
-        // The call is over (or ending): no re-INVITE can go out, and none must be waited for.
-        if (!activity.sipManager.isCallActive) {
-            Log.w(TAG, "No re-INVITE: the call is not active")
-            return ReInviteOutcome.Failed(481)
-        }
         val localOffer = activity.webRtcManager.createOffer()
         val result = CompletableDeferred<ReInviteOutcome>()
         outcome = result
@@ -1284,8 +1279,6 @@ class MiniAppManager(val activity: CallActivity) {
     @Volatile private var shareState = ShareState.NONE
         set(value) { field = value; notifyInvitePending() }
     @Volatile private var shareCancelRequested = false
-    /** Our request lost a glare (491) to the other phone's request, which is now being asked here. */
-    @Volatile private var shareSuperseded = false
     private var heldDecision: CompletableDeferred<Boolean>? = null
         set(value) { field = value; notifyInvitePending() }
     @Volatile private var heldCancelled = false
@@ -1334,7 +1327,6 @@ class MiniAppManager(val activity: CallActivity) {
         val video = kind == "video" || kind == "screen"
         shareState = ShareState.INVITING
         shareCancelRequested = false
-        shareSuperseded = false
         activity.lifecycleScope.launch(Dispatchers.Main) {
             var attempt = 1
             try {
@@ -1376,18 +1368,10 @@ class MiniAppManager(val activity: CallActivity) {
                         r
                     }
                     when {
-                        result is ReInviteOutcome.Answered && shareCancelRequested -> {
-                            // Hủy (or leaving the page) crossed the other phone's Đồng ý: its 200 OK came first, so the
-                            // share was opened. Our user no longer wants it: close it again on both phones, so the
-                            // other phone does not wait for a picker that will never open.
-                            Log.i(TAG, "Share accepted after our cancel: closing it on both phones")
-                            stopShare()
-                        }
                         result is ReInviteOutcome.Answered -> emitShareEvent("accepted")
                         result is ReInviteOutcome.Failed && result.code == 603 -> { shareState = ShareState.NONE; emitShareEvent("declined") }
                         result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> {
-                            // Superseded by the other phone's request: that one owns the share state now.
-                            if (shareSuperseded) shareSuperseded = false else shareState = ShareState.NONE
+                            shareState = ShareState.NONE
                             // Withdrawn for the hold, not by the page's Cancel button: the page must be told.
                             if (endedByHold) { endedByHold = false; emitShareEvent("failed", """{"code":480,"reason":"hold"}""") }
                         }
@@ -1452,24 +1436,12 @@ class MiniAppManager(val activity: CallActivity) {
      * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
      * CANCEL it has already sent the final response (603 / 487) and returns false.
      */
-    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
-        // Both phones asked at the same moment (both pressed Màn hình): ours got 491 and waits to retry, theirs got
-        // through first. The first one wins: drop our retry and let our user answer theirs.
-        if (shareState == ShareState.INVITING) {
-            Log.i(TAG, "Share request from ${activity.peerName} while ours waits to retry: theirs wins, dropping ours")
-            shareSuperseded = true
-            shareCancelRequested = true
-            shareState = ShareState.NONE
-        }
-        return awaitHeldDecision(
-            rawMsg,
-            notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
-            ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
-            dismiss = { emitShareEvent("cancelled") },
-            // Declined from the notification while the page was hidden: its Chấp nhận/Từ chối popup must go too.
-            declined = { emitShareEvent("dismissed") }
-        )
-    }
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
+        rawMsg,
+        notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
+        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
+        dismiss = { emitShareEvent("cancelled") }
+    )
 
     /**
      * The other phone opens an app (not the emote app): ask our user before 200 OK. A native dialog, since the
@@ -1547,7 +1519,7 @@ class MiniAppManager(val activity: CallActivity) {
     private var heldDismiss: (() -> Unit)? = null
 
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
-    private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit, declined: () -> Unit = dismiss): Boolean {
+    private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
         if (com.demo.imsdc.call.CallHold.active) {
             // A request that crossed our hold: it cannot be answered now. 491 makes the other side say "try later".
             Log.i(TAG, "Request \"$notice\" while on hold: 491")
@@ -1573,7 +1545,6 @@ class MiniAppManager(val activity: CallActivity) {
             heldDeclineCode = 603
             activity.sipManager.sendReInviteReject(rawMsg, code, if (code == 480) "Temporarily Unavailable" else "Decline")
             if (accepted == null) dismiss() // no answer: close the sheet / dialog
-            else declined() // Từ chối, on the page or on the notification: the ask closes either way
             return false
         } finally {
             heldDecision = null
@@ -1625,8 +1596,6 @@ class MiniAppManager(val activity: CallActivity) {
     /** Receiver: the far end closed the share (its Re-INVITE had no stream). */
     fun onShareClosedByPeer() {
         if (shareState == ShareState.NONE) return
-        // We may be in the gallery (video) or on the "Bắt đầu ghi hình" consent: take it down.
-        activity.closeOpenPickers("share closed by ${activity.peerName}")
         clearShareSession()
         emitShareEvent("closed")
     }
@@ -1708,11 +1677,7 @@ class MiniAppManager(val activity: CallActivity) {
     fun pickVideo() {
         if (com.demo.imsdc.call.CallHold.active) { runOrDefer { pickVideo() }; return }
         activity.launchVideoPicker { uri ->
-            when {
-                shareState != ShareState.ACTIVE -> Log.i(TAG, "Video picked after the share closed: ignored")
-                uri == null -> emitShareEvent("videoEnded")
-                else -> runOrDefer { startStreaming(uri) }
-            }
+            if (uri == null) emitShareEvent("videoEnded") else runOrDefer { startStreaming(uri) }
         }
     }
 
@@ -1766,7 +1731,6 @@ class MiniAppManager(val activity: CallActivity) {
     fun startScreen() {
         if (com.demo.imsdc.call.CallHold.active) { runOrDefer { startScreen() }; return }
         activity.launchScreenCapture { data ->
-            if (shareState != ShareState.ACTIVE) { Log.i(TAG, "Screen capture answered after the share closed: ignored"); return@launchScreenCapture }
             if (data == null) { emitShareEvent("videoEnded"); return@launchScreenCapture }
             runOrDefer { startScreenWith(data) }
         }

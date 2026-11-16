@@ -109,12 +109,10 @@
     }
 
 
-    /* ── Toast & Transfer Progress ──
-       Low on the screen, just above the dock and the photo counter: the top left belongs to the native
-       camera tiles (mine and the other person's), which are drawn above the page and hid the toast. */
+    /* ── Toast & Transfer Progress ── */
     #hudAlerts {
       position: fixed;
-      bottom: calc(164px + var(--safe-bottom));
+      top: calc(56px + var(--safe-top));
       left: 50%;
       transform: translateX(-50%);
       z-index: 50;
@@ -487,6 +485,7 @@
     }
     html.full .hud-spacer { display: none; }
     html.full .status-pill { max-width: 100%; flex-wrap: wrap; }
+    html.full #hudAlerts { top: calc(112px + var(--safe-top)); }
     html.full #pill { bottom: calc(60px + var(--safe-bottom)); }
     html.full .popover { bottom: calc(128px + var(--safe-bottom)); }
     html.full #chip { bottom: calc(64px + var(--safe-bottom)); }
@@ -686,8 +685,7 @@
     remoteDrafts: new Map(),       // In-progress peer strokes, separate from undo history.
     strokes: [],                    // {id, mine, color, w, pts:[[x,y]..]}
     pendingPhoto: null,             // ảnh đang chờ fetch từ xa
-    lastBackup: null,               // {kind:'strokes',strokes:[..]} | {kind:'photo',photo:{..}} — our own undo
-    peerPhotoBackup: null,          // photo the other phone removed, kept only to follow its undo
+    lastBackup: null,               // {kind:'strokes',strokes:[..]} | {kind:'photo',photo:{..}}
     peerActiveAt: 0,                // presence: thời điểm msg cuối từ đối phương
     eraserCursors: new Map(),       // One cursor per erasing finger.
   };
@@ -789,8 +787,7 @@
     if (activePageId === id) {
       const remaining = albumOrder(), next = remaining[Math.min(index,remaining.length-1)] || null;
       if (sync) selectPage(next); else { desiredPageId = next; displayPage(next); }
-      // Only the phone that removed the photo can undo it; the other phone just follows (album.restore).
-      if (sync) state.lastBackup = {kind:'album-remove',id};
+      state.lastBackup = {kind:'album-remove',id};
       savePage();
     }
     updateToolbar(); updateAlbumNav();
@@ -1739,14 +1736,13 @@
 
         case 'photo.clear':
           resetLiveStrokes();
-          // The peer removed (or put back) the photo. Its Hoàn tác is theirs alone: keep the photo aside
-          // only to follow their undo, not in our own lastBackup.
           if (msg.backup === null) {
-            if (state.peerPhotoBackup) restorePhoto(state.peerPhotoBackup);
-            state.peerPhotoBackup = null;
+            if (state.lastBackup && state.lastBackup.kind === 'photo') {
+              restorePhoto(state.lastBackup.photo);
+            }
+            state.lastBackup = null;
           } else if (state.photo) {
-            state.peerPhotoBackup = { id: state.photo.id, url: state.photo.url };
-            if (state.lastBackup && state.lastBackup.kind === 'photo') state.lastBackup = null;
+            state.lastBackup = { kind: 'photo', photo: { id: state.photo.id, url: state.photo.url } };
             state.photo = null;
             state.pendingPhoto = null;
             redraw();

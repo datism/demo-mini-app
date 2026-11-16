@@ -1,7 +1,7 @@
 {
   "appId": "flight-booking",
   "appName": "SkyLotus Air - Book by Call",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "connectionPolicy": "P2A",
   "qosHint": {
     "latencyMs": 100,

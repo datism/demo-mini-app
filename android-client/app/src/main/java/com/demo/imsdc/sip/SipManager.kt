@@ -617,16 +617,6 @@ class SipManager(
         if (cseqMethod == "INVITE") {
             val isReInvite = isReInviteResponse(msg)
 
-            // A late answer to an earlier call's INVITE must not touch the current call. A certified
-            // hotline (1900) answers only after ringing for 5 s, so hanging up and calling again quickly
-            // brings its 487 (or 200) in during the next call, which then ended as soon as it started.
-            val respCallId = getHeader(msg, "call-id")?.trim()
-            if (!isReInvite && respCallId != null && !sameCall(respCallId, pendingCallId)) {
-                Log.w(TAG, "Ignoring $statusCode for INVITE of another call (call=$respCallId, current=$pendingCallId)")
-                if (statusCode in 200..299) endStrayDialog(msg, respCallId)
-                return
-            }
-
             when (statusCode) {
                 100 -> Log.d(TAG, "100 Trying — waiting for 200 OK")
                 200 -> {
@@ -704,42 +694,6 @@ class SipManager(
                 handleAuthChallenge(msg)
             }
             else -> Log.d(TAG, "Response $statusCode for $cseqMethod — no handler")
-        }
-    }
-
-    /**
-     * Same dialog, whichever leg the Call-ID is from. The IMS-AS forwards the callee's 180 / 4xx-6xx unchanged,
-     * so they carry its leg's Call-ID "b2b_<ours>"; only the 200 OK is rebuilt with ours.
-     */
-    private fun sameCall(a: String?, b: String?): Boolean =
-        a != null && b != null && a.removePrefix("b2b_") == b.removePrefix("b2b_")
-
-    /** A 2xx for a call we already left: ACK it and hang it up at once (RFC 3261 13.2.2.4, 15). */
-    private fun endStrayDialog(resp: String, callId: String) {
-        val from = getHeader(resp, "from") ?: return
-        val to = getHeader(resp, "to") ?: return
-        val cseq = getCSeqNumber(resp)
-        val uri = Regex("<([^>]+)>").find(to)?.groupValues?.get(1) ?: return
-        sipScope.launch {
-            try {
-                val ip = getLocalIp()
-                fun req(method: String, n: Int) = buildString {
-                    appendLine("$method $uri SIP/2.0")
-                    appendLine("Via: SIP/2.0/TCP $ip:$localPort;branch=${randomBranch()}")
-                    appendLine("Max-Forwards: 70")
-                    appendLine("From: $from")
-                    appendLine("To: $to")
-                    appendLine("Call-ID: $callId")
-                    appendLine("CSeq: $n $method")
-                    appendLine("Content-Length: 0")
-                    append("\r\n")
-                }.replace("\r\n", "\n").replace("\n", "\r\n")
-                sendRaw(req("ACK", cseq))
-                sendRaw(req("BYE", cseq + 1))
-                Log.i(TAG, "→ ACK + BYE for the stray answer (call=$callId)")
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not end stray dialog $callId: ${e.message}")
-            }
         }
     }
 
@@ -896,15 +850,6 @@ class SipManager(
                 Log.e(TAG, "Failed to answer CANCEL of a Re-INVITE: ${e.message}")
             }
             onHeldReInviteCancelled?.invoke()
-            return
-        }
-        // The call is already established: this CANCEL is for a Re-INVITE (or the INVITE) we have already answered,
-        // e.g. the other side pressed Hủy just as our user pressed Đồng ý. A CANCEL after the final response
-        // has no effect (RFC 3261 9.2): answer it 200 and keep the call. Ending the call here (without a BYE)
-        // left the other phone talking to nobody until it gave up with "Mất kết nối".
-        if (isCallActive) {
-            try { sendRaw(buildResponse(msg, 200, "OK", "")) } catch (_: Exception) {}
-            Log.i(TAG, "CANCEL after the final response (CSeq ${getCSeqNumber(msg)}): 200 OK, call continues")
             return
         }
         // 1. Phản hồi 200 OK cho bản tin CANCEL
@@ -1225,14 +1170,7 @@ class SipManager(
     /** [onCSeq] gets the CSeq before the request goes out, so its final response can be matched to it. */
     suspend fun sendReInviteWithSdp(sdpBody: String, onCSeq: (Int) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
-            // In-dialog only. After the call ended (BYE, CANCEL, hang-up) there is no dialog to send it in:
-            // the old fallbacks made a brand-new INVITE to "unknown", which the network answered with the
-            // "số máy không đúng" announcement.
-            val callId = pendingCallId
-            if (callId == null || !isCallActive) {
-                Log.w(TAG, "Re-INVITE refused: no active call")
-                return@withContext ""
-            }
+            val callId = pendingCallId ?: randomCallId()
             val fromTag = pendingFromTag ?: randomTag()
             val toVal = activeToHeader ?: "<sip:${pendingRemoteUser ?: "unknown"}@$sipServerHost>"
             val cseq = cseqCounter.getAndIncrement()
