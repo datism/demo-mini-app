@@ -217,36 +217,6 @@ class CallActivity : AppCompatActivity() {
     var callId: String? = null
     var isMiniAppInitiator = false
 
-    // ─── System screens opened for a result (gallery, video picker, screen-capture consent) ───
-    // The activity-result launchers start them through startActivityForResult with a request code we never see;
-    // record the codes so closeOpenPickers() can take those screens down when the call ends or the other phone
-    // leaves the share. Otherwise the gallery stayed open on top after the call was over.
-    private val openRequestCodes = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
-
-    @Deprecated("Activity Result API routes through here")
-    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
-        if (requestCode >= 0) openRequestCodes.add(requestCode)
-        @Suppress("DEPRECATION")
-        super.startActivityForResult(intent, requestCode, options)
-    }
-
-    @Deprecated("Activity Result API routes through here")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        openRequestCodes.remove(requestCode)
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
-    }
-
-    /** Closes any gallery / picker / consent screen this call screen opened; their callbacks then get "cancelled". */
-    fun closeOpenPickers(reason: String) {
-        val codes = synchronized(openRequestCodes) { openRequestCodes.toList() }
-        if (codes.isEmpty()) return
-        Log.i(TAG, "Closing ${codes.size} open picker(s): $reason")
-        for (code in codes) {
-            try { finishActivity(code) } catch (e: Exception) { Log.w(TAG, "finishActivity($code): ${e.message}") }
-        }
-    }
-
     // ─── Photo picker for <input type="file"> inside mini-apps (photo-share) ───
     // WebView shows nothing for a file input unless WebChromeClient.onShowFileChooser opens a chooser.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
@@ -257,22 +227,13 @@ class CallActivity : AppCompatActivity() {
         fileChooserCallback = null
     }
 
-    /**
-     * Opens Android's visual media picker (gallery). [acceptTypes] comes from the page's <input accept>:
-     * image types only (accept "image/…") show only photos (Chia sẻ → Ảnh, Vẽ), video types only videos, anything else both.
-     */
-    fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>, acceptTypes: Array<String>? = null): Boolean {
+    /** Opens Android's visual media picker (gallery) for images and videos. */
+    fun launchPhotoPicker(callback: android.webkit.ValueCallback<Array<android.net.Uri>>): Boolean {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
         fileChooserCallback = callback
-        val types = acceptTypes.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }
-        val mediaType: androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VisualMediaType = when {
-            types.isNotEmpty() && types.all { it.startsWith("image/") } -> androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
-            types.isNotEmpty() && types.all { it.startsWith("video/") } -> androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly
-            else -> androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo
-        }
         return try {
             val request = androidx.activity.result.PickVisualMediaRequest.Builder()
-                .setMediaType(mediaType)
+                .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                 .build()
             mediaPicker.launch(request)
             true
@@ -1209,7 +1170,6 @@ class CallActivity : AppCompatActivity() {
         sipManager.onCallEnded = {
             lifecycleScope.launch(Dispatchers.Main) {
                 isEndingCall = true
-                closeOpenPickers("call ended by the other side")
                 sipManager.markCallEnding()
                 stopRingbackTone()
                 binding.tvCallStatus.text = "Cuộc gọi kết thúc"
@@ -1685,7 +1645,6 @@ class CallActivity : AppCompatActivity() {
             ?: intent.getStringExtra(EXTRA_INCOMING_RAW_SDP)?.replace("\\n", "\n") ?: ""
         binding.slideToAnswerView.visibility = View.GONE
         binding.layoutBottomControls.visibility = View.VISIBLE
-        CallHistory.markAnswered(this, remoteUser) // Gần đây: answered, not missed
         handleIncomingCall(remoteSdp, cId, rawSdp)
     }
 
@@ -1943,7 +1902,6 @@ class CallActivity : AppCompatActivity() {
         mapLocationController?.cancel()
         if (isEndingCall) return
         isEndingCall = true
-        closeOpenPickers("call ended")
         agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
         callServiceStarted = false
@@ -2032,7 +1990,6 @@ class CallActivity : AppCompatActivity() {
         liveMapLocationController = null
         mapLocationController?.cancel()
         mapLocationController = null
-        closeOpenPickers("call screen closed")
         super.onDestroy()
         // Destroyed without endCall() (the system closed the call screen): still release the other phone below.
         val endedHere = isEndingCall

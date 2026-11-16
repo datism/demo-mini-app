@@ -138,12 +138,6 @@
       animation: slUp .45s cubic-bezier(.2, .8, .2, 1) both;
     }
 
-    /* Collapsed to the pill: a branded backdrop instead of an empty screen. */
-    body.min {
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%23FFFFFF' stroke-opacity='.35' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 4c3.6 4.4 3.6 11.2 0 17.5C12.4 15.2 12.4 8.4 16 4z'/%3E%3Cpath d='M14.5 22.5C9 22 5 18 4 12.5c5.3.4 9.4 4.3 10.5 10z'/%3E%3Cpath d='M17.5 22.5C23 22 27 18 28 12.5c-5.3.4-9.4 4.3-10.5 10z'/%3E%3Cpath d='M6 27c5-2 15-2 20 0'/%3E%3C/svg%3E") center 38% / 46% no-repeat,
-        linear-gradient(180deg, #0369A1 0%, #0EA5E9 55%, #7DD3FC 100%) !important;
-    }
-
     .sheet.hidden,
     .pill.hidden {
       display: none;
@@ -1298,6 +1292,7 @@
 
 <body>
   <section id="sheet" class="sheet" aria-label="SkyLotus Air">
+    <div class="grabber"></div>
     <header class="header">
       <span class="logo" data-icon="lotus"></span>
       <div class="brand">
@@ -1416,8 +1411,6 @@
       return day.map(f => Object.assign({}, f, { price: dayPrice(f.price, DATES[di].dow), pick: f.no === pick }));
     }
     const LOCAL_TAKEN = ['1A', '1B', '1F', '2E', '2F', '3C', '3D', '4B', '4C', '5E', '6A', '6F', '7C', '7D', '8B', '9A', '9F', '10C', '10D', '11A', '12B', '12C', '13D', '13E', '14A', '14F', '15C', '16B', '16D', '17E', '17F', '18A', '19C', '20D'];
-    // One booking can take every free seat on the plane (20 rows × 6, minus those already sold).
-    const MAX_PAX = 20 * 6 - LOCAL_TAKEN.length;
     const SEAT_NAME = { A: 'cửa sổ', F: 'cửa sổ', C: 'lối đi', D: 'lối đi', B: 'giữa', E: 'giữa' };
     const METHODS = [
       { k: 'card', vn: 'Thẻ ngân hàng', en: 'Card · thẻ demo' },
@@ -1466,7 +1459,7 @@
         from: 'HAN', to: 'SGN', citySide: 'from', rot: 0, dateIdx: 0, pax: { a: 1, c: 0 },
         flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
         taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
-        name: 'NGUYEN VAN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
+        name: 'NGUYỄN VĂN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
       };
     }
 
@@ -1477,9 +1470,6 @@
     // ------------------------------------------------------------ helpers
     const money = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '₫';
     const pad = n => String(n).padStart(2, '0');
-    // Ticket names are written without diacritics: "Nguyễn Văn Đức" -> "NGUYEN VAN DUC".
-    const plainName = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
-      .replace(/[^A-Za-z ]/g, '').replace(/ {2,}/g, ' ').toUpperCase();
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const route = () => [state.from, state.to];
     const paxCount = () => state.pax.a + state.pax.c;
@@ -1598,7 +1588,7 @@
         return '<div class="pax-row"><div class="who">' + r.vn + '<div class="caption">' + r.en + '</div></div>' +
           '<button class="step-btn dec tap" data-act="pax" data-k="' + r.k + '" data-d="-1"' + (n <= r.min ? ' disabled' : '') + ' aria-label="Bớt ' + r.vn + '">' + ICONS.minus + '</button>' +
           '<span class="pax-n tnum" aria-live="polite">' + n + '</span>' +
-          '<button class="step-btn tap" data-act="pax" data-k="' + r.k + '" data-d="1"' + (paxCount() >= MAX_PAX ? ' disabled' : '') + ' aria-label="Thêm ' + r.vn + '">' + ICONS.plus + '</button></div>';
+          '<button class="step-btn tap" data-act="pax" data-k="' + r.k + '" data-d="1"' + (n >= 9 ? ' disabled' : '') + ' aria-label="Thêm ' + r.vn + '">' + ICONS.plus + '</button></div>';
       }).join('');
       return {
         main:
@@ -1611,7 +1601,7 @@
           '</div>' +
           '<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-label">Ngày đi <small>· Date</small></span><span class="muted" style="font-size:13px">' + monthText() + '</span></div>' +
           '<div class="dates hscroll" role="listbox" aria-label="Ngày đi">' + dates + '</div>' +
-          '<div class="caption" style="margin-top:8px' + (from === to ? ';color:#DC2626' : '') + '">' + (from === to ? 'Hành trình không hợp lệ: điểm đi trùng điểm đến · Invalid route' : flightsFor(from, to, 0) ? 'Giá thấp nhất / người lớn · Lowest fare per day' : 'Chưa có chuyến bay thẳng trên tuyến này · No direct flight on this route') + '</div></div>' +
+          '<div class="caption" style="margin-top:8px">' + (flightsFor(from, to, 0) ? 'Giá thấp nhất / người lớn · Lowest fare per day' : 'Chưa có chuyến bay thẳng trên tuyến này · No direct flight on this route') + '</div></div>' +
           '<div><div class="section-label" style="margin-bottom:4px">Hành khách <small>· Passengers</small></div>' + rows + '</div>',
         footer: '<button class="btn" data-act="search">Tìm chuyến bay<span class="sub">· Search flights</span></button>'
       };
@@ -1626,7 +1616,7 @@
         return '<button role="option" aria-selected="' + sel + '"' + (off ? ' disabled aria-disabled="true"' : '') +
           ' class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)' + (off ? ';opacity:.4' : '') + '" data-act="setcity" data-code="' + code + '">' +
           '<span class="info"><span class="times">' + AIRPORTS[code] + (sel ? ' ✓' : '') + '</span><span class="meta">' + code + ' · Sân bay ' + AIRPORT_NAME[code] +
-          (code === other ? ' · đang là ' + (side === 'from' ? 'điểm đến' : 'điểm đi') : '') +
+          (code === other ? ' · đổi chiều · swap' : '') +
           (off ? ' · Không có chuyến bay từ ' + AIRPORTS[state.from] : '') + '</span></span></button>';
       }).join('');
       return {
@@ -1728,8 +1718,7 @@
           '<div class="trip-seat"><span>' + seatLine + '</span><button class="link tap" data-act="go" data-to="seat">Đổi ghế</button></div></div>' +
           '<div><div class="group-label">Hành khách · Passenger</div>' +
           '<label style="display:block"><span class="field-label"><span>Họ và tên</span><em>Từ số gọi đến · Caller ID</em></span>' +
-          '<input id="name" class="input" value="' + esc(state.name) + '" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>' +
-          '<div class="caption" style="margin-top:6px">Viết không dấu, như trên giấy tờ · No diacritics, as on your ID</div>' +
+          '<input id="name" class="input" value="' + esc(state.name) + '" autocomplete="off"></label>' +
           '<div class="caption tnum" style="font-size:13px;margin-top:8px">+84 912 345 678 · vé gửi qua SMS</div></div>' +
           '<div><div class="group-label">Thanh toán · Payment</div><div class="methods" role="radiogroup" aria-label="Phương thức thanh toán">' + methods + '</div>' +
           '<div class="note">' + ICONS.info + '<span>Bản demo: thanh toán mô phỏng, không trừ tiền thật. Demo only — no real charge.</span></div></div>' +
@@ -1827,7 +1816,7 @@
     function screenHome() {
       return {
         main:
-          '<div><h1>Xin chào! Bạn cần hỗ trợ gì?</h1><div class="muted" style="font-size:13px;margin-top:2px">Hello! How can we help you?</div></div>' +
+          '<div><h1>Xin chào quý khách</h1><div class="muted" style="font-size:13px;margin-top:2px">Welcome to SkyLotus Air · bạn muốn làm gì?</div></div>' +
           memberCard(state.member, false) +
           '<div class="tiles">' +
           tileBtn('search', 'plane', 'Đặt vé', 'Book a flight') +
@@ -1895,12 +1884,10 @@
     const SCREENS = { home: screenHome, history: screenHistory, ticket: screenTicket, member: screenMember, support: screenSupport, search: screenSearch, city: screenCity, results: screenResults, seat: screenSeat, review: screenReview, confirm: screenConfirm };
 
     // ------------------------------------------------------------ render
-    let renderedScreen = null;
     function render() {
       const step = STEPS[state.screen];
       document.getElementById('sheet').classList.toggle('hidden', state.minimized);
       document.getElementById('pill').classList.toggle('hidden', !state.minimized);
-      document.body.classList.toggle('min', state.minimized);
 
       document.getElementById('progress').style.display = (step.menu || state.screen === 'confirm') ? 'none' : '';
       document.getElementById('step-vn').textContent = 'Bước ' + step.n + '/4 · ' + step.vn;
@@ -1914,9 +1901,6 @@
 
       const view = SCREENS[state.screen]();
       const main = document.getElementById('main');
-      const oldDays = main.querySelector('.dates');
-      const keep = renderedScreen === state.screen ? { top: main.scrollTop, left: oldDays ? oldDays.scrollLeft : 0 } : null;
-      renderedScreen = state.screen;
       document.getElementById('top').innerHTML = view.top || '';
       main.className = 'main scroll' + (view.mainClass ? ' ' + view.mainClass : '');
       main.style.cssText = view.mainStyle || '';
@@ -1924,32 +1908,7 @@
       document.getElementById('footer').innerHTML = view.footer;
 
       const name = document.getElementById('name');
-      if (name) name.addEventListener('input', e => {
-        // Strip diacritics as they are typed (an IME may still be composing a letter).
-        if (e.isComposing) return;
-        const plain = plainName(e.target.value);
-        if (plain !== e.target.value) {
-          const pos = Math.max(0, (e.target.selectionStart || 0) - (e.target.value.length - plain.length));
-          e.target.value = plain;
-          try { e.target.setSelectionRange(pos, pos); } catch (_) { }
-        }
-        state.name = plain;
-      });
-      if (name) name.addEventListener('compositionend', e => { e.target.dispatchEvent(new Event('input')); });
-
-      // Same screen re-rendered: keep where the user had scrolled (the day strip and the page).
-      if (keep) main.scrollTop = keep.top;
-      const days = main.querySelector('.dates');
-      if (days) {
-        if (keep) days.scrollLeft = keep.left;
-        // The chosen day stays in view, e.g. the last day after coming back from the city list.
-        const sel = days.querySelector('.date.sel');
-        if (sel) {
-          const r = sel.getBoundingClientRect(), d = days.getBoundingClientRect();
-          if (r.right > d.right) days.scrollLeft += r.right - d.right;
-          else if (r.left < d.left) days.scrollLeft -= d.left - r.left;
-        }
-      }
+      if (name) name.addEventListener('input', e => { state.name = e.target.value; });
     }
 
     // ------------------------------------------------------------ actions
@@ -1959,14 +1918,14 @@
       go: el => go(el.dataset.to),
       swap: () => setState({ from: state.to, to: state.from, rot: state.rot + 180 }),
       city: el => { state.citySide = el.dataset.side; go('city'); },
-      // Picking the city already on the other side is kept as chosen; Tìm chuyến bay then
-      // reports the route as invalid so the user can correct it (no silent swap).
+      // Picking the city already on the other side swaps the two.
       setcity: el => {
-        const code = el.dataset.code, side = state.citySide;
+        const code = el.dataset.code, side = state.citySide, other = side === 'from' ? 'to' : 'from';
         if (side === 'to' && code !== state.from && !flightsFor(state.from, code, 0)) return; // not flown
+        if (code === state[other]) { state[other] = state[side]; state.rot += 180; }
         state[side] = code;
         // A new origin that does not fly to the current destination: take the first city it flies to.
-        if (side === 'from' && state.from !== state.to && !flightsFor(state.from, state.to, 0)) {
+        if (side === 'from' && !flightsFor(state.from, state.to, 0)) {
           const to = AIRPORT_ORDER.find(c => c !== state.from && flightsFor(state.from, c, 0));
           if (to) { state.to = to; showToast('Đã đổi điểm đến: ' + AIRPORTS[to]); }
         }
@@ -1974,21 +1933,13 @@
       },
       date: el => setState({ dateIdx: +el.dataset.i }),
       pax: el => {
-        const k = el.dataset.k, min = k === 'a' ? 1 : 0, d = +el.dataset.d;
-        if (d > 0 && paxCount() >= MAX_PAX) {
-          showToast('Tối đa ' + MAX_PAX + ' hành khách (số ghế trống) · Max ' + MAX_PAX + ' passengers');
-          return;
-        }
+        const k = el.dataset.k, min = k === 'a' ? 1 : 0;
         const pax = Object.assign({}, state.pax);
-        pax[k] = Math.max(min, pax[k] + d);
+        pax[k] = Math.max(min, Math.min(9, pax[k] + (+el.dataset.d)));
         setState({ pax });
       },
       search: () => {
         const [from, to] = route();
-        if (from === to) {
-          showToast('Hành trình không hợp lệ: điểm đi và điểm đến trùng nhau · Invalid route');
-          return;
-        }
         const flights = flightsFor(from, to, state.dateIdx);
         if (!flights) {
           showToast('Chưa có chuyến bay thẳng giữa ' + AIRPORTS[from] + ' và ' + AIRPORTS[to]);
@@ -2035,8 +1986,7 @@
           go('seat');
           return;
         }
-        state.name = plainName(state.name).trim();
-        if (!state.name) {
+        if (!state.name.trim()) {
           showToast('Vui lòng nhập họ và tên · Enter a name');
           return;
         }
