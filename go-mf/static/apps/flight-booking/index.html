@@ -1528,7 +1528,19 @@
     const seatRow = s => parseInt(s, 10);
     const isExtra = s => !!s && state.extraRows.indexOf(seatRow(s)) >= 0;
     const farePerPax = f => f.price + (state.fare === 'flex' ? FLEX : 0);
-    const seatList = seats => seats.join(', ');
+    // A long list (a big group) is cut to its first seats plus a count, so it never pushes the seat map off
+    // the screen (SC_26: 80 passengers listed 80 seats in the banner and the footer).
+    const SEAT_LIST_MAX = 6;
+    const seatList = seats => seats.length <= SEAT_LIST_MAX ? seats.join(', ')
+      : seats.slice(0, 4).join(', ') + ' … +' + (seats.length - 4) + ' ghế';
+    // "side by side" only when they really are: one row, consecutive letters.
+    const sideBySide = seats => seats.length > 1 && seats.every(x => seatRow(x) === seatRow(seats[0])) &&
+      seats.map(x => 'ABCDEF'.indexOf(x.slice(-1))).sort((a, b) => a - b).every((c, i, a) => i === 0 || c === a[i - 1] + 1);
+    const agentBanner = seats => seats.length === 1
+      ? { vn: 'Tổng đài viên gợi ý ghế cửa sổ ' + seats[0], en: 'Agent suggested this seat' }
+      : sideBySide(seats)
+        ? { vn: 'Tổng đài viên gợi ý ghế ' + seatList(seats) + ' ngồi cạnh nhau', en: 'Agent suggested these seats' }
+        : { vn: 'Tổng đài viên gợi ý ' + seats.length + ' ghế: ' + seatList(seats), en: 'Agent suggested ' + seats.length + ' seats' };
     const sameSeats = (a, b) => a.length === b.length && a.every(s => b.indexOf(s) >= 0);
     const seatDesc = seats => seats.length === 1 ? 'Ghế ' + seats[0] + ' · ' + SEAT_NAME[seats[0].slice(-1)] : 'Ghế ' + seatList(seats);
 
@@ -1553,6 +1565,8 @@
         if (state.extraRows.indexOf(r) >= 0) continue;
         cols.forEach(c => { if (out.length < n && free(r + c)) out.push(r + c); });
       }
+      // A group bigger than the free standard seats also gets extra-legroom ones, so everyone has a seat.
+      for (const r of state.extraRows) cols.forEach(c => { if (out.length < n && free(r + c)) out.push(r + c); });
       return out;
     }
 
@@ -2023,11 +2037,7 @@
         // Size the selection to the passenger count now; DCAS's reply refines it.
         state.agentSeats = localAgentSeats(paxCount());
         state.seats = state.agentSeats.slice();
-        state.seatBanner = state.agentSeats.length
-          ? (state.agentSeats.length === 1
-            ? { vn: 'Tổng đài viên gợi ý ghế cửa sổ ' + state.agentSeats[0], en: 'Agent suggested this seat' }
-            : { vn: 'Tổng đài viên gợi ý ghế ' + seatList(state.agentSeats) + ' ngồi cạnh nhau', en: 'Agent suggested these seats' })
-          : null;
+        state.seatBanner = state.agentSeats.length ? agentBanner(state.agentSeats) : null;
         go('seat');
       },
       // One seat per passenger: tap toggles; when all are chosen a new tap replaces the oldest.
@@ -2172,7 +2182,8 @@
         const followAgent = !state.seats.length || sameSeats(state.seats, state.agentSeats);
         applySeatMap(msg);
         if (followAgent) state.seats = state.agentSeats.slice();
-        state.seatBanner = msg.message && state.agentSeats.length ? { vn: msg.message, en: msg.message_en || '' } : null;
+        // Built here (not DCAS's text) so a big group's banner stays short.
+        state.seatBanner = msg.message && state.agentSeats.length ? agentBanner(state.agentSeats) : null;
         if (state.screen === 'seat') render();
       } else if (msg.action === 'confirm' && msg.status === 'confirmed' && state.booking) {
         confirmBooking(msg.pnr || localPnr(), msg.total, msg.tax, msg.member, msg.points_earned);

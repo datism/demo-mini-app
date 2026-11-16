@@ -2,6 +2,7 @@ package dcas
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"strconv"
@@ -313,6 +314,15 @@ func (st *flightSeatStore) agentSeats(key string, n int) []string {
 			}
 		}
 	}
+	// A group bigger than the free standard seats also gets extra-legroom ones, so everyone has a seat.
+	for _, row := range flightExtraRows {
+		for _, col := range cols {
+			seat := strconv.Itoa(row) + col
+			if len(out) < n && !st.isTaken(key, seat) {
+				out = append(out, seat)
+			}
+		}
+	}
 	return out
 }
 
@@ -337,6 +347,10 @@ func requestedSeats(req FlightBookingRequest) []string {
 func agentSeatMessage(seats []string) (string, string) {
 	if len(seats) == 1 {
 		return "Tổng đài viên gợi ý ghế cửa sổ " + seats[0], "Agent suggested this seat"
+	}
+	if len(seats) > 6 { // a big group: a count and the first seats, not a list of every seat
+		return fmt.Sprintf("Tổng đài viên gợi ý %d ghế: %s … +%d ghế", len(seats), strings.Join(seats[:4], ", "), len(seats)-4),
+			fmt.Sprintf("Agent suggested %d seats", len(seats))
 	}
 	return "Tổng đài viên gợi ý ghế " + strings.Join(seats, ", ") + " ngồi cạnh nhau", "Agent suggested these seats"
 }
