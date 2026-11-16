@@ -575,7 +575,16 @@ class SipManager(
         return cseqHeader.trim().split("\\s+".toRegex()).lastOrNull()?.uppercase() ?: ""
     }
 
+    /**
+     * Same call, either leg: the IMS-AS names the callee's leg "b2b_" + the caller's Call-ID and relays
+     * the callee's 1xx and error responses raw (b2b_ id), but rebuilds the 200 OK with the caller's id.
+     */
+    private fun sameCall(a: String?, b: String?): Boolean =
+        a != null && b != null && a.removePrefix("b2b_") == b.removePrefix("b2b_")
+
     private fun isReInviteResponse(msg: String): Boolean {
+        // The callee never sends an initial INVITE in its call: every INVITE it sent is a re-INVITE.
+        if (!isCallIdOwner && isCallActive) return true
         if (initialInviteCSeq <= 0) return false
         val cseqNum = getCSeqNumber(msg)
         // Callee-initiated re-INVITE: the callee uses its OWN independent CSeq counter, so
@@ -615,6 +624,13 @@ class SipManager(
 
         // INVITE / Re-INVITE responses
         if (cseqMethod == "INVITE") {
+            // A response to an earlier call's INVITE (e.g. 1900 still answering 487/200 after a quick
+            // hang-up and redial) must not end or answer the current call (SC_27).
+            val respCallId = getHeader(msg, "call-id")
+            if (!sameCall(respCallId, pendingCallId)) {
+                Log.w(TAG, "Ignoring INVITE response $statusCode for another call ($respCallId, current $pendingCallId)")
+                return
+            }
             val isReInvite = isReInviteResponse(msg)
 
             when (statusCode) {
@@ -852,6 +868,18 @@ class SipManager(
             onHeldReInviteCancelled?.invoke()
             return
         }
+        // CANCEL of a Re-INVITE that is already answered (200 crossed the CANCEL, or 491 on glare):
+        // only the CANCEL is answered and the call goes on (RFC 3261 9.2). It carries the dialog's
+        // To-tag; the CANCEL of a ringing call has none. Ending the call here (CS_49/CS_51) left the
+        // other phone with no BYE and the IMS-AS dropping the session.
+        val inDialog = !getTag(getHeader(msg, "to") ?: "").isNullOrEmpty()
+        if (inDialog || isCallActive) {
+            try { sendRaw(buildResponse(msg, 200, "OK", "")) } catch (e: Exception) {
+                Log.e(TAG, "Failed to answer in-dialog CANCEL: ${e.message}")
+            }
+            Log.i(TAG, "CANCEL of an already answered Re-INVITE: 200 OK, call continues")
+            return
+        }
         // 1. Phản hồi 200 OK cho bản tin CANCEL
         val cancelOk = buildResponse(msg, 200, "OK", "")
         try {
@@ -862,7 +890,9 @@ class SipManager(
         }
 
         // 2. Phản hồi 487 Request Terminated cho INVITE ban đầu
-        val terminated = buildResponse(msg, 487, "Request Terminated", "")
+        // Built from the INVITE so its CSeq names INVITE (one built from the CANCEL says CANCEL).
+        val invite = lastIncomingInviteMsg?.takeIf { sameCall(getHeader(it, "call-id"), getHeader(msg, "call-id")) }
+        val terminated = buildResponse(invite ?: msg, 487, "Request Terminated", "")
         try {
             sendRaw(terminated)
             Log.i(TAG, "→ Sent 487 Request Terminated for INVITE")
@@ -1170,7 +1200,11 @@ class SipManager(
     /** [onCSeq] gets the CSeq before the request goes out, so its final response can be matched to it. */
     suspend fun sendReInviteWithSdp(sdpBody: String, onCSeq: (Int) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
-            val callId = pendingCallId ?: randomCallId()
+            // No call up (the other side hung up, e.g. while the photo library was open): a re-INVITE
+            // with a made-up Call-ID would reach the network as a new call to "unknown" and play the
+            // wrong-number announcement. Callers treat this as the request failing.
+            val callId = pendingCallId?.takeIf { isCallActive }
+                ?: throw IllegalStateException("no active call for a re-INVITE")
             val fromTag = pendingFromTag ?: randomTag()
             val toVal = activeToHeader ?: "<sip:${pendingRemoteUser ?: "unknown"}@$sipServerHost>"
             val cseq = cseqCounter.getAndIncrement()

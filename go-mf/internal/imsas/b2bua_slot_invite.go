@@ -381,6 +381,12 @@ func isReInviteTransaction(session *CallSession, msg *SIPMessage, method string)
 	if m != method {
 		return false
 	}
+	// A CANCEL on the callee's own leg (b2b_ Call-ID) after the answer can only withdraw one of the
+	// callee's re-INVITEs: the callee never sent the initial INVITE. Its CSeq comes from the callee's own
+	// counter, so comparing it with the caller's InitialCSeq tore the whole call down (CS_49/CS_51).
+	if method == "CANCEL" && strings.HasPrefix(msg.GetHeader("Call-ID"), "b2b_") {
+		return true
+	}
 	calleeInitiated := !strings.HasPrefix(msg.GetHeader("Call-ID"), "b2b_") &&
 		session.LastCalleeCSeq > 0 && cseq == session.LastCalleeCSeq
 	return cseq > session.InitialCSeq || calleeInitiated

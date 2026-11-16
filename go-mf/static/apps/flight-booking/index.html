@@ -143,13 +143,47 @@
       display: none;
     }
 
-    .grabber {
-      width: 36px;
-      height: 4px;
-      border-radius: 2px;
-      background: #E2E8F0;
-      margin: 8px auto 0;
-      flex: none;
+    /* Collapsed (pill only): a branded backdrop instead of an empty area (SC_1). */
+    html.min,
+    html.min body {
+      background: linear-gradient(160deg, #0369A1, #0EA5E9) !important;
+    }
+
+    .backdrop {
+      display: none;
+      position: absolute;
+      inset: 0 0 96px 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: #FFFFFF;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    html.min .backdrop {
+      display: flex;
+    }
+
+    .backdrop .logo {
+      width: 72px;
+      height: 72px;
+      background: rgba(255, 255, 255, .18);
+    }
+
+    .backdrop .logo svg {
+      width: 40px;
+      height: 40px;
+    }
+
+    .backdrop b {
+      font-size: 20px;
+    }
+
+    .backdrop small {
+      font-size: 13px;
+      opacity: .85;
     }
 
     .header {
@@ -1292,7 +1326,6 @@
 
 <body>
   <section id="sheet" class="sheet" aria-label="SkyLotus Air">
-    <div class="grabber"></div>
     <header class="header">
       <span class="logo" data-icon="lotus"></span>
       <div class="brand">
@@ -1309,6 +1342,12 @@
     <main id="main" class="main scroll"></main>
     <div id="footer" class="footer"></div>
   </section>
+
+  <div class="backdrop" aria-hidden="true">
+    <span class="logo" data-icon="lotus"></span>
+    <b>SkyLotus Air</b>
+    <small>Chạm thanh bên dưới để mở lại · Tap below to reopen</small>
+  </div>
 
   <button id="pill" class="pill hidden" data-act="restore">
     <span class="logo" data-icon="lotus"></span>
@@ -1459,7 +1498,7 @@
         from: 'HAN', to: 'SGN', citySide: 'from', rot: 0, dateIdx: 0, pax: { a: 1, c: 0 },
         flights: LOCAL_FLIGHTS, flightBanner: null, open: 'SL 213', fare: 'flex', flight: null,
         taken: LOCAL_TAKEN, extraRows: [1, 11], seats: ['4A'], agentSeats: ['4A'], seatBanner: null,
-        name: 'NGUYỄN VĂN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
+        name: 'NGUYEN VAN AN', pm: 'card', booking: false, pnr: null, total: null, tax: null
       };
     }
 
@@ -1472,6 +1511,11 @@
     const pad = n => String(n).padStart(2, '0');
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const route = () => [state.from, state.to];
+    /** "Nguyễn Văn Đạt" -> "NGUYEN VAN DAT": the name on a ticket has no diacritics (SC_11). */
+    const asciiName = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'D')
+      .toUpperCase().replace(/[^A-Z ]/g, '').replace(/ {2,}/g, ' ').replace(/^ /, '');
+    /** Seats still free on the plane (20 rows × 6): the passenger limit, not a fixed 9 (SC_26). */
+    const freeSeats = () => 20 * 6 - (state.taken || []).length;
     const paxCount = () => state.pax.a + state.pax.c;
     const paxText = () => state.pax.a + ' người lớn' + (state.pax.c ? ', ' + state.pax.c + ' trẻ em' : '');
     const dateText = () => DATES[state.dateIdx].wd + ', ' + DATES[state.dateIdx].d + '/' + DATES[state.dateIdx].m;
@@ -1588,7 +1632,7 @@
         return '<div class="pax-row"><div class="who">' + r.vn + '<div class="caption">' + r.en + '</div></div>' +
           '<button class="step-btn dec tap" data-act="pax" data-k="' + r.k + '" data-d="-1"' + (n <= r.min ? ' disabled' : '') + ' aria-label="Bớt ' + r.vn + '">' + ICONS.minus + '</button>' +
           '<span class="pax-n tnum" aria-live="polite">' + n + '</span>' +
-          '<button class="step-btn tap" data-act="pax" data-k="' + r.k + '" data-d="1"' + (n >= 9 ? ' disabled' : '') + ' aria-label="Thêm ' + r.vn + '">' + ICONS.plus + '</button></div>';
+          '<button class="step-btn tap" data-act="pax" data-k="' + r.k + '" data-d="1"' + (state.pax.a + state.pax.c >= freeSeats() ? ' disabled' : '') + ' aria-label="Thêm ' + r.vn + '">' + ICONS.plus + '</button></div>';
       }).join('');
       return {
         main:
@@ -1601,7 +1645,7 @@
           '</div>' +
           '<div><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-label">Ngày đi <small>· Date</small></span><span class="muted" style="font-size:13px">' + monthText() + '</span></div>' +
           '<div class="dates hscroll" role="listbox" aria-label="Ngày đi">' + dates + '</div>' +
-          '<div class="caption" style="margin-top:8px">' + (flightsFor(from, to, 0) ? 'Giá thấp nhất / người lớn · Lowest fare per day' : 'Chưa có chuyến bay thẳng trên tuyến này · No direct flight on this route') + '</div></div>' +
+          '<div class="caption" style="margin-top:8px">' + (from === to ? 'Điểm đi và điểm đến trùng nhau · Same city on both sides' : flightsFor(from, to, 0) ? 'Giá thấp nhất / người lớn · Lowest fare per day' : 'Chưa có chuyến bay thẳng trên tuyến này · No direct flight on this route') + '</div></div>' +
           '<div><div class="section-label" style="margin-bottom:4px">Hành khách <small>· Passengers</small></div>' + rows + '</div>',
         footer: '<button class="btn" data-act="search">Tìm chuyến bay<span class="sub">· Search flights</span></button>'
       };
@@ -1611,12 +1655,11 @@
       const side = state.citySide, other = side === 'from' ? state.to : state.from;
       const list = AIRPORT_ORDER.map(code => {
         const sel = code === state[side];
-        // A destination is offered only if it is flown from the origin (the other side swaps, always fine).
+        // A destination is offered only if it is flown from the origin (the same city is refused at search).
         const off = side === 'to' && code !== state.from && code !== other && !flightsFor(state.from, code, 0);
         return '<button role="option" aria-selected="' + sel + '"' + (off ? ' disabled aria-disabled="true"' : '') +
           ' class="flight-row tap" style="width:100%;border-bottom:1px solid var(--line)' + (off ? ';opacity:.4' : '') + '" data-act="setcity" data-code="' + code + '">' +
           '<span class="info"><span class="times">' + AIRPORTS[code] + (sel ? ' ✓' : '') + '</span><span class="meta">' + code + ' · Sân bay ' + AIRPORT_NAME[code] +
-          (code === other ? ' · đổi chiều · swap' : '') +
           (off ? ' · Không có chuyến bay từ ' + AIRPORTS[state.from] : '') + '</span></span></button>';
       }).join('');
       return {
@@ -1816,7 +1859,7 @@
     function screenHome() {
       return {
         main:
-          '<div><h1>Xin chào quý khách</h1><div class="muted" style="font-size:13px;margin-top:2px">Welcome to SkyLotus Air · bạn muốn làm gì?</div></div>' +
+          '<div><h1>Xin chào! Bạn cần hỗ trợ gì?</h1><div class="muted" style="font-size:13px;margin-top:2px">Hello! How can we help you?</div></div>' +
           memberCard(state.member, false) +
           '<div class="tiles">' +
           tileBtn('search', 'plane', 'Đặt vé', 'Book a flight') +
@@ -1888,6 +1931,7 @@
       const step = STEPS[state.screen];
       document.getElementById('sheet').classList.toggle('hidden', state.minimized);
       document.getElementById('pill').classList.toggle('hidden', !state.minimized);
+      document.documentElement.classList.toggle('min', !!state.minimized);
 
       document.getElementById('progress').style.display = (step.menu || state.screen === 'confirm') ? 'none' : '';
       document.getElementById('step-vn').textContent = 'Bước ' + step.n + '/4 · ' + step.vn;
@@ -1904,11 +1948,21 @@
       document.getElementById('top').innerHTML = view.top || '';
       main.className = 'main scroll' + (view.mainClass ? ' ' + view.mainClass : '');
       main.style.cssText = view.mainStyle || '';
+      // Re-rendering rebuilds the date strip: keep its scroll, or picking a late day jumps back to the first (SC_3).
+      const strip = main.querySelector('.hscroll'), stripLeft = strip ? strip.scrollLeft : 0;
       main.innerHTML = view.main;
+      const newStrip = main.querySelector('.hscroll');
+      if (strip && newStrip) newStrip.scrollLeft = stripLeft;
       document.getElementById('footer').innerHTML = view.footer;
 
+      // Passenger name without diacritics (SC_11). Not while a Vietnamese keyboard is composing a letter.
       const name = document.getElementById('name');
-      if (name) name.addEventListener('input', e => { state.name = e.target.value; });
+      if (name) {
+        const clean = () => { const v = asciiName(name.value); if (v !== name.value) name.value = v; state.name = v; };
+        name.addEventListener('input', e => { if (e.isComposing) state.name = name.value; else clean(); });
+        name.addEventListener('compositionend', clean);
+        name.addEventListener('blur', clean);
+      }
     }
 
     // ------------------------------------------------------------ actions
@@ -1918,14 +1972,14 @@
       go: el => go(el.dataset.to),
       swap: () => setState({ from: state.to, to: state.from, rot: state.rot + 180 }),
       city: el => { state.citySide = el.dataset.side; go('city'); },
-      // Picking the city already on the other side swaps the two.
+      // The same city on both sides is kept as picked and refused at search as an invalid route (SC_21);
+      // the swap button still swaps.
       setcity: el => {
-        const code = el.dataset.code, side = state.citySide, other = side === 'from' ? 'to' : 'from';
+        const code = el.dataset.code, side = state.citySide;
         if (side === 'to' && code !== state.from && !flightsFor(state.from, code, 0)) return; // not flown
-        if (code === state[other]) { state[other] = state[side]; state.rot += 180; }
         state[side] = code;
         // A new origin that does not fly to the current destination: take the first city it flies to.
-        if (side === 'from' && !flightsFor(state.from, state.to, 0)) {
+        if (side === 'from' && state.from !== state.to && !flightsFor(state.from, state.to, 0)) {
           const to = AIRPORT_ORDER.find(c => c !== state.from && flightsFor(state.from, c, 0));
           if (to) { state.to = to; showToast('Đã đổi điểm đến: ' + AIRPORTS[to]); }
         }
@@ -1935,11 +1989,16 @@
       pax: el => {
         const k = el.dataset.k, min = k === 'a' ? 1 : 0;
         const pax = Object.assign({}, state.pax);
-        pax[k] = Math.max(min, Math.min(9, pax[k] + (+el.dataset.d)));
+        pax[k] = Math.max(min, pax[k] + (+el.dataset.d));
+        if (pax.a + pax.c > freeSeats()) { showToast('Chỉ còn ' + freeSeats() + ' ghế trống · Only ' + freeSeats() + ' seats left'); return; }
         setState({ pax });
       },
       search: () => {
         const [from, to] = route();
+        if (from === to) {
+          showToast('Hành trình không hợp lệ: điểm đi và điểm đến trùng nhau · Invalid route');
+          return;
+        }
         const flights = flightsFor(from, to, state.dateIdx);
         if (!flights) {
           showToast('Chưa có chuyến bay thẳng giữa ' + AIRPORTS[from] + ' và ' + AIRPORTS[to]);
@@ -1986,7 +2045,8 @@
           go('seat');
           return;
         }
-        if (!state.name.trim()) {
+        state.name = asciiName(state.name).trim();
+        if (!state.name) {
           showToast('Vui lòng nhập họ và tên · Enter a name');
           return;
         }

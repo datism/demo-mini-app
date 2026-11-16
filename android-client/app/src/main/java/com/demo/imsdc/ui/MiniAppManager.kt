@@ -311,7 +311,7 @@ class MiniAppManager(val activity: CallActivity) {
             ): Boolean {
                 filePathCallback ?: return false
                 Log.i(TAG, "WebView file chooser requested (accept=${fileChooserParams?.acceptTypes?.joinToString()})")
-                return activity.launchPhotoPicker(filePathCallback)
+                return activity.launchPhotoPicker(filePathCallback, fileChooserParams?.acceptTypes)
             }
         }
 
@@ -1172,8 +1172,14 @@ class MiniAppManager(val activity: CallActivity) {
         val result = CompletableDeferred<ReInviteOutcome>()
         outcome = result
         try {
-            withContext(Dispatchers.IO) {
-                activity.sipManager.sendReInviteWithSdp(localOffer) { cseq -> pending.begin(cseq) }
+            try {
+                withContext(Dispatchers.IO) {
+                    activity.sipManager.sendReInviteWithSdp(localOffer) { cseq -> pending.begin(cseq) }
+                }
+            } catch (e: IllegalStateException) {
+                // The call is over (e.g. the other side hung up while a picker was open): nothing to negotiate.
+                Log.w(TAG, "Re-INVITE not sent: ${e.message}")
+                return ReInviteOutcome.Failed(481)
             }
             val answered = withTimeoutOrNull(timeoutMs) { result.await() }
             if (answered == null && cancelOnTimeout) {
@@ -1368,6 +1374,14 @@ class MiniAppManager(val activity: CallActivity) {
                         r
                     }
                     when {
+                        result is ReInviteOutcome.Answered && shareCancelRequested -> {
+                            // Hủy / "Về màn hình cuộc gọi" crossed the other phone's Đồng ý (CS_50): its 200 OK
+                            // won, so the share is open there. Close it on both phones instead of leaving the
+                            // other one waiting for us.
+                            Log.i(TAG, "Share accepted after our cancel: closing it on both phones")
+                            stopShare()
+                            if (endedByHold) { endedByHold = false; emitShareEvent("failed", """{"code":480,"reason":"hold"}""") }
+                        }
                         result is ReInviteOutcome.Answered -> emitShareEvent("accepted")
                         result is ReInviteOutcome.Failed && result.code == 603 -> { shareState = ShareState.NONE; emitShareEvent("declined") }
                         result is ReInviteOutcome.Failed && result.code == 487 && shareCancelRequested -> {
@@ -1440,7 +1454,9 @@ class MiniAppManager(val activity: CallActivity) {
         rawMsg,
         notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
         ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
-        dismiss = { emitShareEvent("cancelled") }
+        dismiss = { emitShareEvent("cancelled") },
+        // Decided outside the page (the notification's Đồng ý / Từ chối): the page's popup follows (CS_48).
+        decided = { accepted -> emitShareEvent(if (accepted) "answered" else "dismissed") }
     )
 
     /**
@@ -1519,7 +1535,10 @@ class MiniAppManager(val activity: CallActivity) {
     private var heldDismiss: (() -> Unit)? = null
 
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
-    private suspend fun awaitHeldDecision(rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit): Boolean {
+    private suspend fun awaitHeldDecision(
+        rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit,
+        decided: (accepted: Boolean) -> Unit = {}
+    ): Boolean {
         if (com.demo.imsdc.call.CallHold.active) {
             // A request that crossed our hold: it cannot be answered now. 491 makes the other side say "try later".
             Log.i(TAG, "Request \"$notice\" while on hold: 491")
@@ -1539,12 +1558,13 @@ class MiniAppManager(val activity: CallActivity) {
                 if (!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) onCallScreenHidden()
             }
             val accepted = withTimeoutOrNull(SHARE_DECISION_TIMEOUT_MS) { decision.await() }
-            if (accepted == true) { activity.sipManager.clearHeldReInvite(); return true }
+            if (accepted == true) { activity.sipManager.clearHeldReInvite(); decided(true); return true }
             if (heldCancelled) { heldCancelled = false; return false } // CANCEL: SipManager already answered 200 + 487
             val code = heldDeclineCode
             heldDeclineCode = 603
             activity.sipManager.sendReInviteReject(rawMsg, code, if (code == 480) "Temporarily Unavailable" else "Decline")
             if (accepted == null) dismiss() // no answer: close the sheet / dialog
+            else decided(false)
             return false
         } finally {
             heldDecision = null
@@ -1598,6 +1618,9 @@ class MiniAppManager(val activity: CallActivity) {
         if (shareState == ShareState.NONE) return
         clearShareSession()
         emitShareEvent("closed")
+        // The other phone left (Thoát) while this one was still in the gallery, the video picker or the
+        // screen-recording consent: close it, the page is back on the share menu (CS_44, CS_53).
+        activity.runOnUiThread { activity.closeOpenPickers() }
     }
 
     // ───────────────────────── Content Sharing: video ─────────────────────────

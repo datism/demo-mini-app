@@ -34,6 +34,9 @@ func TestIsReInviteCancel(t *testing.T) {
 		{"initial INVITE while ringing", ringing, cancelReq("c1", 1), false},
 		{"initial CSeq after answer", answered, cancelReq("c1", 1), false},
 		{"no session", nil, cancelReq("c1", 2), false},
+		// The callee's CSeq counter is its own: a low CSeq on its leg is still a re-INVITE CANCEL.
+		{"callee leg, low CSeq", answered, cancelReq("b2b_c1", 1), true},
+		{"callee leg while ringing", ringing, cancelReq("b2b_c1", 1), false},
 	}
 	for _, c := range cases {
 		if got := isReInviteCancel(c.s, c.msg); got != c.want {

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Checklist VED (11–12/11): IW_25, IW_26, IW_28, CS_2, CS_29, CS_44, CS_45, CS_48–CS_53, SC_1, SC_3, SC_11, SC_21, SC_26, SC_27, GD_10, GD_16, GD_24.
+  - Calls (SC_27): a late answer to an earlier INVITE (1900 answering 487 after a quick hang-up and redial) no longer ends the new call. INVITE responses are matched to the current call by Call-ID, with the IMS-AS's `b2b_` leg prefix ignored on both sides, so the callee's 180 / decline still reach the caller.
+  - Shares (CS_49, CS_51): a CANCEL that crosses Đồng ý, or that withdraws a re-INVITE already answered 491, is answered 200 and the call goes on (it used to end the call without a BYE, and the other phone dropped with "Mất kết nối"). The IMS-AS treats a CANCEL on the callee's leg after the answer as a re-INVITE CANCEL instead of releasing the call.
+  - Shares (CS_50): when Hủy / "Về màn hình cuộc gọi" crosses the other phone's Đồng ý, the share is closed on both phones instead of leaving the other one waiting.
+  - Shares (CS_48): Đồng ý / Từ chối on the notification also updates the page's popup.
+  - Pickers (IW_25, CS_44, CS_53): the gallery, the video picker and the "Bắt đầu ghi hình" consent close when the call ends or the other phone leaves the share. Chia sẻ, Ảnh and Vẽ only show photos (CS_2).
+  - No more "số máy điện thoại không đúng" after the other phone hangs up while a share is being set up: no re-INVITE is sent outside a live call, and the IMS-AS answers a re-INVITE for a call it no longer knows with 481.
+  - Screen share (CS_45): ending the call from the notification no longer leaves "Đang gọi · Với …" behind.
+  - Home: a number already in Danh bạ cannot be added again (GD_10); missed calls have their own red icon in Gần đây (GD_16); Danh bạ keeps one way to add a contact, the "Thêm liên hệ" row (GD_24).
+  - Vẽ: toasts sit above the dock instead of under the camera tiles (IW_26); only the phone that removed a photo can undo it (IW_28).
+  - Chia sẻ vị trí: Gửi vị trí / Chia sẻ trực tiếp no longer blink during live sharing (CS_29).
+  - SkyLotus 1900: home title "Xin chào! Bạn cần hỗ trợ gì?" with English below, no drag handle, a branded backdrop when collapsed (SC_1); picking a late day keeps the date strip where it was (SC_3); passenger names without diacritics (SC_11); the same city on both sides is refused at search as an invalid route instead of being swapped (SC_21); passengers are limited by free seats, not 9 (SC_26).
 - 1900 SkyLotus: DCAS now strips only the last `@` (MF's route) from the call id, so a phone Call-ID like `xxxx@imsdc` matches the IMS-AS session and each caller gets their own account instead of `guest`.
 - 1900 SkyLotus: each caller now has their own points and booking history (DCAS strips MF's `@ip` route from the call id before looking up the caller); a booking must have a seat for every passenger, which also fixes Lịch sử đặt vé not opening.
 - Chia sẻ vị trí is now asked and accepted like the other shares, through a SIP share request (`requestShare('map')`, data-channel only like a photo share) instead of page-only `map.*` messages. It gets the native accept popup, Hold greyed out while pending, the hold cancel and 480/491 handling, and back closes it on both phones through `stopShare`. Live location data still flows over the data channel.

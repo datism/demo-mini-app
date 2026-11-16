@@ -250,7 +250,7 @@
  *             stopShare() · pickVideo() · startScreen() · pauseVideo(bool) · muteShareAudio(bool)
  *             savePhotoB64(json) · setFullScreen(bool)
  * Native gọi: window.shareEvent(name, argJson)
- *   ringing | accepted | declined | cancelled | closed | failed{code} | invite{kind,peer}
+ *   ringing | accepted | declined | cancelled | closed | failed{code} | invite{kind,peer} | answered | dismissed
  *   videoReady{name,dur} | videoTime{t} | videoEnded | videoError{msg} | stopped
  *
  * Trong phiên (ADC stream 1000, JSON):
@@ -390,6 +390,9 @@ window.shareEvent = function (name, arg) {
         if (s.kind === 'photo') pickPhotos(); else if (s.kind === 'screen') call('startScreen'); else call('pickVideo');
       }
       break;
+    // Đồng ý / Từ chối bấm trên thông báo (ngoài app): popup của trang làm theo. Đã trả lời trên trang thì popup đã đóng.
+    case 'answered': if (s && s.role === 'receiver' && !$('inviteScrim').hidden) $('btnAccept').onclick(); break;
+    case 'dismissed': if (s && s.role === 'receiver' && !$('inviteScrim').hidden) { $('inviteScrim').hidden = true; state.s = null; } break;
     case 'declined': closeMapIfOpen(); noteEnd(peerLabel() + ' đã từ chối'); endSession(); break;
     case 'cancelled': if (s) { closeMapIfOpen(); lastCancelAt = Date.now(); noteEnd(peerLabel() + ' đã hủy chia sẻ'); endSession(); } break;
     case 'closed': if (s) { closeMapIfOpen(); toast(peerLabel() + (s.kind === 'map' ? ' đã đóng chia sẻ vị trí' : streamed(s.kind) ? ' đã dừng chia sẻ' : ' đã kết thúc chia sẻ')); endSession(); } break;

@@ -270,7 +270,6 @@ class MainActivity : AppCompatActivity() {
         val keypad = tab == HomeTab.KEYPAD
         binding.layoutDialpadPanel.visibility = if (keypad) View.VISIBLE else View.GONE
         binding.scrollRecentCalls.visibility = if (keypad) View.GONE else View.VISIBLE
-        binding.btnAddContact.visibility = if (tab == HomeTab.CONTACTS) View.VISIBLE else View.GONE
         for ((view, t) in listOf(binding.tabKeypad to HomeTab.KEYPAD, binding.tabPhone to HomeTab.RECENTS,
                                  binding.tabContacts to HomeTab.CONTACTS)) {
             val on = t == tab
@@ -377,14 +376,19 @@ class MainActivity : AppCompatActivity() {
             true
         }
         binding.btnAddToContacts.setOnClickListener {
-            if (dialDigits.isNotEmpty()) editContactDialog(dialDigits, null)
+            if (dialDigits.isEmpty()) return@setOnClickListener
+            // Already saved: say so instead of renaming the existing contact (GD_10).
+            if (Phonebook.nameOf(this, dialDigits) != null) {
+                Toast.makeText(this, "Số điện thoại đã tồn tại trong danh bạ", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            editContactDialog(dialDigits, null)
         }
 
         // Thanh điều hướng dạng viên thuốc: Bàn phím · Gần đây · Danh bạ
         binding.tabKeypad.setOnClickListener { showTab(HomeTab.KEYPAD) }
         binding.tabPhone.setOnClickListener { showTab(HomeTab.RECENTS) }
         binding.tabContacts.setOnClickListener { showTab(HomeTab.CONTACTS) }
-        binding.btnAddContact.setOnClickListener { editContactDialog(null, null) }
 
         // Nút 3 chấm Menu (ở cả tiêu đề danh sách và bàn phím)
         val showMenu = { v: View ->
@@ -616,6 +620,7 @@ class MainActivity : AppCompatActivity() {
         val number: String,
         val isIncoming: Boolean,
         val timestamp: Long,
+        val missed: Boolean = false,
         val displayName: String? = null,
         val isReal: Boolean = false
     )
@@ -714,7 +719,7 @@ class MainActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 items.add(RecentCallItem(obj.getString("number"), obj.getBoolean("isIncoming"),
-                    obj.getLong("timestamp"), isReal = true))
+                    obj.getLong("timestamp"), missed = obj.optBoolean("missed"), isReal = true))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi đọc lịch sử: ${e.message}")
@@ -734,6 +739,7 @@ class MainActivity : AppCompatActivity() {
         for (item in items) {
             val last = merged.lastOrNull()
             if (last != null && last.item.number == item.number && last.item.isIncoming == item.isIncoming &&
+                last.item.missed == item.missed &&
                 dayLabel(last.item.timestamp) == dayLabel(item.timestamp)) last.count++
             else merged.add(Merged(item, 1))
         }
@@ -745,10 +751,17 @@ class MainActivity : AppCompatActivity() {
                 val savedName = Phonebook.nameOf(this, number)
                 val icon = android.widget.ImageView(this).apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(dp(20), dp(20))
-                    setImageResource(if (m.item.isIncoming) com.demo.imsdc.R.drawable.ic_phone_incoming
-                                     else com.demo.imsdc.R.drawable.ic_phone_outgoing)
-                    imageTintList = android.content.res.ColorStateList.valueOf(
-                        android.graphics.Color.parseColor(if (m.item.isIncoming) "#FF3B82F6" else "#FF22C55E"))
+                    // Missed: its own icon in red, so it is not taken for an outgoing call (GD_16).
+                    setImageResource(when {
+                        m.item.missed -> com.demo.imsdc.R.drawable.ic_phone_missed
+                        m.item.isIncoming -> com.demo.imsdc.R.drawable.ic_phone_incoming
+                        else -> com.demo.imsdc.R.drawable.ic_phone_outgoing
+                    })
+                    imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor(when {
+                        m.item.missed -> "#FFEF4444"
+                        m.item.isIncoming -> "#FF3B82F6"
+                        else -> "#FF22C55E"
+                    }))
                 }
                 val title = (savedName ?: number) + if (m.count > 1) " (${m.count})" else ""
                 listRow(icon, title, android.text.format.DateFormat.format("HH:mm", m.item.timestamp).toString(),
@@ -846,6 +859,12 @@ class MainActivity : AppCompatActivity() {
                 val newNumber = etNumber.text.toString().trim()
                 if (newName.isEmpty() || newNumber.isEmpty()) {
                     Toast.makeText(this, "Cần nhập tên và số", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                // A new contact, or an edit that changes the number, must not overwrite another saved number (GD_10).
+                val numberChanged = number == null || Phonebook.normalize(number) != Phonebook.normalize(newNumber)
+                if ((name == null || numberChanged) && Phonebook.nameOf(this, newNumber) != null) {
+                    Toast.makeText(this, "Số điện thoại đã tồn tại trong danh bạ", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 if (number != null && Phonebook.normalize(number) != Phonebook.normalize(newNumber)) Phonebook.remove(this, number)
