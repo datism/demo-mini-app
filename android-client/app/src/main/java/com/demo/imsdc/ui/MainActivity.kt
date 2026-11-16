@@ -18,6 +18,9 @@ import kotlinx.coroutines.withContext
 import java.net.NetworkInterface
 
 private const val TAG = "MainActivity"
+/** Saved-state keys: the home tab and typed number survive the activity being recreated. */
+private const val STATE_TAB = "home_tab"
+private const val STATE_DIGITS = "dial_digits"
 
 /**
  * MainActivity — Màn hình đăng nhập / thiết lập kết nối & bàn phím Samsung OneUI
@@ -96,7 +99,15 @@ class MainActivity : AppCompatActivity() {
 
         setupUI()
         setupDialerKeypad()
-        resetHome(null)
+        // A fresh start opens Gần đây. Recreated by the system (rotation, theme, killed in the background):
+        // the user did not close the app, so the tab and typed number come back (GD_40).
+        val savedTab = savedInstanceState?.getString(STATE_TAB)?.let { name -> HomeTab.values().find { it.name == name } }
+        if (savedTab == null) resetHome(null)
+        else {
+            dialDigits = savedInstanceState.getString(STATE_DIGITS) ?: ""
+            showDigits()
+            showTab(savedTab)
+        }
 
         val autoUser = intent.getStringExtra("username")
         if (autoUser != null) {
@@ -141,11 +152,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onRestart() {
         super.onRestart()
-        // Back from a call, or the app reopened from the background.
-        if (!CallActivity.isCallActive) {
-            resetHome(callOrigin)
+        // Back from the background (recent apps, another app, screen lock) the screen stays as it was
+        // (GD_40, GD_41); only closing the app goes back to Gần đây (onCreate). After a call placed from
+        // here the typed number has been used, so it is cleared; the tab is the one the call came from.
+        if (!CallActivity.isCallActive && callOrigin != null) {
+            dialDigits = ""
+            showDigits()
             callOrigin = null
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_TAB, currentTab.name)
+        outState.putString(STATE_DIGITS, dialDigits)
     }
 
     private fun registerDebugReceiver() {
