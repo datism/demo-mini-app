@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   - Pickers (IW_25, CS_44, CS_53): the gallery, the video picker and the "Bắt đầu ghi hình" consent close when the call ends or the other phone leaves the share. Chia sẻ, Ảnh and Vẽ only show photos (CS_2).
   - No more "số máy điện thoại không đúng" after the other phone hangs up while a share is being set up: no re-INVITE is sent outside a live call, and the IMS-AS answers a re-INVITE for a call it no longer knows with 481.
   - Screen share (CS_45): ending the call from the notification no longer leaves "Đang gọi · Với …" behind.
+  - Calls (GD_42): when the caller hangs up while the call is still being set up (media not ready yet), the IMS-AS no longer forwards the INVITE afterwards, so the callee does not ring for a call that is already over.
+  - Screen share (CS_35): sharper and smoother picture, up to 1920 px on the long side, 30 fps, 6 Mbps, level 4.0, variable bitrate where the encoder offers it.
   - Home: a number already in Danh bạ cannot be added again (GD_10); missed calls have their own red icon in Gần đây (GD_16); Danh bạ keeps one way to add a contact, the "Thêm liên hệ" row (GD_24).
   - Vẽ: toasts sit above the dock instead of under the camera tiles (IW_26); only the phone that removed a photo can undo it (IW_28).
   - Chia sẻ vị trí: Gửi vị trí / Chia sẻ trực tiếp no longer blink during live sharing (CS_29).
