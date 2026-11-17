@@ -43,6 +43,10 @@ func newSlidesRelay(base int) *slidesRelay {
 				log.Printf("[MF] WARNING: content-share RTP port %d not available: %v", ports[leg][media], err)
 				continue
 			}
+			// A keyframe of a shared video arrives as hundreds of packets at once; the default
+			// socket buffer (~200 KB) can overflow while the relay goroutine is descheduled.
+			_ = c.SetReadBuffer(4 << 20)
+			_ = c.SetWriteBuffer(4 << 20)
 			r.conns[leg][media] = c
 			go r.run(leg, media)
 		}

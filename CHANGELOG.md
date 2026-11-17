@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Shared video / screen share stutter on the receiving phone:
+  - When the decoder had no free input buffer, the picture was dropped; every later picture that referenced it then smeared or froze until the next keyframe. It is now kept and retried.
+  - Playout delay 200 → 100 ms: pictures waiting for their display time hold decoder output buffers, and at 200 ms a 1080p decoder ran out and stopped taking input.
+  - A log line every 5 s reports lost packets and decoder stalls (`ContentReceiver`), to tell network loss from decoding.
+  - MF: the content-share relay sockets get 4 MB buffers.
 - Call teardown: the other phone ends the call within about 0.5 s of a hang-up instead of 3–4 s.
   - IMS-AS: BYE and CANCEL are answered and forwarded first; the MF context, DCSF subscription and dc2 releases now run afterwards in the background (they used to run one after another before the peer was told). The IMS-AS HTTP client has a 5 s timeout, so a stuck MF/DCSF can no longer hold a call flow.
   - Android: on a BYE from the other side, the call goes silent at once (media, timer, call notification stopped) and the "Cuộc gọi kết thúc" screen closes after 0.5 s instead of 1.5 s. Stopping RTP runs off the UI thread.
