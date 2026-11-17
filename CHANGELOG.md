@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
   - Screen share (CS_45): ending the call from the notification no longer leaves "Đang gọi · Với …" behind.
   - Calls (GD_42): when the caller hangs up while the call is still being set up (media not ready yet), the IMS-AS no longer forwards the INVITE afterwards, so the callee does not ring for a call that is already over.
   - Screen share (CS_35): sharper and smoother picture, up to 1920 px on the long side, 30 fps, 6 Mbps, level 4.0, variable bitrate where the encoder offers it.
+  - Bàn phím (GD_5, GD_47): the Call button is dimmed and does nothing until a number is typed; an empty keypad no longer calls the last number.
   - Home (GD_40, GD_41): coming back from the recent-apps list, another app or a screen lock keeps the tab and the typed number; only closing the app goes back to Gần đây. After a call placed from the home screen the typed number is cleared and the tab stays.
   - Home: a number already in Danh bạ cannot be added again (GD_10); missed calls have their own red icon in Gần đây (GD_16); Danh bạ keeps one way to add a contact, the "Thêm liên hệ" row (GD_24).
   - Vẽ: toasts sit above the dock instead of under the camera tiles (IW_26); only the phone that removed a photo can undo it (IW_28).
