@@ -262,6 +262,22 @@ func (b *B2BUA) handleReInvite(session *CallSession, msg *SIPMessage, remoteAddr
 		}
 	}
 
+	// Hold / resume on a hotline: the offer only repeats the open app (now a=inactive or
+	// a=sendrecv again). The network is the far end, so answer it here; taken for an app
+	// switch it was forwarded to the S-CSCF toward a number no phone registers, failed,
+	// and the phone undid the hold.
+	if config.IsHotline(session.Callee) && (reqAppId == "" || reqAppId == session.ActiveAppID) {
+		isCallerInitiator := msg.ExtractUsername("From") == session.Caller
+		answer := ExcludeADCFromSDP(msg.Body)
+		if session.IsAnchorCtxCreated && session.AdcType != "" && session.AdcType != "P2A" {
+			answer = hotlineReInviteAnswer(msg.Body, session.MfInfoA, session.MfInfoB, isCallerInitiator, session.ActiveAppID)
+		}
+		resp := b.BuildSIPResponse(msg, 200, "OK", map[string]string{"Content-Type": "application/sdp"}, answer)
+		b.sendUDP(resp, remoteAddr)
+		log.Printf("[IMS-AS] Hotline %s: answered hold/resume re-INVITE directly (app=%q)", session.Callee, session.ActiveAppID)
+		return
+	}
+
 	// ADC Release: if operator-menu Re-INVITE arrives while an ADC context already exists,
 	// this is the caller signalling ADC teardown. Forward the Re-INVITE unchanged so the
 	// callee receives the a=3gpp-req-app:"operator-menu" cue and exits the whiteboard.
