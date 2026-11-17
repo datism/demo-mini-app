@@ -147,6 +147,7 @@ class MainActivity : AppCompatActivity() {
     private fun callFromList(number: String, origin: CallOrigin) {
         callOrigin = origin
         dialDigits = number
+        showDigits()
         binding.btnDialerCall.performClick()
     }
 
@@ -309,6 +310,9 @@ class MainActivity : AppCompatActivity() {
         val vis = if (dialDigits.isEmpty()) View.INVISIBLE else View.VISIBLE
         binding.btnBackspace.visibility = vis
         binding.btnAddToContacts.visibility = vis
+        // Call is dimmed and off until a number is typed (GD_5).
+        binding.btnDialerCall.isEnabled = dialDigits.isNotEmpty()
+        binding.btnDialerCall.alpha = if (dialDigits.isEmpty()) 0.4f else 1f
     }
 
     /**
@@ -422,9 +426,11 @@ class MainActivity : AppCompatActivity() {
 
         // Nút Gọi từ bàn phím quay số
         binding.btnDialerCall.setOnClickListener {
+            // Only the typed (or tapped) number is called; nothing typed, no call (GD_47).
+            if (dialDigits.isEmpty()) return@setOnClickListener
             val sipServer  = if (binding.etSipServer.text.toString().trim().isNotEmpty()) binding.etSipServer.text.toString().trim() else "100.76.76.105"
             val username   = if (binding.etUsername.text.toString().trim().isNotEmpty()) binding.etUsername.text.toString().trim() else "1002"
-            val remoteUser = if (dialDigits.isNotEmpty()) dialDigits else if (binding.etRemoteUser.text.toString().trim().isNotEmpty()) binding.etRemoteUser.text.toString().trim() else "1003"
+            val remoteUser = dialDigits
             
             // Ưu tiên IP thực tế từ socket TCP SipManager, fallback về probe định tuyến
             val activeIp = SipManager.shared?.getLocalIp() ?: com.demo.imsdc.util.NetworkUtils.getLocalIpAddress(this, sipServer)
