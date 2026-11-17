@@ -123,6 +123,9 @@ class ContentReceiver(
     @Volatile private var vps: ByteArray? = null // H.265 only
     /** The stream is H.265 (payload type 98) rather than H.264 (97). */
     @Volatile private var hevc = false
+    /** For the 5-second log line: packets given up as lost, and times the decoder had no free input buffer. */
+    @Volatile private var lostPackets = 0
+    private var stalls = 0
 
     private fun videoLoop() {
         val socket = videoSocket ?: return
@@ -268,6 +271,7 @@ class ContentReceiver(
                 val next = pending.keys.minByOrNull { (it - expected) and 0xFFFF }!!
                 Log.w(TAG, "Lost ${(next - expected) and 0xFFFF} video packet(s) before seq $next")
                 broken = true
+                lostPackets += (next - expected) and 0xFFFF
                 expected = next
                 drain()
             }
@@ -282,8 +286,13 @@ class ContentReceiver(
         var codecRotation = 0
         var codecHevc = false
         var shownW = 0; var shownH = 0
+        // A picture the decoder had no input buffer for: it is retried, never dropped. Dropping one broke
+        // every later picture that referenced it (smearing / freezes until the next keyframe).
+        var held: Picture? = null
+        var lastStatsNs = System.nanoTime()
         while (running) {
-            val picture = pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
+            val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
+            held = null
             if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
                 // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
                 Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
@@ -296,16 +305,19 @@ class ContentReceiver(
             if (c == null) continue
             try {
                 if (picture != null) {
-                    // RTP time (90 kHz, wraps at 2^32) to a steadily increasing presentation time.
-                    if (lastTs >= 0) ptsBaseUs += ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
-                        if (it >= 0x80000000L) it - 0x100000000L else it
-                    } * 100 / 9
-                    lastTs = picture.rtpTs
-                    val ii = c.dequeueInputBuffer(20_000)
+                    val ii = c.dequeueInputBuffer(5_000)
                     if (ii >= 0) {
+                        // RTP time (90 kHz, wraps at 2^32) to a steadily increasing presentation time.
+                        if (lastTs >= 0) ptsBaseUs += ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
+                            if (it >= 0x80000000L) it - 0x100000000L else it
+                        } * 100 / 9
+                        lastTs = picture.rtpTs
                         val ib = c.getInputBuffer(ii)!!
                         ib.clear(); ib.put(picture.data)
                         c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
+                    } else {
+                        held = picture // decoder busy: free its output below, then try again
+                        stalls++
                     }
                 }
                 // Each decoded picture is shown at its own time, a fixed delay behind the stream, so network
@@ -322,6 +334,11 @@ class ContentReceiver(
                         }
                     }
                     else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
+                }
+                if (System.nanoTime() - lastStatsNs > 5_000_000_000L) {
+                    if (stalls > 0 || lostPackets > 0) Log.i(TAG, "video last 5 s: $lostPackets packet(s) lost, decoder busy $stalls time(s), ${pictures.size} picture(s) queued")
+                    stalls = 0; lostPackets = 0
+                    lastStatsNs = System.nanoTime()
                 }
             } catch (e: Exception) {
                 if (running) Log.w(TAG, "Decode error: ${e.message}")
@@ -395,8 +412,12 @@ class ContentReceiver(
     companion object {
         /** About a second of video at 30 fps. */
         private const val PICTURE_QUEUE = 30
-        /** How far playback runs behind the stream, to absorb network jitter. */
-        const val PLAYOUT_DELAY_MS = 200L
+        /**
+         * How far playback runs behind the stream, to absorb network jitter. Every picture waiting for its
+         * time holds one of the decoder's output buffers: at 200 ms (6 pictures at 30 fps) a 1080p decoder ran
+         * out of them and stopped taking input.
+         */
+        const val PLAYOUT_DELAY_MS = 100L
 
         /** H.265 random-access (IRAP) pictures: BLA, IDR, CRA. Decoding can start there. */
         fun isHevcKey(type: Int) = type in 16..21
