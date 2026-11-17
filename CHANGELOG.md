@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- Call teardown: the other phone ends the call within about 0.5 s of a hang-up instead of 3–4 s.
+  - IMS-AS: BYE and CANCEL are answered and forwarded first; the MF context, DCSF subscription and dc2 releases now run afterwards in the background (they used to run one after another before the peer was told). The IMS-AS HTTP client has a 5 s timeout, so a stuck MF/DCSF can no longer hold a call flow.
+  - Android: on a BYE from the other side, the call goes silent at once (media, timer, call notification stopped) and the "Cuộc gọi kết thúc" screen closes after 0.5 s instead of 1.5 s. Stopping RTP runs off the UI thread.
 - Checklist VED (11–12/11): IW_25, IW_26, IW_28, CS_2, CS_29, CS_44, CS_45, CS_48–CS_53, SC_1, SC_3, SC_11, SC_21, SC_26, SC_27, GD_10, GD_16, GD_24.
   - Calls (SC_27): a late answer to an earlier INVITE (1900 answering 487 after a quick hang-up and redial) no longer ends the new call. INVITE responses are matched to the current call by Call-ID, with the IMS-AS's `b2b_` leg prefix ignored on both sides, so the callee's 180 / decline still reach the caller.
   - Shares (CS_49, CS_51): a CANCEL that crosses Đồng ý, or that withdraws a re-INVITE already answered 491, is answered 200 and the call goes on (it used to end the call without a BYE, and the other phone dropped with "Mất kết nối"). The IMS-AS treats a CANCEL on the callee's leg after the answer as a re-INVITE CANCEL instead of releasing the call.

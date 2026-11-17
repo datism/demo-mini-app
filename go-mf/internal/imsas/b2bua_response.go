@@ -373,48 +373,13 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	}
 	b.mu.Unlock()
 
-	// Release MF Context
-	if ok && session != nil {
-		mfHost := session.MfHost
-		if mfHost == "" {
-			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-		}
-		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
-		b.closeAppSlot(session)
-		if session.ContextID != "" {
-			log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
-			_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-		}
-		if session.IsAnchorCtxCreated {
-			log.Printf("[IMS-AS] BDC Context deleted. ADC transport is automatically cleaned up with the context.")
-		}
-	}
-
-	// Release DCSF Event Subscription (DC1)
-	if ok && session != nil {
-		dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
-		dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
-		log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s", callID)
-		_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
-	}
-
-	// Release dc2 sessions (close SCTP ports, avoid UDP leak)
-	if ok && session != nil {
-		mfHost := session.MfHost
-		if mfHost == "" {
-			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-		}
-		if session.SessionIDA != "" {
-			go b.callDc2Release(mfHost, session.SessionIDA)
-		}
-		if session.SessionIDB != "" {
-			go b.callDc2Release(mfHost, session.SessionIDB)
-		}
-	}
-
-	// Reply 200 OK immediately
+	// Reply 200 OK and tell the other side first: releasing the MF/DCSF
+	// resources takes HTTP round trips and must not delay the peer's hang-up.
 	resp := b.BuildSIPResponse(msg, 200, "OK", nil, "")
 	b.sendUDP(resp, remoteAddr)
+	if ok && session != nil {
+		defer func() { go b.releaseCallResources(session, callID) }()
+	}
 
 	// If it's Hotline 198, consume it locally
 	if ok && session != nil && config.IsHotline(session.Callee) {
@@ -500,41 +465,9 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		return
 	}
 
-	// Clean up MF Context (including ADC anchor context)
-	if ok && session != nil && session.ContextID != "" {
-		mfHost := session.MfHost
-		if mfHost == "" {
-			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-		}
-		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
-		b.closeAppSlot(session)
-		log.Printf("[IMS-AS] Releasing MF Context %s due to CANCEL", session.ContextID)
-		_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-		if session.IsAnchorCtxCreated {
-			log.Printf("[IMS-AS] BDC Context deleted due to CANCEL. ADC transport is automatically cleaned up with the context.")
-		}
-	}
-
-	// Release DCSF Event Subscription (DC1) due to CANCEL
+	// Release MF/DCSF resources after the CANCEL is forwarded (see handleBye).
 	if ok && session != nil {
-		dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
-		dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
-		log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s due to CANCEL", callID)
-		_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
-	}
-
-	// Clean up dc2 sessions (close SCTP/UDP ports on MF)
-	if ok && session != nil {
-		mfHost := session.MfHost
-		if mfHost == "" {
-			mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-		}
-		if session.SessionIDA != "" {
-			go b.callDc2Release(mfHost, session.SessionIDA)
-		}
-		if session.SessionIDB != "" {
-			go b.callDc2Release(mfHost, session.SessionIDB)
-		}
+		defer func() { go b.releaseCallResources(session, callID) }()
 	}
 
 	// Forward CANCEL to S-CSCF (only if not Hotline 198)
@@ -595,4 +528,32 @@ func (b *B2BUA) sendAnswerToInitiator(session *CallSession, msg *SIPMessage, isC
 	resp := b.BuildSIPResponse(origMsgForResp, 200, "OK", headers, sdp)
 	b.forwardToSCSCF(resp)
 	log.Printf("[IMS-AS] Forwarded rewritten 200 OK Answer back to S-CSCF")
+}
+
+// releaseCallResources frees what a finished call holds outside the IMS-AS:
+// the App-slot and main MF contexts, the DCSF event subscription and the dc2
+// sessions. Run it after the BYE/CANCEL has been forwarded.
+func (b *B2BUA) releaseCallResources(session *CallSession, callID string) {
+	mfHost := session.MfHost
+	if mfHost == "" {
+		mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
+	}
+	b.closeAppSlot(session)
+	if session.ContextID != "" {
+		log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
+		mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
+		_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
+	}
+
+	dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
+	dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
+	log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s", callID)
+	_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
+
+	if session.SessionIDA != "" {
+		go b.callDc2Release(mfHost, session.SessionIDA)
+	}
+	if session.SessionIDB != "" {
+		go b.callDc2Release(mfHost, session.SessionIDB)
+	}
 }
