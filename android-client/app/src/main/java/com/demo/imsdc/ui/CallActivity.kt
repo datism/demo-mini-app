@@ -1229,8 +1229,16 @@ class CallActivity : AppCompatActivity() {
                 closeOpenPickers()
                 if (::miniAppManager.isInitialized) miniAppManager.resetShare()
                 stopRingbackTone()
+                // The peer hung up: silence the call now. Media, timer and the call notification used to
+                // keep running until onDestroy, after the "ended" label had shown for 1.5 s.
+                com.demo.imsdc.call.CallService.stop(this@CallActivity)
+                callServiceStarted = false
+                IncomingCallNotificationManager.dismiss(this@CallActivity)
+                stopCallTimer()
+                stopRtpInBackground()
+                resetAudio()
                 binding.tvCallStatus.text = "Cuộc gọi kết thúc"
-                delay(1500)
+                delay(500)
                 finish()
             }
         }
@@ -1970,7 +1978,7 @@ class CallActivity : AppCompatActivity() {
         stopRingbackTone()
         isDataChannelsOpened = false
         stopCallTimer()
-        rtpMediaManager?.stop()
+        stopRtpInBackground()
         // Photo-share: dọn photostore theo vòng đời cuộc gọi (GSMA TS.66 container lifecycle).
         dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()
@@ -1983,6 +1991,12 @@ class CallActivity : AppCompatActivity() {
         releaseVideoViews()
         webRtcManager.close()
         finish()
+    }
+
+    /** RtpMediaManager.stop() joins its threads and releases the codecs: keep it off the UI thread. Idempotent. */
+    private fun stopRtpInBackground() {
+        val rtp = rtpMediaManager ?: return
+        Thread({ rtp.stop() }, "rtp-stop").start()
     }
 
     // --- Lifecycle cleanup ---------------------------------------------------
@@ -2071,7 +2085,7 @@ class CallActivity : AppCompatActivity() {
             Log.w(TAG, "Error unregistering debugReceiver: ${e.message}")
         }
         stopCallTimer()
-        rtpMediaManager?.stop()
+        stopRtpInBackground()
         // Photo-share: dọn photostore theo vòng đời cuộc gọi (GSMA TS.66 container lifecycle).
         dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()

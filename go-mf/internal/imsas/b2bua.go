@@ -250,6 +250,8 @@ func NewB2BUA(cfg *config.Config) *B2BUA {
 	return &B2BUA{
 		cfg: cfg,
 		httpClient: &http.Client{
+			// A slow or stuck MF/DCSF must never hold a call flow forever.
+			Timeout: 5 * time.Second,
 			Transport: &HEPRoundTripper{
 				Proxied: &http2.Transport{
 					AllowHTTP: true,
