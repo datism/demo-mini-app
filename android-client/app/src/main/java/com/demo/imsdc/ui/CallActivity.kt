@@ -807,6 +807,7 @@ class CallActivity : AppCompatActivity() {
         binding.btnKeypadCircle.alpha = if (on) 1f else 0.35f
         binding.btnKeypadCircle.contentDescription = when {
             on -> "Giữ cuộc gọi"
+            agentCalling -> "Giữ cuộc gọi (không khả dụng khi đang gọi tổng đài viên)"
             invitePending -> "Giữ cuộc gọi (đang chờ phản hồi lời mời)"
             else -> "Giữ cuộc gọi (khả dụng khi đã kết nối)"
         }
@@ -815,7 +816,7 @@ class CallActivity : AppCompatActivity() {
     /** An app or share invite is waiting for an answer: Hold waits too (no second Re-INVITE meanwhile). */
     private var invitePending = false
 
-    private fun refreshHoldAvailable() = setHoldAvailable(isCallActiveUiShown && !invitePending)
+    private fun refreshHoldAvailable() = setHoldAvailable(isCallActiveUiShown && !invitePending && !agentCalling)
 
     private fun setupUI() {
         setHoldAvailable(false)
@@ -2226,6 +2227,7 @@ class CallActivity : AppCompatActivity() {
 
     private fun toggleCallHold() {
         if (!isCallActiveUiShown) return // not connected yet: nothing to hold
+        if (agentCalling) return // 1900 "Gặp tổng đài viên" is ringing: no hold meanwhile
         if (invitePending && !sipManager.isCallHoldActive) {
             Toast.makeText(this, "Đang chờ phản hồi lời mời", Toast.LENGTH_SHORT).show()
             return
@@ -2405,6 +2407,8 @@ class CallActivity : AppCompatActivity() {
         if (agentCallJob?.isActive == true) return
         val c = CertifiedNumbers.of(remoteUser)
         agentCallJob = lifecycleScope.launch(Dispatchers.Main) {
+            agentCalling = true
+            refreshHoldAvailable()
             try {
                 if (c != null) showCertified(c)
                 binding.tvBigNumber.text = "Tổng đài viên · $remoteUser"
@@ -2433,10 +2437,14 @@ class CallActivity : AppCompatActivity() {
                 binding.layoutMiddleDetails.visibility = View.GONE
                 binding.viewBackgroundPlaceholder.visibility = View.GONE
                 binding.webviewMiniapp.visibility = View.VISIBLE
+                agentCalling = false
+                refreshHoldAvailable()
             }
         }
     }
     @Volatile private var agentRingCancelled = false
+    /** 1900 "Gặp tổng đài viên" screen is up (ringing, then "không trả lời"): Hold is unavailable. */
+    private var agentCalling = false
 
     private fun startAvatarPulse() {
         val ring = binding.viewAvatarPulse

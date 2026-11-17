@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-10-25
 
 ### Fixed
+- 1900 "Gặp tổng đài viên": Hold is greyed out and does nothing while the agent screen is up (ringing, then "Tổng đài viên không trả lời"); it works again once the booking page is back.
 - Hold on a hotline call (1900, 198): the hold screen no longer flashes and undoes itself. The hold / resume re-INVITE repeats the open app (`a=3gpp-req-app`), so the IMS-AS took it for an app switch and forwarded it toward the hotline number, where no phone answers. The IMS-AS now answers a hotline re-INVITE that asks for no new app itself (200 OK, same media as when the app opened).
 - Shared video / screen share stutter on the receiving phone:
   - When the decoder had no free input buffer, the picture was dropped; every later picture that referenced it then smeared or froze until the next keyframe. It is now kept and retried.
