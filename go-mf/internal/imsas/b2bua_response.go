@@ -487,6 +487,10 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	if ok && session != nil && !reInviteCancel {
 		b.forgetStoredSession(callID)
 	}
+	if !ok && !strings.HasPrefix(msgCallID, "b2b_") && !strings.Contains(msg.GetHeader("To"), ";tag=") {
+		// A CANCEL for a call not seen yet: its INVITE may still be on the way (see takeEarlyCancel).
+		b.rememberEarlyCancel(msgCallID)
+	}
 
 	// Reply 200 OK to CANCEL immediately
 	headers := map[string]string{

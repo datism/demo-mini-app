@@ -1,6 +1,7 @@
 package imsas
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -57,4 +58,39 @@ func TestInviteNotForwardedForSessionReloadedAfterCancel(t *testing.T) {
 	if n, _, err := r.scscf.ReadFromUDP(buf); err == nil {
 		t.Fatalf("something reached the S-CSCF: %q", string(buf[:n]))
 	}
+}
+
+// The caller cancelled so quickly that its CANCEL reached the IMS-AS before the INVITE: the INVITE is
+// answered 487 and nothing is set up, instead of ringing the callee for a call nobody is on.
+func TestInviteAfterItsCancelIsTerminated(t *testing.T) {
+	r := newFailureRig(t)
+	from, _ := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	defer from.Close()
+	addr := from.LocalAddr().(*net.UDPAddr)
+
+	cancel, _ := ParseSIPMessage("CANCEL sip:bob@ims SIP/2.0\r\nVia: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK1\r\n" +
+		"From: <sip:alice@ims>;tag=a\r\nTo: <sip:bob@ims>\r\nCall-ID: early1\r\nCSeq: 1 CANCEL\r\nContent-Length: 0\r\n\r\n")
+	r.b.handleCancel(cancel, addr)
+
+	invite, _ := ParseSIPMessage("INVITE sip:bob@ims SIP/2.0\r\nVia: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bK1\r\n" +
+		"From: <sip:alice@ims>;tag=a\r\nTo: <sip:bob@ims>\r\nCall-ID: early1\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	r.b.handleInvite(invite, addr)
+
+	buf := make([]byte, 2048)
+	var got []string
+	_ = from.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	for {
+		n, _, err := from.ReadFromUDP(buf)
+		if err != nil {
+			break
+		}
+		got = append(got, strings.SplitN(string(buf[:n]), "\r\n", 2)[0])
+	}
+	if len(got) != 2 || !strings.Contains(got[0], "200") || !strings.Contains(got[1], "487") {
+		t.Fatalf("want 200 for the CANCEL then 487 for the INVITE, got %q", got)
+	}
+	if _, ok := r.b.sessions["early1"]; ok {
+		t.Fatalf("a call was set up for an INVITE that came after its CANCEL")
+	}
+	r.nothingMore(t) // nothing towards the callee
 }

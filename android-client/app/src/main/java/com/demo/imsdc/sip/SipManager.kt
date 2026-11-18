@@ -1094,6 +1094,10 @@ class SipManager(
      * @param localIp      IP của thiết bị local (tùy chọn, nếu không truyền sẽ tự lấy từ socket)
      * @param sdpBody      SDP body bao gồm m=application section (từ WebRtcManager)
      */
+    /** From-tag of the last INVITE we sent; kept after resetCallState so a late CANCEL can still name it. */
+    @Volatile var lastInviteFromTag: String? = null
+        private set
+
     suspend fun invite(toUser: String, localIp: String? = null, sdpBody: String?): String =
         withContext(Dispatchers.IO) {
             val effectiveIp = getLocalIp()
@@ -1106,6 +1110,7 @@ class SipManager(
             isCallIdOwner = true
             pendingCallId  = callId
             pendingFromTag = fromTag
+            lastInviteFromTag = fromTag
             pendingBranch  = branch
             pendingRemoteUser = toUser
             pendingCSeq = cseq

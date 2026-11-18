@@ -94,6 +94,14 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		return
 	}
 
+	// The caller already cancelled this call: its CANCEL overtook the INVITE. End the INVITE (487) instead of
+	// setting the call up, or the callee rings for a call nobody is on.
+	if b.takeEarlyCancel(callID) {
+		log.Printf("[IMS-AS] INVITE for call %s came after its CANCEL: 487, callee not rung", callID)
+		b.sendUDP(b.BuildSIPResponse(msg, 487, "Request Terminated", nil, ""), remoteAddr)
+		return
+	}
+
 	// Resolve and hash target MF host at session initialization
 	mfHost := resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
 

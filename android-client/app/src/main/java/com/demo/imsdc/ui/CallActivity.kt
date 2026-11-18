@@ -351,7 +351,7 @@ class CallActivity : AppCompatActivity() {
     var currentAppId: String = "operator-menu"
     private var isCallActiveUiShown = false
     private var isVideoEnabled = false
-    internal var isEndingCall = false
+    @Volatile internal var isEndingCall = false
     private var ringtone: Ringtone? = null
 
     private val debugReceiver = object : android.content.BroadcastReceiver() {
@@ -1648,7 +1648,20 @@ class CallActivity : AppCompatActivity() {
                 }
 
                 // 5. Gởi SIP INVITE kèm SDP offer
-                callId = sipManager.invite(remoteUser, localIp, localOffer)
+                // End may be pressed while the camera and offer are being set up: there was no Call-ID yet to
+                // CANCEL, and the INVITE went out afterwards anyway, ringing the other phone for a call nobody
+                // was on. Not sending it, or withdrawing it at once (also when End lands while it is sent).
+                if (isEndingCall) { Log.i(TAG, "Call ended before the INVITE was sent: not calling $remoteUser"); return@launch }
+                val sentCallId = withContext(kotlinx.coroutines.NonCancellable) {
+                    val id = sipManager.invite(remoteUser, localIp, localOffer)
+                    if (isEndingCall) {
+                        Log.i(TAG, "Call ended while the INVITE was being sent: CANCEL $id")
+                        sipManager.cancel(remoteUser, localIp, overrideCallId = id, overrideFromTag = sipManager.lastInviteFromTag)
+                    }
+                    id
+                }
+                if (isEndingCall) return@launch
+                callId = sentCallId
                 Log.i(TAG, "SIP INVITE sent with SDP, call_id=$callId")
 
                 withContext(Dispatchers.Main) {
