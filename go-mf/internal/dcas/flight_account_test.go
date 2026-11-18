@@ -10,24 +10,17 @@ func reply(req FlightBookingRequest, caller string, seats *flightSeatStore, acct
 	return buildFlightReplyForCaller(req, caller, fixedPNR, seats, accts)
 }
 
-func TestFlightProfileSeedsNewCaller(t *testing.T) {
+func TestFlightProfileNewCallerIsEmpty(t *testing.T) {
 	accts := newFlightAccountStore()
 	r := reply(FlightBookingRequest{Action: "profile"}, "1001", newFlightSeatStore(), accts)
 	if r.Status != "success" || r.Member == nil {
 		t.Fatalf("unexpected reply %+v", r)
 	}
-	if len(r.Bookings) != 2 {
-		t.Fatalf("expected 2 seeded bookings, got %d", len(r.Bookings))
+	if len(r.Bookings) != 0 {
+		t.Fatalf("a new caller should have no bookings, got %d", len(r.Bookings))
 	}
-	if r.Member.Tier != "silver" || r.Member.NextTier != "gold" || r.Member.ToNext <= 0 {
-		t.Errorf("unexpected member %+v", r.Member)
-	}
-	statuses := map[string]int{}
-	for _, b := range r.Bookings {
-		statuses[b.Status]++
-	}
-	if statuses["flown"] != 1 || statuses["upcoming"] != 1 {
-		t.Errorf("seed should hold one flown and one upcoming booking, got %v", statuses)
+	if *r.Member != memberFor(0) {
+		t.Errorf("a new caller should start at 0 points, got %+v", r.Member)
 	}
 }
 
@@ -88,8 +81,8 @@ func TestFlightAccountsAreIsolatedPerCaller(t *testing.T) {
 	reply(confirmReq("4A"), "1001", seats, accts)
 
 	other := reply(FlightBookingRequest{Action: "profile"}, "1002", seats, accts)
-	if len(other.Bookings) != 2 {
-		t.Errorf("another caller must keep only the seed, got %d bookings", len(other.Bookings))
+	if len(other.Bookings) != 0 {
+		t.Errorf("another caller must see none of these bookings, got %d", len(other.Bookings))
 	}
 }
 
@@ -113,11 +106,10 @@ func TestFlightFailedConfirmRecordsNothing(t *testing.T) {
 	}
 }
 
-func TestFlightConfirmCanUpgradeTier(t *testing.T) {
-	seats, accts := newFlightSeatStore(), newFlightAccountStore()
-	r := reply(confirmReq("4A"), "1001", seats, accts)
-	if r.Member == nil || r.Member.Tier != "gold" {
-		t.Errorf("seed points plus this booking should reach gold, got %+v", r.Member)
+func TestFlightBookingCanUpgradeTier(t *testing.T) {
+	accts := newFlightAccountStore()
+	if _, m := accts.record("1001", FlightBookingRecord{Total: flightGoldPoints * flightPointsPerVND}); m.Tier != "gold" {
+		t.Errorf("a booking worth %d points should reach gold, got %+v", flightGoldPoints, m)
 	}
 }
 
@@ -169,7 +161,7 @@ func TestFlightConfirmNeedsEverySeat(t *testing.T) {
 		}
 	}
 	after, bookings := accts.profile("1001")
-	if after != before || len(bookings) != len(seededFlightAccount().bookings) {
+	if after != before || len(bookings) != 0 {
 		t.Errorf("seatless confirm changed the account: %+v -> %+v", before, after)
 	}
 }

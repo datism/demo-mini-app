@@ -647,8 +647,7 @@ class MainActivity : AppCompatActivity() {
         val isIncoming: Boolean,
         val timestamp: Long,
         val missed: Boolean = false,
-        val displayName: String? = null,
-        val isReal: Boolean = false
+        val displayName: String? = null
     )
 
     // ───────────────── Danh sách kiểu One UI: tiêu đề nhóm + thẻ bo góc ─────────────────
@@ -745,17 +744,21 @@ class MainActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 items.add(RecentCallItem(obj.getString("number"), obj.getBoolean("isIncoming"),
-                    obj.getLong("timestamp"), missed = obj.optBoolean("missed"), isReal = true))
+                    obj.getLong("timestamp"), missed = obj.optBoolean("missed")))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi đọc lịch sử: ${e.message}")
         }
 
-        // Thêm mock data giống ảnh màn hình
-        val now = System.currentTimeMillis()
-        if (items.none { it.number == "1001" }) items.add(RecentCallItem("1001", isIncoming = false, timestamp = now - 3600000 * 2))
-        if (items.none { it.number == "1002" }) items.add(RecentCallItem("1002", isIncoming = true, timestamp = now - 3600000 * 3))
-        if (items.none { it.number == "1003" }) items.add(RecentCallItem("1003", isIncoming = true, timestamp = now - 3600000 * 8))
+        if (items.isEmpty()) {
+            container.addView(android.widget.TextView(this).apply {
+                text = "Chưa có cuộc gọi nào"
+                setTextColor(android.graphics.Color.parseColor("#FF6E6E73"))
+                textSize = 14f
+                setPadding(dp(20), dp(16), dp(20), dp(16))
+            })
+            return
+        }
 
         items.sortByDescending { it.timestamp }
 
