@@ -245,6 +245,9 @@ type B2BUA struct {
 	// cancelledCalls holds, for a short while, calls the caller cancelled before the callee's
 	// 200 OK was handled, so a 200 OK that crosses the CANCEL still ends the callee's leg.
 	cancelledCalls map[string]*CallSession
+	// earlyCancels holds Call-IDs whose CANCEL came before their INVITE (the S-CSCF handles each message
+	// on its own, so they can overtake): that INVITE is ended with 487 instead of ringing the callee.
+	earlyCancels map[string]bool
 	httpServer     *http.Server
 	localIP        string
 	localClusterIP string
@@ -445,6 +448,32 @@ func (b *B2BUA) takeCancelled(callID string) *CallSession {
 	s := b.cancelledCalls[callID]
 	delete(b.cancelledCalls, callID)
 	return s
+}
+
+// rememberEarlyCancel records a CANCEL for a call not seen yet, for cancelledCallTTL.
+func (b *B2BUA) rememberEarlyCancel(callID string) {
+	b.mu.Lock()
+	if b.earlyCancels == nil {
+		b.earlyCancels = make(map[string]bool)
+	}
+	b.earlyCancels[callID] = true
+	b.mu.Unlock()
+	time.AfterFunc(cancelledCallTTL, func() {
+		b.mu.Lock()
+		delete(b.earlyCancels, callID)
+		b.mu.Unlock()
+	})
+}
+
+// takeEarlyCancel reports (once) whether the call's CANCEL already came before this INVITE.
+func (b *B2BUA) takeEarlyCancel(callID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.earlyCancels[callID] {
+		return false
+	}
+	delete(b.earlyCancels, callID)
+	return true
 }
 
 // forgetStoredSession drops the Redis copy of a call that has ended. Without it
