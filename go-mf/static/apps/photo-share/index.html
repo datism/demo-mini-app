@@ -269,8 +269,15 @@ const state = {
   muted: false, peer: '',
 };
 
+// The data channel takes at most 64 KB per message: native drops a bigger one (it would close the channel).
+const MAX_JSON = 60000;
 function sendJson(obj) {
-  const s = JSON.stringify(obj), b = B();
+  let s = JSON.stringify(obj);
+  if (s.length > MAX_JSON && obj.t === 'offer') {
+    console.warn('[CS] offer too large (' + s.length + ' bytes): sent without previews');
+    s = JSON.stringify(Object.assign({}, obj, { photos: (obj.photos || []).map(p => Object.assign({}, p, { thumb: '' })) }));
+  }
+  const b = B();
   if (b && b.send) b.send(1000, s); else if (b && b.sendData) b.sendData(s); else console.warn('[CS] no bridge', s);
 }
 function call(name, arg) { const b = B(); if (b && typeof b[name] === 'function') return arg === undefined ? b[name]() : b[name](arg); if (name !== 'setFullScreen' && name !== 'setCameraRow' && name !== 'showCallControls') console.warn('[CS] bridge missing', name); }
@@ -362,6 +369,8 @@ function endSession() {
   state.s = null; state.video = null;
   Object.values(state.photos).forEach(p => { if (p.url && !p.local) URL.revokeObjectURL(p.url); });
   state.photos = {}; state.order = []; state.current = null; state.gotSeqMax = 0; state.seq = 0;
+  // A transfer left over from this session must not hold up the next one (it waited out a 30 s timeout).
+  fetching = null; outbox = []; offerInFlight = null;
   setZoom(1, 0, 0);
   show('home');
 }
@@ -467,7 +476,7 @@ $('fileInput').onchange = async () => {
   if (!B()) { toast('Không tìm thấy AndroidBridge'); return; }
   if (files.length > MAX_PHOTOS) { files = files.slice(-MAX_PHOTOS); toast('Tối đa ' + MAX_PHOTOS + ' ảnh — chỉ gửi ' + MAX_PHOTOS + ' ảnh cuối'); }
   else toast('Đang xử lý ' + files.length + ' ảnh…');
-  const offered = [];
+  let added = 0;
   for (let i = 0; i < files.length; i++) {
     const id = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + i;
     let res;
@@ -478,15 +487,45 @@ $('fileInput').onchange = async () => {
     if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); continue; }
     state.photos[id] = { id, mimeType: 'image/jpeg', bytes: res.bytes, local: true, ready: true, url: B().mediaUrl(id, false), thumbUrl: B().mediaUrl(id, true) };
     state.order.push(id);
-    offered.push({ id, bytes: res.bytes, thumb: await thumbB64Of(id) });
+    trimPhotos();
+    // Each photo goes out as soon as it is ready, one at a time (sendNextOffer): its preview, then its full
+    // picture, then the next preview. One offer with every preview inline went over the channel's 64 KB
+    // limit with a few photos and was dropped: the other phone kept spinning.
+    outbox.push({ id, bytes: res.bytes, thumb: await thumbB64Of(id) });
+    sendNextOffer();
+    if (++added === 1) {
+      if ($('viewer').hidden) enterViewer();
+      gotoPhoto(id, true);
+    }
   }
-  if (!offered.length) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
-  trimPhotos();
-  sendJson({ t: 'offer', photos: offered.map(o => ({ id: o.id, bytes: o.bytes, thumb: o.thumb })) });
-  if ($('viewer').hidden) enterViewer();
-  else toast('Đã gửi ' + offered.length + ' ảnh');
-  gotoPhoto(offered[0].id, true);
+  if (!added) { if (!state.order.length) { call('stopShare'); endSession(); } return; }
+  if (added > 1 || $('viewer').hidden) toast('Đang gửi ' + added + ' ảnh');
 };
+
+/* ─────────────── Gửi lần lượt (bên gửi) ─────────────── */
+let outbox = [], offerInFlight = null;
+/** Offers the next photo once the other phone has the previous one in full ('done'), or after a timeout. */
+function sendNextOffer() {
+  if (offerInFlight) return;
+  let o;
+  while ((o = outbox.shift()) && !state.photos[o.id]) { /* trimmed meanwhile */ }
+  if (!o) return;
+  offerInFlight = o.id;
+  sendJson({ t: 'offer', photos: [{ id: o.id, bytes: o.bytes, thumb: o.thumb }] });
+  armOfferTimeout(o.id);
+}
+function armOfferTimeout(id) { // the other phone may never answer (old page, lost message); hold time does not count
+  setTimeout(() => {
+    if (offerInFlight !== id) return;
+    if (callHeld) { armOfferTimeout(id); return; }
+    offerInFlight = null; sendNextOffer();
+  }, 30000);
+}
+function onDone(msg) {
+  if (msg.id !== offerInFlight) return;
+  offerInFlight = null;
+  sendNextOffer();
+}
 $('btnAdd').onclick = pickPhotos;
 
 /* ─────────────── Nhận ảnh (bên nhận) ─────────────── */
@@ -687,7 +726,8 @@ window.receiveData = function (dataStr) {
       case 'vstart': if (state.s && streamed(state.s.kind)) enterVideo({ name: msg.name, dur: msg.dur || 0, t: 0, paused: false }); break;
       case 'vpause': if (state.video) { state.video.paused = !!msg.paused; renderVideoState(); } break;
       case 'vtime': if (state.video && state.s && state.s.role === 'receiver') renderTime(msg.v || 0); break;
-      case 'begin': case 'done': break;
+      case 'done': onDone(msg); break;
+      case 'begin': break;
     }
   } catch (err) { console.warn('[CS] bad message', err, dataStr && dataStr.slice(0, 80)); }
 };

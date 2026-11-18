@@ -116,7 +116,8 @@ class ContentReceiver(
      * keyframe). If the decoder falls this far behind, the backlog is dropped and decoding restarts at
      * the next keyframe, so the picture stays live instead of lagging further.
      */
-    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean)
+    /** [arrivalUs]: when its last packet came in, so playout is timed from arrival, not from decoding. */
+    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean, val arrivalUs: Long = System.nanoTime() / 1000)
     private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
@@ -290,6 +291,8 @@ class ContentReceiver(
         // every later picture that referenced it (smearing / freezes until the next keyframe).
         var held: Picture? = null
         var lastStatsNs = System.nanoTime()
+        // Arrival time of each picture in the decoder, by presentation time (output can come out reordered).
+        val arrivals = LinkedHashMap<Long, Long>()
         while (running) {
             val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             held = null
@@ -315,16 +318,22 @@ class ContentReceiver(
                         val ib = c.getInputBuffer(ii)!!
                         ib.clear(); ib.put(picture.data)
                         c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
+                        arrivals[ptsBaseUs] = picture.arrivalUs
+                        if (arrivals.size > 64) arrivals.remove(arrivals.keys.first())
                     } else {
                         held = picture // decoder busy: free its output below, then try again
                         stalls++
                     }
                 }
-                // Each decoded picture is shown at its own time, a fixed delay behind the stream, so network
+                // Each decoded picture is shown at its own time, a fixed delay behind its arrival, so network
                 // jitter is absorbed instead of showing up as uneven motion.
                 while (true) {
                     val oi = c.dequeueOutputBuffer(info, 0)
-                    if (oi >= 0) c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, System.nanoTime() / 1000) * 1000)
+                    if (oi >= 0) {
+                        val nowUs = System.nanoTime() / 1000
+                        val arrivalUs = arrivals.remove(info.presentationTimeUs) ?: nowUs
+                        c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs) * 1000)
+                    }
                     else if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val (w, h) = shownSize(c.outputFormat, codecRotation)
                         if (w > 0 && h > 0 && (w != shownW || h != shownH)) {
@@ -398,14 +407,21 @@ class ContentReceiver(
         t.play()
         // Delay the sound as much as the picture's playout buffer, so they stay in step.
         t.write(ShortArray((8 * PLAYOUT_DELAY_MS).toInt()), 0, (8 * PLAYOUT_DELAY_MS).toInt())
+        var written = 8 * PLAYOUT_DELAY_MS // frames given to the track (8 kHz mono)
+        val maxBuffered = 8 * (PLAYOUT_DELAY_MS + CATCH_UP_MS)
         val buf = ByteArray(2048)
         while (running) {
             val pkt = DatagramPacket(buf, buf.size)
             socket.receive(pkt)
             val n = pkt.length
             if (n < 13 || (buf[1].toInt() and 0x7F) != 8) continue
+            // Sound waiting in the track is delay: after a burst it would stay (a sender pause then kept
+            // playing here for that long). Above the target, drop this packet so it shrinks back.
+            val buffered = written - (t.playbackHeadPosition.toLong() and 0xFFFFFFFFL)
+            if (buffered > maxBuffered) continue
             val pcm = ShortArray(n - 12) { RtpMediaManager.alawToLinear(buf[12 + it]) }
             t.write(pcm, 0, pcm.size)
+            written += pcm.size
         }
     }
 
@@ -418,6 +434,8 @@ class ContentReceiver(
          * out of them and stopped taking input.
          */
         const val PLAYOUT_DELAY_MS = 100L
+        /** Extra delay tolerated beyond [PLAYOUT_DELAY_MS] before playback catches up (picture and sound). */
+        const val CATCH_UP_MS = 150L
 
         /** H.265 random-access (IRAP) pictures: BLA, IDR, CRA. Decoding can start there. */
         fun isHevcKey(type: Int) = type in 16..21
@@ -464,18 +482,23 @@ class ContentReceiver(
 }
 
 /**
- * Maps a picture's presentation time to when it should be on screen: [delayUs] behind the first picture,
- * then at the stream's own pace. A picture far late (a stall) or far off (pause, seek, a new stream)
- * starts the timeline again from that picture.
+ * Maps a picture's presentation time to when it should be on screen: [delayUs] behind its arrival, then at
+ * the stream's own pace. The timeline starts again from a picture that is far late (a stall), or that would
+ * be shown more than [catchUpUs] later than [delayUs] after it arrived (delay piled up, or a pause, seek or
+ * new stream).
+ *
+ * The timeline used to start from when a picture was decoded and only ever moved later: each stall added
+ * delay that never went away, up to about a second, and a sender's pause kept playing here for that long.
+ * Timed from arrival, pictures that waited in the queue are shown at once and the backlog drains.
  */
-class PlayoutClock(private val delayUs: Long) {
+class PlayoutClock(private val delayUs: Long, private val catchUpUs: Long = ContentReceiver.CATCH_UP_MS * 1000L) {
     private var baseWallUs = Long.MIN_VALUE
     private var basePtsUs = 0L
 
-    fun renderAtUs(ptsUs: Long, nowUs: Long): Long {
+    fun renderAtUs(ptsUs: Long, arrivalUs: Long, nowUs: Long): Long {
         var at = if (baseWallUs == Long.MIN_VALUE) Long.MIN_VALUE else baseWallUs + (ptsUs - basePtsUs)
-        if (at == Long.MIN_VALUE || at < nowUs - LATE_RESET_US || at > nowUs + delayUs + EARLY_RESET_US) {
-            baseWallUs = nowUs + delayUs
+        if (at == Long.MIN_VALUE || at < nowUs - LATE_RESET_US || at > arrivalUs + delayUs + catchUpUs) {
+            baseWallUs = arrivalUs + delayUs
             basePtsUs = ptsUs
             at = baseWallUs
         }
@@ -484,6 +507,5 @@ class PlayoutClock(private val delayUs: Long) {
 
     companion object {
         const val LATE_RESET_US = 100_000L
-        const val EARLY_RESET_US = 1_000_000L
     }
 }

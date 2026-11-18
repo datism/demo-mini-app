@@ -22,6 +22,19 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	session, exists := b.getSession(callID)
 
 	if !exists {
+		// The callee answered a call the caller had already cancelled (the 200 OK crossed the
+		// CANCEL, which the callee then ignored): ACK the 200 and end the callee's leg, or the
+		// callee stays in a call nobody is on and turns the next call away as busy.
+		cseqVal, _ := msg.GetCSeq()
+		if strings.HasPrefix(rawCallID, "b2b_") {
+			if cancelled := b.takeCancelled(callID); cancelled != nil && cseqVal == cancelled.InitialCSeq {
+				log.Printf("[IMS-AS] Callee answered cancelled call %s: ACK and BYE on the callee leg", callID)
+				cancelled.TermTo = msg.GetHeader("To")
+				b.ackCallee(cancelled, msg)
+				b.byeCallee(cancelled)
+				return
+			}
+		}
 		log.Printf("[IMS-AS] ⚠️ Session %s not found for 200 OK, forwarding transparently", callID)
 		b.forwardToSCSCF(msg.Raw)
 		return
@@ -333,10 +346,26 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	b.forwardToSCSCF(resp)
 	log.Printf("[IMS-AS] Forwarded rewritten 200 OK Answer (pointing to MF-A) back to S-CSCF")
 
-	// B2BUA: Mark session as answered to prevent retransmission loops
+	// B2BUA: Mark session as answered to prevent retransmission loops. Under b.mu: handleCancel
+	// reads TermAnswered there to choose between a BYE now and a BYE from here (below).
+	b.mu.Lock()
 	session.TermAnswered = true
+	session.TermTo = msg.GetHeader("To")
+	b.mu.Unlock()
 
 	// B2BUA: Send ACK on terminating leg to stop callee retransmitting 200 OK
+	b.ackCallee(session, msg)
+
+	// The caller cancelled while this answer was being handled: its CANCEL reached the callee
+	// after the 200 OK and changed nothing there, so end the callee's leg now.
+	if b.takeCancelled(callID) == session {
+		log.Printf("[IMS-AS] Call %s was cancelled while the callee answered: BYE on the callee leg", callID)
+		b.byeCallee(session)
+	}
+}
+
+// ackCallee ACKs the callee's 200 OK (msg) for the initial INVITE on the terminating leg.
+func (b *B2BUA) ackCallee(session *CallSession, msg *SIPMessage) {
 	ackHeaders := map[string]string{
 		"Call-ID":    session.TermCallID,
 		"Session-ID": session.SessionID + ";remote=00000000000000000000000000000000",
@@ -344,6 +373,23 @@ func (b *B2BUA) handle200OKInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 	ackReq := b.BuildSIPRequest("ACK", msg.RURI, msg, ackHeaders, "")
 	b.forwardToSCSCF(ackReq)
 	log.Printf("[IMS-AS] B2BUA: Sent ACK on terminating leg (TermCallID=%s)", session.TermCallID)
+}
+
+// byeCallee ends the callee's answered leg of a call the caller cancelled (RFC 3261 9.1: a CANCEL
+// has no effect once the 200 OK is sent, so the INVITE's sender must ACK and send a BYE).
+func (b *B2BUA) byeCallee(session *CallSession) {
+	if session.OrigMsg == nil || session.TermTo == "" {
+		log.Printf("[IMS-AS] Cannot send BYE to the callee of call %s: no answer recorded", session.OrigCallID)
+		return
+	}
+	headers := map[string]string{
+		"Call-ID":    session.TermCallID,
+		"To":         session.TermTo,
+		"CSeq":       fmt.Sprintf("%d BYE", session.InitialCSeq+1),
+		"Session-ID": session.SessionID + ";remote=00000000000000000000000000000000",
+	}
+	b.forwardToSCSCF(b.BuildSIPRequest("BYE", session.OrigMsg.RURI, session.OrigMsg, headers, ""))
+	log.Printf("[IMS-AS] Sent BYE on terminating leg (TermCallID=%s)", session.TermCallID)
 }
 
 func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
@@ -372,6 +418,9 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 	b.mu.Unlock()
+	if ok && session != nil && !reInviteCancel {
+		b.forgetStoredSession(callID)
+	}
 
 	// Reply 200 OK and tell the other side first: releasing the MF/DCSF
 	// resources takes HTTP round trips and must not delay the peer's hang-up.
@@ -425,7 +474,19 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 			delete(b.sessions, callID)
 		}
 	}
+	// Decided under b.mu, like TermAnswered in handle200OKInvite: either the callee had already
+	// answered (end its leg with a BYE now) or the call is remembered so the crossing 200 OK does it.
+	calleeAnswered := false
+	if ok && session != nil && !reInviteCancel && isCaller && !config.IsHotline(session.Callee) {
+		calleeAnswered = session.TermAnswered
+		if !calleeAnswered {
+			b.rememberCancelledLocked(session)
+		}
+	}
 	b.mu.Unlock()
+	if ok && session != nil && !reInviteCancel {
+		b.forgetStoredSession(callID)
+	}
 
 	// Reply 200 OK to CANCEL immediately
 	headers := map[string]string{
@@ -472,6 +533,13 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 
 	// Forward CANCEL to S-CSCF (only if not Hotline 198)
 	if ok && session != nil && !config.IsHotline(session.Callee) {
+		// The callee already answered and was ACKed: a CANCEL would change nothing there
+		// (RFC 3261 9.2), so end its leg with a BYE.
+		if calleeAnswered {
+			log.Printf("[IMS-AS] CANCEL of call %s after the callee answered: BYE on the callee leg", callID)
+			b.byeCallee(session)
+			return
+		}
 		targetCallID := session.TermCallID
 		if !isCaller {
 			targetCallID = session.OrigCallID

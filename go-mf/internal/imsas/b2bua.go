@@ -65,6 +65,7 @@ type CallSession struct {
 	// Anti-loop: đánh dấu đã forward terminating leg INVITE
 	TermForwarded  bool
 	TermAnswered   bool // true after first 200 OK on terminating leg is processed
+	TermTo         string // To header of the callee's 200 OK (with its tag), for a BYE on the callee leg
 	LastCSeq        int
 	LastTermCSeq    int
 	InitialCSeq     int
@@ -241,6 +242,9 @@ type B2BUA struct {
 	scscfAddr      *net.UDPAddr
 	sessions       map[string]*CallSession
 	mu             sync.RWMutex
+	// cancelledCalls holds, for a short while, calls the caller cancelled before the callee's
+	// 200 OK was handled, so a 200 OK that crosses the CANCEL still ends the callee's leg.
+	cancelledCalls map[string]*CallSession
 	httpServer     *http.Server
 	localIP        string
 	localClusterIP string
@@ -410,6 +414,45 @@ func (b *B2BUA) deleteSession(callID string) {
 	delete(b.sessions, callID)
 	b.mu.Unlock()
 	redisclient.Del("imsas:session:" + callID)
+}
+
+// cancelledCallTTL is how long a cancelled call waits for a crossing 200 OK (RFC 3261 Timer B, 64*T1).
+const cancelledCallTTL = 32 * time.Second
+
+// rememberCancelledLocked keeps a call the caller cancelled before the callee answered, so a
+// 200 OK from the callee that crosses the CANCEL can still be ACKed and ended with a BYE.
+// The caller must hold b.mu.
+func (b *B2BUA) rememberCancelledLocked(session *CallSession) {
+	callID := session.OrigCallID
+	if b.cancelledCalls == nil {
+		b.cancelledCalls = make(map[string]*CallSession)
+	}
+	b.cancelledCalls[callID] = session
+	time.AfterFunc(cancelledCallTTL, func() {
+		b.mu.Lock()
+		if b.cancelledCalls[callID] == session {
+			delete(b.cancelledCalls, callID)
+		}
+		b.mu.Unlock()
+	})
+}
+
+// takeCancelled returns and forgets the cancelled call stored under callID, if any. Taking it
+// once means a retransmitted 200 OK does not send the callee a second BYE.
+func (b *B2BUA) takeCancelled(callID string) *CallSession {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	s := b.cancelledCalls[callID]
+	delete(b.cancelledCalls, callID)
+	return s
+}
+
+// forgetStoredSession drops the Redis copy of a call that has ended. Without it
+// getSession would load the call back from Redis (for example when DCSF's media
+// instruction arrives after a CANCEL), and the INVITE would ring the callee for
+// a call the caller already cancelled.
+func (b *B2BUA) forgetStoredSession(callID string) {
+	_ = redisclient.Del("imsas:session:" + callID)
 }
 
 func extractSIPCallID(data string) string {
