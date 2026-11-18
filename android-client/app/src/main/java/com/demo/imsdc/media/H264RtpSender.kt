@@ -26,6 +26,11 @@ class H264RtpSender(
     private var nextSendNs = 0L
     /** Clockwise rotation (0/90/180/270) the picture needs for display; sent in every packet when not 0. */
     @Volatile var rotation = 0
+    /**
+     * The pictures being sent now are only for the other phone's decoder, not to be shown yet (the few after a
+     * pause point: its decoder gives out a picture only when later input arrives). Marked in every packet.
+     */
+    @Volatile var hidden = false
 
     /** Sends one NAL (without start code); [marker] goes on the last packet of the picture. */
     fun sendNal(nal: ByteArray, tsUs: Long, marker: Boolean) {
@@ -73,7 +78,7 @@ class H264RtpSender(
 
     private fun header(ts: Long, marker: Boolean): ByteArray {
         val h = RtpMediaManager.buildRtpHeader(payloadType.toByte(), seq, ts, ssrc, marker).also { seq = (seq + 1) and 0xFFFF }
-        return if (rotation == 0) h else withRotation(h, rotation)
+        return if (rotation == 0 && !hidden) h else withExtensions(h, rotation, hidden)
     }
 
     /**
@@ -104,15 +109,22 @@ class H264RtpSender(
         const val PT_H264 = 97
         const val PT_H265 = 98
 
-        /** [header] (12 bytes, no CSRC) with the X bit set and a rotation extension appended. */
-        fun withRotation(header: ByteArray, rotation: Int): ByteArray {
+        /** RFC 8285 one-byte header extension id marking a picture not to be shown yet ([hidden]). */
+        const val HIDDEN_EXT_ID = 2
+
+        /**
+         * [header] (12 bytes, no CSRC) with the X bit set and a one-word extension: the rotation, and the hidden
+         * mark when [hidden].
+         */
+        fun withExtensions(header: ByteArray, rotation: Int, hidden: Boolean = false): ByteArray {
             val out = header.copyOf(12 + 8)
             out[0] = (out[0].toInt() or 0x10).toByte()
             out[12] = 0xBE.toByte(); out[13] = 0xDE.toByte() // one-byte header profile
             out[14] = 0; out[15] = 1                         // one 32-bit word follows
             out[16] = (ROTATION_EXT_ID shl 4).toByte()        // id 1, 1 byte of data
             out[17] = ((rotation / 90) and 3).toByte()
-            return out                                        // [18], [19]: padding
+            if (hidden) { out[18] = (HIDDEN_EXT_ID shl 4).toByte(); out[19] = 1 } // id 2, 1 byte; else padding
+            return out
         }
 
         private const val MAX_SINGLE = 1200

@@ -47,7 +47,7 @@ class AndroidBridgeInterface(
         fun pauseVideo(paused: Boolean)
         fun awaitVideoStill(seq: Int, stopUs: Long = -1L)
         fun videoResumed()
-        fun videoStopUs(): Long
+        fun pauseVideoSynced(paused: Boolean)
         fun alignPreview(tSec: Double)
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
@@ -125,9 +125,12 @@ class AndroidBridgeInterface(
         } catch (_: Exception) {}
     }
 
-    /** Page, sender, right after pauseVideo(true): media time (µs) of the last picture sent, -1 if none. */
+    /**
+     * Page, sender: pause (true) or resume (false) with both phones ending on the same picture: shareEvent
+     * 'videoStopAt' {us} gives the pause point for the other phone, 'videoPaused' {t} once this one is still.
+     */
     @JavascriptInterface
-    fun videoStopUs(): Double = (shareHandler?.videoStopUs() ?: -1L).toDouble()
+    fun pauseVideoSynced(paused: Boolean) { shareHandler?.pauseVideoSynced(paused) }
 
     /** Page, receiver: the sender resumed. */
     @JavascriptInterface

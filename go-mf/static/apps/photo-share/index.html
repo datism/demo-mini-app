@@ -408,7 +408,10 @@ window.shareEvent = function (name, arg) {
     case 'failed': noteEnd(a.code === 480 ? 'Đã hủy lời mời vì cuộc gọi đang giữ' : a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : a.code === 505 ? 'Máy kia chưa hỗ trợ chia sẻ nội dung' : 'Không thể chia sẻ lúc này'); endSession(); break;
     case 'videoReady': onVideoReady(a); break;
     case 'videoTime': if (state.video) { renderTime(a.t); sendJson({ t: 'vtime', v: a.t }); } break;
-    case 'videoPaused': // sender: the preview is still, on the frame the other phone stopped on
+    case 'videoStopAt': // sender: the pause point; the other phone plays on to it
+      if (state.video && state.video.paused) sendJson({ t: 'vpause', paused: true, seq: state.video.pauseSeq, us: a.us });
+      break;
+    case 'videoPaused': // sender: the preview is still, on the pause point
       if (state.video && state.video.paused) { state.video.still = true; renderTime(a.t); renderVideoState(); }
       break;
     case 'videoStill': // receiver: this phone's picture has stopped, on the sender's last picture
@@ -711,19 +714,20 @@ function renderVideoState() {
   const b = $('btnPlayPause'); b.innerHTML = v.paused ? ICON.play : ICON.pause; b.title = v.paused ? 'Tiếp tục' : 'Tạm dừng';
 }
 function renderMute() { const b = $('btnMute'); b.innerHTML = state.muted ? ICON.muted : ICON.sound; b.title = state.muted ? 'Bật tiếng' : 'Tắt tiếng'; }
-/* Pausing: the stream stops after a whole picture and its time goes with 'vpause' (us). The other phone shows
- * every picture up to that one and stops there; the sender's own picture is put on that same one. Each side
- * shows "Đã tạm dừng" once its picture is still. */
+/* Pausing: this phone picks the pause point (no frame goes back) and plays on to it ('videoPaused'); its time
+ * goes to the other phone with 'vpause' (us, from 'videoStopAt'), which plays on to the same picture and stops.
+ * Each side shows "Đã tạm dừng" once its picture is still. */
 $('btnPlayPause').onclick = () => {
   const v = state.video; if (!v) return;
   v.paused = !v.paused; v.still = false; v.pauseSeq = (v.pauseSeq || 0) + 1;
   renderVideoState();
-  call('pauseVideo', v.paused);
-  const us = v.paused && B() && typeof B().videoStopUs === 'function' ? Number(B().videoStopUs()) : -1;
-  sendJson({ t: 'vpause', paused: v.paused, seq: v.pauseSeq, us: us });
-  if (!v.paused) return;
-  if (!B() || typeof B().alignPreview !== 'function') { v.still = true; renderVideoState(); return; } // older app
-  call('alignPreview', -1); // the last picture sent: the one the other phone stops on
+  if (B() && typeof B().pauseVideoSynced === 'function') {
+    call('pauseVideoSynced', v.paused);
+    if (!v.paused) sendJson({ t: 'vpause', paused: false, seq: v.pauseSeq });
+    return; // paused: vpause goes on 'videoStopAt'
+  }
+  call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused, seq: v.pauseSeq }); // older app
+  if (v.paused) { v.still = true; renderVideoState(); }
 };
 function onRemotePause(msg) {
   const v = state.video; if (!v) return;

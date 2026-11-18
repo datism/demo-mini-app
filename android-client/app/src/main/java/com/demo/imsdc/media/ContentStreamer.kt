@@ -45,13 +45,13 @@ class ContentStreamer(
      */
     @Volatile var lastSentVideoPtsUs = -1L
         private set
-    /** The last video sample sent, in decode order (its presentation time): where a resend after a pause ends. */
-    @Volatile private var lastSentSampleUs = -1L
     /** Held while one video sample goes out: [pause] waits for it, so no sample is half sent or sent after. */
     private val sendLock = Object()
-    /** The other phone drained its decoder on this pause: on resume, re-send from the keyframe before it. */
-    @Volatile private var resendOnResume = false
-    @Volatile private var resendPending = false
+    /**
+     * A pause by the user, at this media time ([pauseAt]; -1 = none pending): pictures up to it go out on time,
+     * then a few hidden ones ([TAIL]), then the stream parks.
+     */
+    @Volatile private var stopAtUs = -1L
     private var videoSocket: DatagramSocket? = null
     private var audioSocket: DatagramSocket? = null
     private val threads = mutableListOf<Thread>()
@@ -93,8 +93,7 @@ class ContentStreamer(
         running = true
         paused = false
         lastSentVideoPtsUs = -1L
-        lastSentSampleUs = -1L
-        resendOnResume = false; resendPending = false
+        stopAtUs = -1L
         originNs = System.nanoTime()
         videoSocket = bind(localVideoPort)
         audioSocket = bind(localAudioPort)
@@ -105,15 +104,11 @@ class ContentStreamer(
         Log.i(TAG, "Streaming $uri to MF $mfIp (video $mfVideoPort, audio $mfAudioPort)")
     }
 
-    /**
-     * Stops before the next sample. When it returns no video sample is going out, so [lastSentVideoPtsUs] is the
-     * last picture the other phone gets. [drained]: the other phone will empty its decoder (a pause by the user),
-     * so the resume starts again from a keyframe ([resume]).
-     */
-    fun pause(drained: Boolean = false) {
+    /** Stops before the next sample (a pause for hold). When it returns no video sample is going out. */
+    fun pause() {
         if (!running) return
         synchronized(sendLock) {
-            if (drained) resendOnResume = true
+            stopAtUs = -1L
             if (paused) return
             pausedAtNs = System.nanoTime()
             paused = true
@@ -121,12 +116,57 @@ class ContentStreamer(
         Log.i(TAG, "Paused after sending video at ${lastSentVideoPtsUs / 1000} ms")
     }
 
-    fun resume() {
-        if (!running || !paused) return
+    /**
+     * A pause by the user, ending on the picture at media time [stopUs] (both phones stop there): pictures up to
+     * it still go out on time; the next [TAIL] go at once, marked hidden (the other phone's decoder gives out
+     * the pause picture only when later input arrives, and keeps these back until [resume]); then the stream
+     * parks with its clock on [stopUs], so resuming continues from there with nothing sent twice.
+     */
+    fun pauseAt(stopUs: Long) {
+        if (!running) return
         synchronized(sendLock) {
+            if (paused) return
+            stopAtUs = maxOf(stopUs, 0L)
+        }
+        Log.i(TAG, "Pausing at ${stopUs / 1000} ms (last sent ${lastSentVideoPtsUs / 1000} ms)")
+    }
+
+    /** The video thread reached the pause point and sent the hidden tail: hold here, the clock on [stopUs]. */
+    private fun park(stopUs: Long) {
+        synchronized(sendLock) {
+            if (stopAtUs != stopUs || paused) return // resumed meanwhile
+            stopAtUs = -1L
+            val now = System.nanoTime()
+            pausedAtNs = now
+            originNs = now - stopUs * 1000
+            paused = true
+        }
+        Log.i(TAG, "Paused at ${stopUs / 1000} ms: last picture shown ${lastSentVideoPtsUs / 1000} ms")
+    }
+
+    fun resume() {
+        if (!running) return
+        synchronized(sendLock) {
+            stopAtUs = -1L // resumed before the pause point was reached
+            if (!paused) return
             originNs += System.nanoTime() - pausedAtNs
-            if (resendOnResume) { resendPending = true; resendOnResume = false }
             paused = false
+        }
+    }
+
+    /**
+     * Keeps the stream on the sender's own picture ([mediaUs], the local preview's position): the clock both
+     * the stream and the time shown run on moves toward it, a little at a time ([followStepUs]). Behind, the
+     * stream waits; ahead, it catches up without a burst. Not while paused or about to pause.
+     * Returns the stream's position (µs) before the step, for logging.
+     */
+    fun followUs(mediaUs: Long): Long {
+        if (!running || mediaUs < 0) return -1L
+        synchronized(sendLock) {
+            if (paused || stopAtUs >= 0) return -1L
+            val clockUs = (System.nanoTime() - originNs) / 1000
+            originNs -= followStepUs(clockUs, mediaUs) * 1000
+            return clockUs
         }
     }
 
@@ -158,9 +198,10 @@ class ContentStreamer(
         }
     }
 
-    /** Blocks until the file's time [mediaUs] is due; holds while paused. */
-    private fun waitUntil(mediaUs: Long) {
+    /** Blocks until the file's time [mediaUs] is due; holds while paused. Returns early once [stop] is true. */
+    private fun waitUntil(mediaUs: Long, stop: () -> Boolean = { false }) {
         while (running) {
+            if (stop()) return
             if (paused) { Thread.sleep(20); continue }
             val dueUs = mediaUs - (System.nanoTime() - originNs) / 1000
             if (dueUs <= 0) return
@@ -195,19 +236,15 @@ class ContentStreamer(
             var frames = 0
             var lastLogNs = 0L
 
-            // After a pause the other phone's decoder was emptied and restarted: it needs the pictures from the
-            // keyframe before the pause point again. They go out at once (it decodes them without showing them),
-            // up to the last sample sent before the pause; then sending continues on time.
-            var resendUntilUs = -1L
-            var resent = 0
+            fun sendSample(data: ByteArray, ptsUs: Long, sync: Boolean, hidden: Boolean) {
+                val nals = nalUnits(data)
+                rtp.hidden = hidden
+                if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
+                nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
+                rtp.hidden = false
+            }
+            var tailSent = 0
             while (running) {
-                if (resendPending) {
-                    resendPending = false
-                    if (lastSentSampleUs < 0) continue // nothing was sent before the pause
-                    resendUntilUs = lastSentSampleUs
-                    resent = 0
-                    ex.seekTo(lastSentVideoPtsUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                }
                 buf.clear()
                 val n = ex.readSampleData(buf, 0)
                 if (n < 0) break
@@ -216,38 +253,34 @@ class ContentStreamer(
                 val data = ByteArray(n)
                 buf.position(0)
                 buf.get(data, 0, n)
-                if (resendUntilUs >= 0) {
-                    val nals = nalUnits(data)
-                    if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
-                    nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
-                    resent++
-                    if (ptsUs == resendUntilUs || resent >= MAX_RESEND) {
-                        Log.i(TAG, "Resumed: re-sent $resent sample(s) from the keyframe before ${resendUntilUs / 1000} ms")
-                        resendUntilUs = -1L
-                    } else Thread.sleep(2) // a short gap, not one burst
-                    ex.advance()
-                    continue
-                }
                 // Sent only while not paused, as a whole, under [sendLock] (see [pause]).
                 var sent = false
-                var back = false
-                while (running && !sent && !back) {
-                    waitUntil(ptsUs)
+                while (running && !sent) {
+                    val stop = stopAtUs
+                    if (stop >= 0 && ptsUs > stop) {
+                        // Past the pause point: a few pictures at once, hidden, then park until resumed.
+                        if (tailSent < TAIL) {
+                            synchronized(sendLock) { if (stopAtUs == stop) { sendSample(data, ptsUs, sync, true); sent = true } }
+                            if (sent) tailSent++
+                        } else {
+                            park(stop)
+                            tailSent = 0
+                        }
+                        continue
+                    }
+                    if (stop < 0) tailSent = 0
+                    waitUntil(ptsUs) { stopAtUs.let { it >= 0 && ptsUs > it } }
                     if (!running) break
                     synchronized(sendLock) {
-                        // Resumed after a drained pause: this sample comes after the re-send, not before it.
-                        if (resendPending) back = true
-                        else if (!paused) {
-                            val nals = nalUnits(data)
-                            if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
-                            nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
-                            if (running) { lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs); lastSentSampleUs = ptsUs }
+                        val st = stopAtUs
+                        if (!paused && !(st >= 0 && ptsUs > st)) {
+                            sendSample(data, ptsUs, sync, false)
+                            if (running) lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs)
                             sent = true
                         }
                     }
                 }
                 if (!running) break
-                if (back) continue
                 frames++
                 val lateMs = ((System.nanoTime() - originNs) / 1000 - ptsUs) / 1000
                 if (!paused && System.nanoTime() - lastLogNs > 1_000_000_000L) {
@@ -362,8 +395,28 @@ class ContentStreamer(
     }
 
     companion object {
-        /** At most this many samples re-sent after a pause (a keyframe every 10 s at 30 fps). */
-        private const val MAX_RESEND = 300
+        /**
+         * Pictures sent hidden after a pause point: enough for the other phone's decoder to give out the pause
+         * picture (it holds back a few: B-frame reordering, or the decoder's own pipeline).
+         */
+        const val TAIL = 4
+
+        /**
+         * The pause point: the later of the picture the sender shows ([shownUs]) and the last one sent ([sentUs]),
+         * so neither phone goes back; the other one plays on to it (a few frames at most). -1 if neither is known.
+         */
+        fun pauseStopUs(shownUs: Long, sentUs: Long): Long = maxOf(shownUs, sentUs, -1L)
+
+        /** Within this of the preview, the stream is left alone (no jitter from small corrections). */
+        const val FOLLOW_SLACK_US = 40_000L
+        /** At most this much per correction, so catching up never sends a burst. */
+        const val FOLLOW_STEP_US = 150_000L
+
+        /** How far to move the stream clock (now at [clockUs]) toward the preview at [previewUs]. */
+        fun followStepUs(clockUs: Long, previewUs: Long): Long {
+            val d = previewUs - clockUs
+            return if (kotlin.math.abs(d) <= FOLLOW_SLACK_US) 0L else d.coerceIn(-FOLLOW_STEP_US, FOLLOW_STEP_US)
+        }
         private val SUPPORTED_VIDEO = setOf(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC)
 
         /**
