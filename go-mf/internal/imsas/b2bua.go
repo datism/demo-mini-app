@@ -412,6 +412,14 @@ func (b *B2BUA) deleteSession(callID string) {
 	redisclient.Del("imsas:session:" + callID)
 }
 
+// forgetStoredSession drops the Redis copy of a call that has ended. Without it
+// getSession would load the call back from Redis (for example when DCSF's media
+// instruction arrives after a CANCEL), and the INVITE would ring the callee for
+// a call the caller already cancelled.
+func (b *B2BUA) forgetStoredSession(callID string) {
+	_ = redisclient.Del("imsas:session:" + callID)
+}
+
 func extractSIPCallID(data string) string {
 	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)

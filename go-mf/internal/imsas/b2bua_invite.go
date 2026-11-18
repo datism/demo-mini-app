@@ -211,8 +211,10 @@ func (b *B2BUA) handleInvite(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 // session and found no callee leg to end). Forwarding then would ring the callee for a dead call
 // (GD_42). Returns whether the INVITE went out.
 func (b *B2BUA) forwardInviteToCallee(session *CallSession, invite string) bool {
+	// Alive means this very session is still in the map: a copy getSession loaded back from Redis
+	// after the CANCEL/BYE does not count.
 	b.mu.RLock()
-	_, alive := b.sessions[session.CallID]
+	alive := b.sessions[session.CallID] == session
 	b.mu.RUnlock()
 	if !alive {
 		log.Printf("[IMS-AS] Call %s ended before its INVITE was forwarded: not ringing %s", session.CallID, session.Callee)
@@ -923,8 +925,9 @@ func (b *B2BUA) processMediaInstruction(session *CallSession, instruction *sba.M
 					"Session-ID":   session.SessionID + ";remote=00000000000000000000000000000000",
 				}
 				forwardedInvite := b.BuildSIPRequest("INVITE", session.OrigMsg.RURI, session.OrigMsg, headers, fallbackSDP)
-				b.forwardToSCSCF(forwardedInvite)
-				log.Printf("[IMS-AS] Fallback: Forwarded INVITE (port=0, TermCallID=%s) to S-CSCF", session.TermCallID)
+				if b.forwardInviteToCallee(session, forwardedInvite) {
+					log.Printf("[IMS-AS] Fallback: Forwarded INVITE (port=0, TermCallID=%s) to S-CSCF", session.TermCallID)
+				}
 			}
 			session.ResponseChan <- instruction
 			return

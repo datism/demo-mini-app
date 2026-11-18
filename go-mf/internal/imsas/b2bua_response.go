@@ -372,6 +372,9 @@ func (b *B2BUA) handleBye(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 	b.mu.Unlock()
+	if ok && session != nil && !reInviteCancel {
+		b.forgetStoredSession(callID)
+	}
 
 	// Reply 200 OK and tell the other side first: releasing the MF/DCSF
 	// resources takes HTTP round trips and must not delay the peer's hang-up.
@@ -426,6 +429,9 @@ func (b *B2BUA) handleCancel(msg *SIPMessage, remoteAddr *net.UDPAddr) {
 		}
 	}
 	b.mu.Unlock()
+	if ok && session != nil && !reInviteCancel {
+		b.forgetStoredSession(callID)
+	}
 
 	// Reply 200 OK to CANCEL immediately
 	headers := map[string]string{
