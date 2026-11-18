@@ -1451,7 +1451,7 @@ class MiniAppManager(val activity: CallActivity) {
      * CANCEL it has already sent the final response (603 / 487) and returns false.
      */
     suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
-        rawMsg,
+        rawMsg, isShare = true,
         notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
         ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
         dismiss = { emitShareEvent("cancelled") },
@@ -1537,7 +1537,7 @@ class MiniAppManager(val activity: CallActivity) {
     /** 180, then waits for our user: true = accepted (caller answers 200 OK); false = 603 / 487 already sent. */
     private suspend fun awaitHeldDecision(
         rawMsg: String, notice: String, ask: () -> Unit, dismiss: () -> Unit,
-        decided: (accepted: Boolean) -> Unit = {}
+        decided: (accepted: Boolean) -> Unit = {}, isShare: Boolean = false
     ): Boolean {
         if (com.demo.imsdc.call.CallHold.active) {
             // A request that crossed our hold: it cannot be answered now. 491 makes the other side say "try later".
@@ -1550,6 +1550,7 @@ class MiniAppManager(val activity: CallActivity) {
         heldDecision = decision
         heldDismiss = dismiss
         heldNotice = notice
+        heldIsShare = isShare
         try {
             activity.sipManager.sendReInviteRinging(rawMsg)
             ask()
@@ -1570,9 +1571,16 @@ class MiniAppManager(val activity: CallActivity) {
             heldDecision = null
             heldDismiss = null
             heldNotice = null
+            heldIsShare = false
             com.demo.imsdc.notification.CallRequestNotification.cancel(activity)
         }
     }
+
+    /**
+     * The request being decided is a share request, asked by the Content Sharing page's popup (not the native
+     * app-request dialog, which stays on screen whatever page is shown).
+     */
+    @Volatile private var heldIsShare = false
 
     /** Text of the request being decided ("muốn mở 🎨 Vẽ"), null when none is. */
     @Volatile private var heldNotice: String? = null
@@ -1603,6 +1611,13 @@ class MiniAppManager(val activity: CallActivity) {
      * would still carry a=dcmap:1002 and the other phone would take it for a new share request.
      */
     private fun leaveShareForAppSwitch() {
+        // The popup asking about the other phone's share goes with the page (Back, the menu button). Left
+        // waiting, the request held the negotiation for up to 30 s: our own app change queued behind it and
+        // the other phone stayed on "waiting". Leaving declines it now (603).
+        if (heldIsShare) heldDecision?.let { decision ->
+            Log.i(TAG, "Left Content Sharing with a share request pending: declining")
+            decision.complete(false)
+        }
         when (shareState) {
             ShareState.INVITING -> cancelShare()
             ShareState.ACTIVE -> { Log.i(TAG, "Leaving Content Sharing page: dropping the open share"); clearShareSession() }
