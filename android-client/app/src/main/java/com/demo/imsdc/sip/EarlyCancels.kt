@@ -36,6 +36,15 @@ class ExpiringIds(
  * A CANCEL for a call this phone has not seen: no To-tag (not in a dialog) and not the call it knows. Its
  * INVITE may still be on the way; the CANCEL must not end whatever call is current.
  */
+/**
+ * Whether the incoming call [callId] still rings: it is the call this phone holds ([pendingCallId], with or without
+ * the IMS-AS's b2b_ prefix) and not answered yet. A CANCEL handled before the call screen opened cleared it.
+ */
+fun isRingingCall(pendingCallId: String?, callId: String?, callActive: Boolean): Boolean {
+    if (callActive || pendingCallId.isNullOrEmpty() || callId.isNullOrEmpty()) return false
+    return pendingCallId.removePrefix("b2b_") == callId.removePrefix("b2b_")
+}
+
 fun isEarlyCancel(cancelCallId: String?, pendingCallId: String?, hasToTag: Boolean): Boolean {
     if (hasToTag || cancelCallId.isNullOrEmpty()) return false
     if (pendingCallId == null) return true

@@ -606,6 +606,11 @@ class CallActivity : AppCompatActivity() {
         val incomingRawSdp = intent.getStringExtra(EXTRA_INCOMING_RAW_SDP)?.replace("\\n", "\n")
 
         if (incomingInvite != null && incomingSdp != null && incomingCallId != null) {
+            if (!incomingStillRinging(intent)) {
+                // The new call was cancelled before reaching this screen: leave this screen as it was.
+                Log.i(TAG, "Incoming call $incomingCallId ended before the call screen showed it: ignored")
+                return
+            }
             pendingInviteMsg = incomingInvite
             callId = incomingCallId
             incomingRemoteSdp = incomingSdp
@@ -615,6 +620,7 @@ class CallActivity : AppCompatActivity() {
             setupUI()
             initializeSipManager()
             initializeWebRtcManager()
+            if (!incomingStillRinging(intent)) { closeEndedIncoming(incomingCallId); return }
 
             if (autoAnswer) {
                 Log.i(TAG, "onNewIntent: autoAnswer requested — answering immediately")
@@ -664,8 +670,9 @@ class CallActivity : AppCompatActivity() {
             refreshHoldAvailable()
         }
 
-        // Wake screen + show on lockscreen for incoming calls
-        if (isIncoming) {
+        // Wake screen + show on lockscreen for incoming calls. Not for one cancelled while this screen was opening
+        // (closed in initAndStart, once this screen is set up).
+        if (isIncoming && incomingStillRinging(intent)) {
             // Play default ringtone
             try {
                 val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -710,6 +717,25 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The incoming call in [intent] still rings. A CANCEL handled while this screen was opening (before it set
+     * sipManager.onCallEnded) cleared the call and closed nothing: this screen then rang on for a call that was
+     * over, and while open made this phone turn the next call away as busy.
+     */
+    private fun incomingStillRinging(intent: Intent): Boolean {
+        val id = intent.getStringExtra(EXTRA_INCOMING_CALL_ID) ?: return true
+        return SipManager.shared?.isRinging(id) ?: true
+    }
+
+    /** The incoming call ended before this screen showed it: no ringing, no screen, nothing sent. */
+    private fun closeEndedIncoming(callId: String) {
+        Log.i(TAG, "Incoming call $callId ended before the call screen opened: closing it")
+        isEndingCall = true
+        try { ringtone?.stop() } catch (_: Exception) {}
+        IncomingCallNotificationManager.dismiss(this)
+        finish()
+    }
+
     private fun checkPermissions(): Boolean {
         return requiredPermissions.all {
             androidx.core.content.ContextCompat.checkSelfPermission(this, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -746,6 +772,7 @@ class CallActivity : AppCompatActivity() {
         val autoAnswer = intent.getBooleanExtra(EXTRA_AUTO_ANSWER, false)
 
         if (incomingInvite != null && incomingSdp != null && incomingCallId != null) {
+            if (!incomingStillRinging(intent)) { closeEndedIncoming(incomingCallId); return }
             pendingInviteMsg = incomingInvite
             callId = incomingCallId
             incomingRemoteSdp = incomingSdp
