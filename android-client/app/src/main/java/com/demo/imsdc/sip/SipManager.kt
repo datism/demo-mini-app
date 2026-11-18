@@ -152,7 +152,7 @@ class SipManager(
     private var keepAliveThread: Thread? = null
 
     // Lưu thông tin cuộc gọi đang pending (để gửi ACK sau 200 OK)
-    private var pendingCallId: String? = null
+    @Volatile private var pendingCallId: String? = null
     private var pendingFromTag: String? = null
     val currentCallId: String?
         get() = pendingCallId
@@ -574,6 +574,9 @@ class SipManager(
         val cseqHeader = getHeader(msg, "cseq") ?: return ""
         return cseqHeader.trim().split("\\s+".toRegex()).lastOrNull()?.uppercase() ?: ""
     }
+
+    /** The incoming call [callId] still rings here (not cancelled, not answered). */
+    fun isRinging(callId: String?): Boolean = isRingingCall(pendingCallId, callId, isCallActive)
 
     /**
      * Same call, either leg: the IMS-AS names the callee's leg "b2b_" + the caller's Call-ID and relays
