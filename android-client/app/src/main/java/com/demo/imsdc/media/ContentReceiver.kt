@@ -326,6 +326,9 @@ class ContentReceiver(
         var ptsBaseUs = 0L
         var codecRotation = 0
         var codecHevc = false
+        // The stream reorders pictures (B-frames): its decoder must not run low-latency (see startDecoder).
+        var reordered = false
+        var codecLowLatency = false
         var shownW = 0; var shownH = 0
         // A picture the decoder had no input buffer for: it is retried, never dropped. Dropping one broke
         // every later picture that referenced it (smearing / freezes until the next keyframe).
@@ -381,25 +384,36 @@ class ContentReceiver(
             if (releaseKept) codec?.let { showKept(it) } ?: run { releaseKept = false }
             val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             held = null
-            if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
-                // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
-                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
+            // B-frames found while low-latency: switch over on a keyframe, so the picture never stops.
+            val leaveLowLatency = codecLowLatency && reordered && picture?.key == true
+            if (codec != null && (codecRotation != rotation || codecHevc != hevc || leaveLowLatency)) {
+                // Rotation, codec and low-latency are set when the decoder starts: restart it, from the next keyframe.
+                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc, low-latency $codecLowLatency (B-frames $reordered): restarting the decoder")
                 kept.clear()
                 try { codec?.stop() } catch (_: Exception) {}
                 try { codec?.release() } catch (_: Exception) {}
                 codec = null
             }
             if (codec == null && picture != null && !picture.key) continue
-            val c = codec ?: (if (picture != null) startDecoder(rotation)?.also { codecRotation = rotation; codecHevc = hevc } else null)
+            val c = codec ?: (if (picture != null) startDecoder(rotation, !reordered)?.also {
+                codecRotation = rotation; codecHevc = hevc; codecLowLatency = !reordered
+            } else null)
             if (c == null) continue
             try {
                 if (picture != null) {
                     val ii = c.dequeueInputBuffer(5_000)
                     if (ii >= 0) {
                         // RTP time (90 kHz, wraps at 2^32) to a steadily increasing presentation time.
-                        if (lastTs >= 0) ptsBaseUs += ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
-                            if (it >= 0x80000000L) it - 0x100000000L else it
-                        } * 100 / 9
+                        if (lastTs >= 0) {
+                            val stepUs = ((picture.rtpTs - lastTs) and 0xFFFFFFFFL).let {
+                                if (it >= 0x80000000L) it - 0x100000000L else it
+                            } * 100 / 9
+                            if (stepUs < 0 && !reordered && stepUs > -5_000_000L) {
+                                reordered = true
+                                if (codecLowLatency) Log.i(TAG, "Stream has B-frames: decoder without low-latency from the next keyframe")
+                            }
+                            ptsBaseUs += stepUs
+                        }
                         lastTs = picture.rtpTs
                         val ib = c.getInputBuffer(ii)!!
                         ib.clear(); ib.put(picture.data)
@@ -450,7 +464,7 @@ class ContentReceiver(
         return if (rotation % 180 == 90) h to w else w to h
     }
 
-    private fun startDecoder(rotation: Int): MediaCodec? {
+    private fun startDecoder(rotation: Int, lowLatency: Boolean): MediaCodec? {
         val sps = sps; val pps = pps; val vps = vps; val hevc = hevc
         if (sps == null || pps == null || (hevc && vps == null)) return null
         return try {
@@ -465,14 +479,15 @@ class ContentReceiver(
             }
             // Turns the picture as it is drawn on the surface (portrait phone video arrives as landscape frames).
             if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, rotation)
-            // Output each picture as soon as it is decoded where the decoder supports it: otherwise it keeps the
-            // last few back until more input arrives, and a paused stream froze here a few frames early.
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            // Output each picture as soon as it is decoded where the decoder supports it (otherwise it keeps the
+            // last few back until more input arrives). Not with B-frames: in that mode decoders assume display
+            // order = decode order and give reordered pictures out of order or broken.
+            if (lowLatency && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             val c = MediaCodec.createDecoderByType(mime)
             c.configure(format, surface, null, 0)
             c.start()
             codec = c
-            Log.i(TAG, "Video decoder started (${if (hevc) "hevc" else "avc"}, rotation $rotation°)")
+            Log.i(TAG, "Video decoder started (${if (hevc) "hevc" else "avc"}, rotation $rotation°, low-latency $lowLatency)")
             c
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start video decoder: ${e.message}", e)

@@ -244,23 +244,37 @@ class ContentStreamer(
                 rtp.hidden = false
             }
             var tailSent = 0
+            // Samples come in decode order. With B-frames that is not display order (I0 P4 B2 B1 B3 ...):
+            // each one goes out when the first picture needing it is due (its send time, [sendTimeUs] over a
+            // window read ahead), not at its own display time, which got references there frames late.
+            class Sample(val data: ByteArray, val ptsUs: Long, val sync: Boolean)
+            val ahead = ArrayDeque<Sample>()
+            var ended = false
+            fun fill() {
+                while (!ended && ahead.size < LOOKAHEAD) {
+                    buf.clear()
+                    val n = ex.readSampleData(buf, 0)
+                    if (n < 0) { ended = true; return }
+                    val data = ByteArray(n)
+                    buf.position(0)
+                    buf.get(data, 0, n)
+                    ahead.addLast(Sample(data, ex.sampleTime, (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0))
+                    ex.advance()
+                }
+            }
             while (running) {
-                buf.clear()
-                val n = ex.readSampleData(buf, 0)
-                if (n < 0) break
-                val ptsUs = ex.sampleTime
-                val sync = (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
-                val data = ByteArray(n)
-                buf.position(0)
-                buf.get(data, 0, n)
+                fill()
+                val sample = ahead.removeFirstOrNull() ?: break
+                val ptsUs = sample.ptsUs
+                val dueUs = sendTimeUs(ptsUs, ahead.map { it.ptsUs })
                 // Sent only while not paused, as a whole, under [sendLock] (see [pause]).
                 var sent = false
                 while (running && !sent) {
                     val stop = stopAtUs
-                    if (stop >= 0 && ptsUs > stop) {
-                        // Past the pause point: a few pictures at once, hidden, then park until resumed.
+                    if (stop >= 0 && dueUs > stop) {
+                        // Every picture left is past the pause point: a few at once, hidden, then park until resumed.
                         if (tailSent < TAIL) {
-                            synchronized(sendLock) { if (stopAtUs == stop) { sendSample(data, ptsUs, sync, true); sent = true } }
+                            synchronized(sendLock) { if (stopAtUs == stop) { sendSample(sample.data, ptsUs, sample.sync, true); sent = true } }
                             if (sent) tailSent++
                         } else {
                             park(stop)
@@ -269,25 +283,26 @@ class ContentStreamer(
                         continue
                     }
                     if (stop < 0) tailSent = 0
-                    waitUntil(ptsUs) { stopAtUs.let { it >= 0 && ptsUs > it } }
+                    waitUntil(dueUs) { stopAtUs.let { it >= 0 && dueUs > it } }
                     if (!running) break
                     synchronized(sendLock) {
                         val st = stopAtUs
-                        if (!paused && !(st >= 0 && ptsUs > st)) {
-                            sendSample(data, ptsUs, sync, false)
-                            if (running) lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs)
+                        if (!paused && !(st >= 0 && dueUs > st)) {
+                            // Needed before the pause point but shown after it: sent, hidden.
+                            val hidden = st >= 0 && ptsUs > st
+                            sendSample(sample.data, ptsUs, sample.sync, hidden)
+                            if (running && !hidden) lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs)
                             sent = true
                         }
                     }
                 }
                 if (!running) break
                 frames++
-                val lateMs = ((System.nanoTime() - originNs) / 1000 - ptsUs) / 1000
+                val lateMs = ((System.nanoTime() - originNs) / 1000 - dueUs) / 1000
                 if (!paused && System.nanoTime() - lastLogNs > 1_000_000_000L) {
                     Log.d(TAG, "video: $frames frames sent, ${lateMs} ms behind the clock")
                     lastLogNs = System.nanoTime()
                 }
-                ex.advance()
             }
         } finally {
             ex.release()
@@ -400,6 +415,12 @@ class ContentStreamer(
          * picture (it holds back a few: B-frame reordering, or the decoder's own pipeline).
          */
         const val TAIL = 4
+        /** Samples read ahead to find each one's send time (deeper than any B-frame reordering). */
+        const val LOOKAHEAD = 16
+
+        /** Send time of a sample shown at [ptsUs], given the display times of the samples after it in decode
+         *  order: the earliest of them all, so it is there before any picture that needs it (see videoLoop). */
+        fun sendTimeUs(ptsUs: Long, laterPts: List<Long>): Long = minOf(ptsUs, laterPts.minOrNull() ?: ptsUs)
 
         /**
          * The pause point: the later of the picture the sender shows ([shownUs]) and the last one sent ([sentUs]),

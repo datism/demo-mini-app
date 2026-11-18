@@ -10,6 +10,17 @@ class PausePointTest {
     private fun header() = ByteArray(12).also { it[0] = 0x80.toByte(); it[1] = 97 }
 
     @Test
+    fun sendTime_getsReferencesOutBeforeThePicturesThatNeedThem() {
+        // Decode order I0 P4 B2 B1 B3 P8 B6 B5 B7 (frame units): P4 must go out with B1, not at 4.
+        val pts = listOf(0L, 4, 2, 1, 3, 8, 6, 5, 7)
+        val due = pts.indices.map { ContentStreamer.sendTimeUs(pts[it], pts.drop(it + 1)) }
+        assertEquals(listOf(0L, 1, 1, 1, 3, 5, 5, 5, 7), due)
+        // No B-frames: each one goes at its own time, as before.
+        val plain = listOf(0L, 1, 2, 3)
+        assertEquals(plain, plain.indices.map { ContentStreamer.sendTimeUs(plain[it], plain.drop(it + 1)) })
+    }
+
+    @Test
     fun follow_movesTheStreamTowardThePreviewInSmallSteps() {
         assertEquals(0L, ContentStreamer.followStepUs(5_000_000L, 5_030_000L)) // within the slack
         assertEquals(0L, ContentStreamer.followStepUs(5_000_000L, 4_970_000L))
