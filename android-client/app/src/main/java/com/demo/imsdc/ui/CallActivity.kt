@@ -842,7 +842,7 @@ class CallActivity : AppCompatActivity() {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             audioManager.isMicrophoneMute = !audioManager.isMicrophoneMute
             val isMuted = audioManager.isMicrophoneMute
-            setCallButtonOn(binding.btnMute, isMuted)
+            showMuted(isMuted)
             Toast.makeText(this, if (isMuted) "\u0110\u00e3 t\u1eaft ti\u1ebfng" else "\u0110\u00e3 b\u1eadt ti\u1ebfng", Toast.LENGTH_SHORT).show()
         }
 
@@ -920,14 +920,14 @@ class CallActivity : AppCompatActivity() {
         }
         binding.localVideoView.visibility = View.GONE
 
-        // Route audio to speakerphone for hands-free PoC demo
+        // A call starts on the earpiece; the speaker button switches to the loudspeaker.
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         audioManager.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        setSpeakerphoneOn(audioManager, true)
+        setSpeakerphoneOn(audioManager, false)
         // The mute button sets Android's global mic mute, which outlives the call: start every call unmuted.
         if (audioManager.isMicrophoneMute) Log.w(TAG, "Mic was left muted by an earlier call: unmuting")
         audioManager.isMicrophoneMute = false
-        setCallButtonOn(binding.btnMute, false)
+        showMuted(false)
         Log.i(TAG, "Audio: mode=${audioManager.mode} voiceVol=${audioManager.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)}/" +
             "${audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_VOICE_CALL)}")
 
@@ -2359,6 +2359,12 @@ class CallActivity : AppCompatActivity() {
     }
 
     // Messenger-style toggle: white circle with a dark icon when on, translucent with a white icon when off.
+    /** Mute button: a microphone with a slash while muted, the plain microphone otherwise (no highlight). */
+    private fun showMuted(muted: Boolean) {
+        binding.btnMute.setImageResource(if (muted) R.drawable.ic_mic_off else R.drawable.ic_mute)
+        binding.btnMute.contentDescription = if (muted) "Bật tiếng" else "Tắt tiếng"
+    }
+
     private fun setCallButtonOn(btn: android.widget.ImageView, on: Boolean) {
         btn.backgroundTintList = android.content.res.ColorStateList.valueOf(
             android.graphics.Color.parseColor(if (on) "#FFFFFFFF" else "#29FFFFFF")
