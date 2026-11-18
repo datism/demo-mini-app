@@ -39,6 +39,12 @@ class ContentStreamer(
     @Volatile private var paused = false
     @Volatile private var originNs = 0L
     @Volatile private var pausedAtNs = 0L
+    /**
+     * Latest presentation time among the video samples sent so far (samples go in decode order, so the max).
+     * On pause the sender's own preview is moved to this frame: the frame the other phone ends on.
+     */
+    @Volatile var lastSentVideoPtsUs = -1L
+        private set
     private var videoSocket: DatagramSocket? = null
     private var audioSocket: DatagramSocket? = null
     private val threads = mutableListOf<Thread>()
@@ -79,6 +85,7 @@ class ContentStreamer(
         if (running) return
         running = true
         paused = false
+        lastSentVideoPtsUs = -1L
         originNs = System.nanoTime()
         videoSocket = bind(localVideoPort)
         audioSocket = bind(localAudioPort)
@@ -102,7 +109,7 @@ class ContentStreamer(
     }
 
     /** Position in the file, in milliseconds. */
-    fun positionMs(): Long = (((if (paused) pausedAtNs else System.nanoTime()) - originNs) / 1_000_000L).coerceAtLeast(0)
+    fun positionMs(): Long = if (originNs == 0L) 0L else (((if (paused) pausedAtNs else System.nanoTime()) - originNs) / 1_000_000L).coerceAtLeast(0)
 
     fun stop() {
         running = false
@@ -186,6 +193,7 @@ class ContentStreamer(
                 val nals = nalUnits(data)
                 if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
                 nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
+                if (running) lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs)
                 ex.advance()
             }
         } finally {

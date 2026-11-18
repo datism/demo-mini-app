@@ -927,6 +927,8 @@ class MiniAppManager(val activity: CallActivity) {
         private const val SHARE_ANSWER_TIMEOUT_MS = 35_000L
         /** The callee declines on its own after this long without an answer from its user. */
         private const val SHARE_DECISION_TIMEOUT_MS = 30_000L
+        /** Longest the stream waits for the sender's local preview to be ready before starting without it. */
+        private const val PREVIEW_START_TIMEOUT_MS = 3_000L
         /** App id of the Content Sharing page. */
         const val SHARE_APP = "photo-share"
         /** Pages that go full screen when they ask (AndroidBridge.setFullScreen). */
@@ -1732,7 +1734,18 @@ class MiniAppManager(val activity: CallActivity) {
             }
             streamer = s
             userPausedVideo = false
-            s.start()
+            // The stream and the local preview start together, so the sender's picture shows what is sent.
+            // Started before the preview was ready, the stream ran ahead of it and a pause froze the two
+            // phones on different frames. Without a preview (none, or it fails) the stream starts anyway.
+            var started = false
+            val startStream = {
+                if (!started && streamer === s) {
+                    started = true
+                    s.start()
+                    if (userPausedVideo || com.demo.imsdc.call.CallHold.active) applyVideoPause(true)
+                }
+            }
+            activity.binding.root.postDelayed({ startStream() }, PREVIEW_START_TIMEOUT_MS)
             // The sender watches and hears the same video locally. On speakerphone the mic can pick it up
             // and the other person may hear an echo through the call; the page's mute button silences it.
             withContentSurface { surface ->
@@ -1743,11 +1756,13 @@ class MiniAppManager(val activity: CallActivity) {
                         setOnVideoSizeChangedListener { _, w, h -> fitContentSurface(w, h) }
                         val v = if (shareMuted) 0f else com.demo.imsdc.media.SHARED_VIDEO_VOLUME
                         setVolume(v, v)
-                        setOnPreparedListener { it.start() }
+                        setOnPreparedListener { it.start(); startStream() }
+                        setOnErrorListener { _, what, extra -> Log.w(TAG, "Preview error $what/$extra"); startStream(); false }
                         prepareAsync()
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Local preview unavailable: ${e.message}")
+                    startStream()
                 }
             }
             emitShareEvent("videoReady", JSONObject().put("name", info.name).put("dur", info.durationMs / 1000.0).toString())
@@ -1873,8 +1888,18 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     private fun applyVideoPause(paused: Boolean) {
+        // The stream stops first (before its next sample); the preview is then put on the last frame sent,
+        // which is where the other phone's picture stops. Both resume from there.
         streamer?.let { if (paused) it.pause() else it.resume() }
-        try { preview?.let { if (paused) it.pause() else it.start() } } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
+        try {
+            preview?.let { p ->
+                if (paused) {
+                    p.pause()
+                    val ptsUs = streamer?.lastSentVideoPtsUs ?: -1L
+                    if (ptsUs >= 0) p.seekTo(ptsUs / 1000, android.media.MediaPlayer.SEEK_CLOSEST)
+                } else p.start()
+            }
+        } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
     }
 
     /** Mute the shared video's sound on this phone only: the receiver's stream, or the sender's local preview. */
