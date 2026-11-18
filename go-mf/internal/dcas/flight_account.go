@@ -16,7 +16,6 @@ const (
 	flightPointsPerVND = 10000   // 1 point per 10.000₫ of the total
 	flightGoldPoints   = 5000
 	flightPlatPoints   = 15000
-	flightSeedPoints   = 4800 // close to Gold, so the first booking visibly upgrades
 )
 
 type FlightBookingRecord struct {
@@ -72,26 +71,12 @@ func memberFor(points int) FlightMember {
 	return m
 }
 
-// seeded gives a first-time caller something to look at: one flown trip and
-// one upcoming trip.
-func seededFlightAccount() *flightAccount {
-	return &flightAccount{
-		points: flightSeedPoints,
-		bookings: []FlightBookingRecord{
-			{PNR: "SL9X3C", Flight: "SL 225", From: "SGN", To: "HAN", Date: "2026-11-20", Dep: "11:15", Arr: "13:20",
-				Fare: "saver", Seats: []string{"12A"}, Pax: 1, Total: 1670000, Status: "upcoming", BookedAt: "2026-10-18"},
-			{PNR: "SL4M8P", Flight: "SL 201", From: "HAN", To: "SGN", Date: "2026-10-12", Dep: "06:00", Arr: "08:10",
-				Fare: "saver", Seats: []string{"9C"}, Pax: 1, Total: 1479000, Status: "flown", BookedAt: "2026-09-30"},
-		},
-	}
-}
-
-// account returns the caller's account, creating the seeded one on first use.
+// account returns the caller's account, creating an empty one on first use.
 // The caller must hold st.mu.
 func (st *flightAccountStore) account(phone string) *flightAccount {
 	a := st.accounts[phone]
 	if a == nil {
-		a = seededFlightAccount()
+		a = &flightAccount{}
 		st.accounts[phone] = a
 	}
 	return a
