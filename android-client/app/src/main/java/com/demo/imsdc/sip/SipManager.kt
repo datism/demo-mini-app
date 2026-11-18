@@ -728,6 +728,14 @@ class SipManager(
         // re-INVITE of the current call, whatever Call-ID it carries, and must never be turned away.
         // Checked before the pending* fields below are overwritten, so the current call keeps its state.
         val newDialog = getTag(getHeader(msg, "to") ?: "").isNullOrEmpty()
+        // The caller already cancelled this call: its CANCEL overtook this INVITE. 487, and no ringing.
+        if (newDialog && earlyCancelIds.remove(callId)) {
+            Log.i(TAG, "→ 487 to INVITE $callId from $fromUser: its CANCEL came first, not ringing")
+            try { sendRaw(buildResponse(msg, 487, "Request Terminated", "Content-Length: 0\r\n")) } catch (e: Exception) {
+                Log.e(TAG, "487 send error: ${e.message}")
+            }
+            return
+        }
         val inCall = com.demo.imsdc.ui.CallActivity.isCallActive || isCallActive ||
             (pendingCallId != null && IncomingCallNotificationManager.ringing)
         val busyReason = when {
@@ -868,6 +876,16 @@ class SipManager(
             onHeldReInviteCancelled?.invoke()
             return
         }
+        // A CANCEL for a call not seen yet: it overtook its INVITE on the way here (the SIP server handles each
+        // message on its own and passes a CANCEL on faster). Ending "the current call" here dropped nothing, then
+        // the INVITE rang this phone with no CANCEL left to come. Remember it; that INVITE gets 487 (below).
+        val cancelId = getHeader(msg, "call-id")
+        if (isEarlyCancel(cancelId, pendingCallId, !getTag(getHeader(msg, "to") ?: "").isNullOrEmpty())) {
+            try { sendRaw(buildResponse(msg, 200, "OK", "")) } catch (_: Exception) {}
+            earlyCancelIds.add(cancelId!!)
+            Log.i(TAG, "CANCEL for a call not seen yet ($cancelId, current $pendingCallId): its INVITE may follow, remembered")
+            return
+        }
         // CANCEL of a Re-INVITE that is already answered (200 crossed the CANCEL, or 491 on glare):
         // only the CANCEL is answered and the call goes on (RFC 3261 9.2). It carries the dialog's
         // To-tag; the CANCEL of a ringing call has none. Ending the call here (CS_49/CS_51) left the
@@ -910,6 +928,9 @@ class SipManager(
         onCancelReceived?.invoke()
         onCallEnded?.invoke()
     }
+
+    /** Call-IDs whose CANCEL came before their INVITE (see handleCancel). */
+    private val earlyCancelIds = ExpiringIds()
 
     /** Call-IDs turned away while busy (answered 480). */
     private val busyCallIds = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
