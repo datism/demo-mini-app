@@ -65,4 +65,16 @@ class PlayoutClockTest {
         val t = 5_000_000L
         assertEquals(t + delay, clock.renderAtUs(frame, t, t))
     }
+
+    @Test
+    fun rtpTimestamp_isTheSendersMediaTime() {
+        // H264RtpSender sends ts = mediaUs * 9 / 100 (90 kHz, no offset), 32 bits.
+        for (mediaUs in listOf(0L, 33_366L, 1_000_000L, 12_345_678L, 3_600_000_000L)) {
+            val rtpTs = (mediaUs * 9 / 100) and 0xFFFFFFFFL
+            val back = ContentReceiver.mediaUsOf(rtpTs)
+            assertTrue("$mediaUs -> $back", kotlin.math.abs(back - mediaUs) < 12) // one 90 kHz tick
+        }
+        // A sign-extended (negative) value is read as the unsigned 32-bit timestamp.
+        assertEquals(ContentReceiver.mediaUsOf(0xFFFFFFFFL), ContentReceiver.mediaUsOf(-1L))
+    }
 }

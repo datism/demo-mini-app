@@ -45,6 +45,8 @@ class AndroidBridgeInterface(
         fun pickVideo()
         fun startScreen()
         fun pauseVideo(paused: Boolean)
+        fun awaitVideoStill(seq: Int)
+        fun alignPreview(tSec: Double)
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
         fun setFullScreen(on: Boolean)
@@ -104,6 +106,14 @@ class AndroidBridgeInterface(
     /** Page, sender: pause (true) or resume (false) the stream for both people. */
     @JavascriptInterface
     fun pauseVideo(paused: Boolean) { shareHandler?.pauseVideo(paused) }
+
+    /** Page, receiver: after the sender's pause, report (shareEvent 'videoStill') the frame this phone stopped on. */
+    @JavascriptInterface
+    fun awaitVideoStill(seq: Int) { shareHandler?.awaitVideoStill(seq) }
+
+    /** Page, sender: put the paused preview on that frame (seconds; < 0 = the last frame sent), then 'videoPaused'. */
+    @JavascriptInterface
+    fun alignPreview(tSec: Double) { shareHandler?.alignPreview(tSec) }
 
     /** Page, receiver: mute or unmute this phone's speaker for the shared video. */
     @JavascriptInterface

@@ -1567,6 +1567,8 @@ class CallActivity : AppCompatActivity() {
             override fun pickVideo() = miniAppManager.pickVideo()
             override fun startScreen() = miniAppManager.startScreen()
             override fun pauseVideo(paused: Boolean) = miniAppManager.pauseVideo(paused)
+            override fun awaitVideoStill(seq: Int) = miniAppManager.awaitVideoStill(seq)
+            override fun alignPreview(tSec: Double) = miniAppManager.alignPreview(tSec)
             override fun muteShareAudio(muted: Boolean) = miniAppManager.muteShareAudio(muted)
             override fun peerNumber(): String = remoteUser
             override fun setFullScreen(on: Boolean) = miniAppManager.setFullScreen(on)

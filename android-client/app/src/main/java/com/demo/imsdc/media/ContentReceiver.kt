@@ -48,6 +48,27 @@ class ContentReceiver(
     private var track: AudioTrack? = null
     private var codec: MediaCodec? = null
     private val threads = mutableListOf<Thread>()
+    /** Media time (the sender's file time) of the last picture handed to the screen, and when. */
+    @Volatile private var lastRenderedMediaUs = -1L
+    @Volatile private var lastRenderNs = 0L
+
+    /**
+     * Calls [onStill] (on a background thread) with the media time of the picture on screen once no new
+     * picture has been shown for [STILL_MS]: the sender paused and this phone has played out what it had.
+     * Gives up after [STILL_GIVE_UP_MS] (the stream kept coming) without calling back.
+     */
+    fun awaitStill(onStill: (mediaUs: Long) -> Unit) {
+        Thread({
+            val deadline = System.nanoTime() + STILL_GIVE_UP_MS * 1_000_000L
+            try {
+                while (running && System.nanoTime() < deadline) {
+                    Thread.sleep(50)
+                    val idleMs = (System.nanoTime() - lastRenderNs) / 1_000_000L
+                    if (lastRenderedMediaUs >= 0 && idleMs >= STILL_MS) { onStill(lastRenderedMediaUs); return@Thread }
+                }
+            } catch (_: InterruptedException) {}
+        }, "content-rx-still").start()
+    }
 
     fun start() {
         if (running) return
@@ -291,8 +312,10 @@ class ContentReceiver(
         // every later picture that referenced it (smearing / freezes until the next keyframe).
         var held: Picture? = null
         var lastStatsNs = System.nanoTime()
-        // Arrival time of each picture in the decoder, by presentation time (output can come out reordered).
+        // Arrival time and media time of each picture in the decoder, by presentation time (output can come
+        // out reordered).
         val arrivals = LinkedHashMap<Long, Long>()
+        val mediaTimes = LinkedHashMap<Long, Long>()
         while (running) {
             val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             held = null
@@ -320,6 +343,8 @@ class ContentReceiver(
                         c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
                         arrivals[ptsBaseUs] = picture.arrivalUs
                         if (arrivals.size > 64) arrivals.remove(arrivals.keys.first())
+                        mediaTimes[ptsBaseUs] = mediaUsOf(picture.rtpTs)
+                        if (mediaTimes.size > 64) mediaTimes.remove(mediaTimes.keys.first())
                     } else {
                         held = picture // decoder busy: free its output below, then try again
                         stalls++
@@ -332,7 +357,11 @@ class ContentReceiver(
                     if (oi >= 0) {
                         val nowUs = System.nanoTime() / 1000
                         val arrivalUs = arrivals.remove(info.presentationTimeUs) ?: nowUs
-                        c.releaseOutputBuffer(oi, clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs) * 1000)
+                        val renderAtUs = clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs)
+                        c.releaseOutputBuffer(oi, renderAtUs * 1000)
+                        mediaTimes.remove(info.presentationTimeUs)?.let { lastRenderedMediaUs = it }
+                        // When it is actually on screen (its render time may still be ahead).
+                        lastRenderNs = maxOf(nowUs, renderAtUs) * 1000
                     }
                     else if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val (w, h) = shownSize(c.outputFormat, codecRotation)
@@ -379,6 +408,9 @@ class ContentReceiver(
             }
             // Turns the picture as it is drawn on the surface (portrait phone video arrives as landscape frames).
             if (rotation != 0) format.setInteger(MediaFormat.KEY_ROTATION, rotation)
+            // Output each picture as soon as it is decoded where the decoder supports it: otherwise it keeps the
+            // last few back until more input arrives, and a paused stream froze here a few frames early.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
             val c = MediaCodec.createDecoderByType(mime)
             c.configure(format, surface, null, 0)
             c.start()
@@ -436,6 +468,13 @@ class ContentReceiver(
         const val PLAYOUT_DELAY_MS = 100L
         /** Extra delay tolerated beyond [PLAYOUT_DELAY_MS] before playback catches up (picture and sound). */
         const val CATCH_UP_MS = 150L
+
+        /** No new picture shown for this long: the picture has stopped (well past the playout delay). */
+        const val STILL_MS = 250L
+        private const val STILL_GIVE_UP_MS = 3_000L
+
+        /** The sender's RTP timestamp is the file's media time at 90 kHz with no offset (H264RtpSender). */
+        fun mediaUsOf(rtpTs: Long): Long = (rtpTs and 0xFFFFFFFFL) * 100 / 9
 
         /** H.265 random-access (IRAP) pictures: BLA, IDR, CRA. Decoding can start there. */
         fun isHevcKey(type: Int) = type in 16..21
