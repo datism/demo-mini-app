@@ -10,6 +10,16 @@ class PausePointTest {
     private fun header() = ByteArray(12).also { it[0] = 0x80.toByte(); it[1] = 97 }
 
     @Test
+    fun follow_movesTheStreamTowardThePreviewInSmallSteps() {
+        assertEquals(0L, ContentStreamer.followStepUs(5_000_000L, 5_030_000L)) // within the slack
+        assertEquals(0L, ContentStreamer.followStepUs(5_000_000L, 4_970_000L))
+        assertEquals(80_000L, ContentStreamer.followStepUs(5_000_000L, 5_080_000L)) // preview ahead
+        assertEquals(-80_000L, ContentStreamer.followStepUs(5_000_000L, 4_920_000L)) // preview behind
+        assertEquals(150_000L, ContentStreamer.followStepUs(5_000_000L, 6_000_000L)) // capped
+        assertEquals(-150_000L, ContentStreamer.followStepUs(5_000_000L, 4_000_000L))
+    }
+
+    @Test
     fun pausePoint_isTheLaterOfShownAndSent() {
         assertEquals(5_100_000L, ContentStreamer.pauseStopUs(5_000_000L, 5_100_000L)) // preview behind the stream
         assertEquals(5_200_000L, ContentStreamer.pauseStopUs(5_200_000L, 5_100_000L)) // preview ahead

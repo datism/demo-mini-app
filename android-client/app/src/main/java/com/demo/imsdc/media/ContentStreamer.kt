@@ -154,6 +154,22 @@ class ContentStreamer(
         }
     }
 
+    /**
+     * Keeps the stream on the sender's own picture ([mediaUs], the local preview's position): the clock both
+     * the stream and the time shown run on moves toward it, a little at a time ([followStepUs]). Behind, the
+     * stream waits; ahead, it catches up without a burst. Not while paused or about to pause.
+     * Returns the stream's position (µs) before the step, for logging.
+     */
+    fun followUs(mediaUs: Long): Long {
+        if (!running || mediaUs < 0) return -1L
+        synchronized(sendLock) {
+            if (paused || stopAtUs >= 0) return -1L
+            val clockUs = (System.nanoTime() - originNs) / 1000
+            originNs -= followStepUs(clockUs, mediaUs) * 1000
+            return clockUs
+        }
+    }
+
     /** Position in the file, in milliseconds. */
     fun positionMs(): Long = if (originNs == 0L) 0L else (((if (paused) pausedAtNs else System.nanoTime()) - originNs) / 1_000_000L).coerceAtLeast(0)
 
@@ -390,6 +406,17 @@ class ContentStreamer(
          * so neither phone goes back; the other one plays on to it (a few frames at most). -1 if neither is known.
          */
         fun pauseStopUs(shownUs: Long, sentUs: Long): Long = maxOf(shownUs, sentUs, -1L)
+
+        /** Within this of the preview, the stream is left alone (no jitter from small corrections). */
+        const val FOLLOW_SLACK_US = 40_000L
+        /** At most this much per correction, so catching up never sends a burst. */
+        const val FOLLOW_STEP_US = 150_000L
+
+        /** How far to move the stream clock (now at [clockUs]) toward the preview at [previewUs]. */
+        fun followStepUs(clockUs: Long, previewUs: Long): Long {
+            val d = previewUs - clockUs
+            return if (kotlin.math.abs(d) <= FOLLOW_SLACK_US) 0L else d.coerceIn(-FOLLOW_STEP_US, FOLLOW_STEP_US)
+        }
         private val SUPPORTED_VIDEO = setOf(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC)
 
         /**

@@ -1770,12 +1770,25 @@ class MiniAppManager(val activity: CallActivity) {
             emitShareEvent("videoReady", JSONObject().put("name", info.name).put("dur", info.durationMs / 1000.0).toString())
             videoTicker?.cancel()
             videoTicker = activity.lifecycleScope.launch {
+                var tick = 0
+                var lastFollowLogNs = 0L
                 while (true) {
-                    delay(500)
-                    val pos = streamer?.positionMs() ?: break
+                    delay(100)
+                    val st = streamer ?: break
                     // Paused, the time shown is the frame both phones stopped on (videoPaused / videoStill).
                     if (userPausedVideo || com.demo.imsdc.call.CallHold.active) continue
-                    emitShareEvent("videoTime", JSONObject().put("t", pos / 1000.0).toString())
+                    // One clock: the stream (and the time shown) follow this phone's own picture, so repeated
+                    // pauses and resumes never leave the two apart.
+                    val p = preview
+                    val shownUs = try { if (p != null && p.isPlaying) p.currentPosition * 1000L else -1L } catch (_: Exception) { -1L }
+                    if (shownUs >= 0) {
+                        val wasUs = st.followUs(shownUs)
+                        if (wasUs >= 0 && System.nanoTime() - lastFollowLogNs > 1_000_000_000L) {
+                            Log.d(TAG, "Follow: preview ${shownUs / 1000} ms, stream ${wasUs / 1000} ms")
+                            lastFollowLogNs = System.nanoTime()
+                        }
+                    }
+                    if (++tick % 5 == 0) emitShareEvent("videoTime", JSONObject().put("t", st.positionMs() / 1000.0).toString())
                 }
             }
         }
@@ -1920,7 +1933,7 @@ class MiniAppManager(val activity: CallActivity) {
             if (p == null || stopUs < 0) { done(); return@runOnUiThread }
             previewStopJob?.cancel()
             previewStopJob = activity.lifecycleScope.launch {
-                val deadline = System.nanoTime() + 500_000_000L
+                val deadline = System.nanoTime() + 1_000_000_000L
                 try {
                     // Play on to the pause point (a few frames at most), then stop there.
                     while (userPausedVideo && p.isPlaying && p.currentPosition * 1000L < stopUs - HALF_FRAME_US &&
@@ -1928,7 +1941,8 @@ class MiniAppManager(val activity: CallActivity) {
                     if (!userPausedVideo) return@launch
                     p.pause()
                     val atUs = p.currentPosition * 1000L
-                    if (kotlin.math.abs(atUs - stopUs) > HALF_FRAME_US) {
+                    // Short of the pause point (it lagged): forward to it. Never back: a frame past it stays.
+                    if (stopUs - atUs > 2 * HALF_FRAME_US) {
                         p.setOnSeekCompleteListener { mp -> mp.setOnSeekCompleteListener(null); if (userPausedVideo) done() }
                         p.seekTo(stopUs / 1000, android.media.MediaPlayer.SEEK_CLOSEST)
                     } else done()
