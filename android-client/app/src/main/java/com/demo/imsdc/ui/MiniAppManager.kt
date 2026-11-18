@@ -1742,7 +1742,7 @@ class MiniAppManager(val activity: CallActivity) {
                 if (!started && streamer === s) {
                     started = true
                     s.start()
-                    if (userPausedVideo || com.demo.imsdc.call.CallHold.active) applyVideoPause(true)
+                    if (userPausedVideo || com.demo.imsdc.call.CallHold.active) applyVideoPause(true, seekToSent = true)
                 }
             }
             activity.binding.root.postDelayed({ startStream() }, PREVIEW_START_TIMEOUT_MS)
@@ -1771,6 +1771,8 @@ class MiniAppManager(val activity: CallActivity) {
                 while (true) {
                     delay(500)
                     val pos = streamer?.positionMs() ?: break
+                    // Paused, the time shown is the frame both phones stopped on (videoPaused / videoStill).
+                    if (userPausedVideo || com.demo.imsdc.call.CallHold.active) continue
                     emitShareEvent("videoTime", JSONObject().put("t", pos / 1000.0).toString())
                 }
             }
@@ -1867,7 +1869,7 @@ class MiniAppManager(val activity: CallActivity) {
             deferredAction?.let { action -> deferredAction = null; Log.i(TAG, "Resume: running the action held back during hold"); action() }
         }
         if (streamer == null) return
-        if (held) applyVideoPause(true)
+        if (held) applyVideoPause(true, seekToSent = true)
         else if (!userPausedVideo) applyVideoPause(false)
     }
 
@@ -1887,19 +1889,58 @@ class MiniAppManager(val activity: CallActivity) {
         applyVideoPause(paused)
     }
 
-    private fun applyVideoPause(paused: Boolean) {
-        // The stream stops first (before its next sample); the preview is then put on the last frame sent,
-        // which is where the other phone's picture stops. Both resume from there.
+    /**
+     * The stream stops first (before its next sample), then the preview. A pause by the user is then lined up on
+     * the frame the other phone actually stopped on (the page asks it, then calls [alignPreview]); a pause for
+     * hold goes straight to the last frame sent ([seekToSent]). Both resume from there.
+     */
+    private fun applyVideoPause(paused: Boolean, seekToSent: Boolean = false) {
         streamer?.let { if (paused) it.pause() else it.resume() }
         try {
             preview?.let { p ->
                 if (paused) {
                     p.pause()
                     val ptsUs = streamer?.lastSentVideoPtsUs ?: -1L
-                    if (ptsUs >= 0) p.seekTo(ptsUs / 1000, android.media.MediaPlayer.SEEK_CLOSEST)
+                    if (seekToSent && ptsUs >= 0) p.seekTo(ptsUs / 1000, android.media.MediaPlayer.SEEK_CLOSEST)
                 } else p.start()
             }
         } catch (e: Exception) { Log.w(TAG, "Preview pause: ${e.message}") }
+    }
+
+    /**
+     * Receiver, after the sender's pause: once this phone's picture has stopped (it plays out what it already
+     * had), tells the page the media time of the frame on screen ('videoStill'), for the sender to match.
+     */
+    fun awaitVideoStill(seq: Int) {
+        val r = receiver ?: return
+        r.awaitStill { mediaUs ->
+            emitShareEvent("videoStill", JSONObject().put("seq", seq).put("t", mediaUs / 1_000_000.0).toString())
+        }
+    }
+
+    /**
+     * Sender, paused: puts the preview on [tSec] (the frame the other phone stopped on; < 0 = the last frame
+     * sent), then tells the page ('videoPaused') once the picture is still, so "Đã tạm dừng" never shows over
+     * a moving frame.
+     */
+    fun alignPreview(tSec: Double) {
+        activity.runOnUiThread {
+            val sentUs = streamer?.lastSentVideoPtsUs ?: -1L
+            val ms = if (tSec >= 0) (tSec * 1000).toLong() else if (sentUs >= 0) sentUs / 1000 else -1L
+            val done = {
+                val t = if (ms >= 0) ms / 1000.0 else (streamer?.positionMs() ?: 0L) / 1000.0
+                emitShareEvent("videoPaused", JSONObject().put("t", t).toString())
+            }
+            val p = preview
+            if (p == null || ms < 0 || !userPausedVideo) { done(); return@runOnUiThread }
+            try {
+                p.setOnSeekCompleteListener { mp -> mp.setOnSeekCompleteListener(null); done() }
+                p.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST)
+            } catch (e: Exception) {
+                Log.w(TAG, "Preview align: ${e.message}")
+                done()
+            }
+        }
     }
 
     /** Mute the shared video's sound on this phone only: the receiver's stream, or the sender's local preview. */

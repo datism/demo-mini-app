@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Callee kept ringing after a quick cancel: when the caller cancelled while the IMS-AS was still setting up the media, the call was loaded back from Redis and the INVITE reached the callee about 5 s later, with no CANCEL to follow. The IMS-AS now deletes the stored call on CANCEL/BYE and only forwards the INVITE while the original call is still live.
+- Shared video pause: both phones now end on the frame the receiving phone actually stopped on (it reports it; the sender moves its picture there), and "Đã tạm dừng" only appears once the picture has stopped. The receiver asks its decoder for low-latency output so it no longer keeps the last frames back.
 - Shared video: when the sender paused, the two phones froze on different frames. The sender's local preview and the stream ran on separate clocks (the stream also started before the preview was ready); they now start together, and on pause the preview is moved to the last frame sent, which is where the other phone stops.
 - Call screen: the mute button shows a crossed-out microphone while muted instead of lighting up, and a call starts on the earpiece instead of the loudspeaker (the speaker button still switches to it).
 - Content Sharing: leaving the page (Back or the menu button) while the other phone's share request was on screen left it pending for 30 s: our own app change waited behind it and the other phone stayed on "waiting". Leaving now declines it at once.

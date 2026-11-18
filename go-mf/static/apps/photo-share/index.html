@@ -408,6 +408,15 @@ window.shareEvent = function (name, arg) {
     case 'failed': noteEnd(a.code === 480 ? 'Đã hủy lời mời vì cuộc gọi đang giữ' : a.code === 491 ? 'Thử lại sau' : a.code === 501 ? 'Chia sẻ video chưa khả dụng' : a.code === 505 ? 'Máy kia chưa hỗ trợ chia sẻ nội dung' : 'Không thể chia sẻ lúc này'); endSession(); break;
     case 'videoReady': onVideoReady(a); break;
     case 'videoTime': if (state.video) { renderTime(a.t); sendJson({ t: 'vtime', v: a.t }); } break;
+    case 'videoPaused': // sender: the preview is still, on the frame the other phone stopped on
+      if (state.video && state.video.paused) { state.video.still = true; renderTime(a.t); renderVideoState(); }
+      break;
+    case 'videoStill': // receiver: this phone's picture has stopped; tell the sender which frame it is
+      if (state.video && state.video.paused && a.seq === state.video.pauseSeq) {
+        state.video.still = true; renderTime(a.t); renderVideoState();
+        sendJson({ t: 'vframe', v: a.t, seq: a.seq });
+      }
+      break;
     case 'stopped': if (s) { toast('Đã dừng chia sẻ'); endSession(); } break; // nút trên thông báo
     case 'videoEnded': if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;
     case 'videoError': toast(a.msg || 'Video không được hỗ trợ'); if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;
@@ -700,15 +709,39 @@ function enterVideo(v) {
 function renderTime(t) { const v = state.video; if (!v) return; v.t = t; $('cur').textContent = fmt(t); $('fill').style.width = (v.dur ? Math.min(100, t / v.dur * 100) : 0) + '%'; }
 function renderVideoState() {
   const v = state.video; if (!v) return;
-  $('paused').hidden = !v.paused; $('liveDot').classList.toggle('still', !!v.paused);
+  // "Đã tạm dừng" only once the picture has stopped on the frame both phones show (v.still).
+  $('paused').hidden = !(v.paused && v.still); $('liveDot').classList.toggle('still', !!v.paused);
   const b = $('btnPlayPause'); b.innerHTML = v.paused ? ICON.play : ICON.pause; b.title = v.paused ? 'Tiếp tục' : 'Tạm dừng';
 }
 function renderMute() { const b = $('btnMute'); b.innerHTML = state.muted ? ICON.muted : ICON.sound; b.title = state.muted ? 'Bật tiếng' : 'Tắt tiếng'; }
+/* Pausing: the other phone plays out what it already has and reports the frame it stopped on ('vframe');
+ * the sender's own picture is then put on that frame. Each side shows "Đã tạm dừng" once its picture is still. */
 $('btnPlayPause').onclick = () => {
   const v = state.video; if (!v) return;
-  v.paused = !v.paused; renderVideoState();
-  call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused });
+  v.paused = !v.paused; v.still = false; v.pauseSeq = (v.pauseSeq || 0) + 1;
+  renderVideoState();
+  call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused, seq: v.pauseSeq });
+  if (!v.paused) return;
+  const seq = v.pauseSeq;
+  if (!B() || typeof B().alignPreview !== 'function') { v.still = true; renderVideoState(); return; } // older app
+  setTimeout(() => { // no answer from the other phone (older app): line up on the last frame sent
+    if (state.video === v && v.paused && v.pauseSeq === seq && v.alignedSeq !== seq) { v.alignedSeq = seq; call('alignPreview', -1); }
+  }, 1500);
 };
+function onVframe(msg) {
+  const v = state.video;
+  if (!v || !v.paused || msg.seq !== v.pauseSeq || v.alignedSeq === msg.seq) return;
+  v.alignedSeq = msg.seq;
+  call('alignPreview', typeof msg.v === 'number' ? msg.v : -1);
+}
+function onRemotePause(msg) {
+  const v = state.video; if (!v) return;
+  v.paused = !!msg.paused; v.still = false; v.pauseSeq = msg.seq | 0;
+  renderVideoState();
+  if (!v.paused) return;
+  if (B() && typeof B().awaitVideoStill === 'function') call('awaitVideoStill', v.pauseSeq);
+  else { v.still = true; renderVideoState(); }
+}
 $('btnStop').onclick = () => { call('stopShare'); toast('Đã dừng chia sẻ'); endSession(); };
 $('btnMute').onclick = () => { state.muted = !state.muted; renderMute(); call('muteShareAudio', state.muted); toast(state.muted ? 'Đã tắt tiếng' : 'Đã bật tiếng'); };
 
@@ -724,7 +757,8 @@ window.receiveData = function (dataStr) {
       case 'goto': onRemoteGoto(msg); break;
       case 'skind': state.hint = { kind: msg.kind, at: Date.now() }; break;
       case 'vstart': if (state.s && streamed(state.s.kind)) enterVideo({ name: msg.name, dur: msg.dur || 0, t: 0, paused: false }); break;
-      case 'vpause': if (state.video) { state.video.paused = !!msg.paused; renderVideoState(); } break;
+      case 'vpause': onRemotePause(msg); break;
+      case 'vframe': onVframe(msg); break;
       case 'vtime': if (state.video && state.s && state.s.role === 'receiver') renderTime(msg.v || 0); break;
       case 'done': onDone(msg); break;
       case 'begin': break;
