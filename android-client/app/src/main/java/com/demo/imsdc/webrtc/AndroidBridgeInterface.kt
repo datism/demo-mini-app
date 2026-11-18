@@ -45,7 +45,9 @@ class AndroidBridgeInterface(
         fun pickVideo()
         fun startScreen()
         fun pauseVideo(paused: Boolean)
-        fun awaitVideoStill(seq: Int)
+        fun awaitVideoStill(seq: Int, stopUs: Long = -1L)
+        fun videoResumed()
+        fun videoStopUs(): Long
         fun alignPreview(tSec: Double)
         fun muteShareAudio(muted: Boolean)
         fun peerNumber(): String
@@ -110,6 +112,26 @@ class AndroidBridgeInterface(
     /** Page, receiver: after the sender's pause, report (shareEvent 'videoStill') the frame this phone stopped on. */
     @JavascriptInterface
     fun awaitVideoStill(seq: Int) { shareHandler?.awaitVideoStill(seq) }
+
+    /**
+     * Page, receiver: after the sender's pause, show every picture up to the last one it sent ({seq, us}: us =
+     * its media time in microseconds), then report (shareEvent 'videoStill') the frame this phone stopped on.
+     */
+    @JavascriptInterface
+    fun awaitVideoStop(json: String) {
+        try {
+            val o = org.json.JSONObject(json)
+            shareHandler?.awaitVideoStill(o.optInt("seq"), o.optLong("us", -1L))
+        } catch (_: Exception) {}
+    }
+
+    /** Page, sender, right after pauseVideo(true): media time (µs) of the last picture sent, -1 if none. */
+    @JavascriptInterface
+    fun videoStopUs(): Double = (shareHandler?.videoStopUs() ?: -1L).toDouble()
+
+    /** Page, receiver: the sender resumed. */
+    @JavascriptInterface
+    fun videoResumed() { shareHandler?.videoResumed() }
 
     /** Page, sender: put the paused preview on that frame (seconds; < 0 = the last frame sent), then 'videoPaused'. */
     @JavascriptInterface

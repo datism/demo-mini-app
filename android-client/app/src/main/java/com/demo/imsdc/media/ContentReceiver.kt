@@ -51,24 +51,43 @@ class ContentReceiver(
     /** Media time (the sender's file time) of the last picture handed to the screen, and when. */
     @Volatile private var lastRenderedMediaUs = -1L
     @Volatile private var lastRenderNs = 0L
+    /**
+     * The sender paused: once the picture it stopped on ([drainTargetUs], media time; < 0 = not known) is in the
+     * decoder, or nothing new came for [STILL_MS], the decoder gives out the pictures it still holds.
+     */
+    @Volatile private var drainWanted = false
+    @Volatile private var drainTargetUs = -1L
 
     /**
-     * Calls [onStill] (on a background thread) with the media time of the picture on screen once no new
-     * picture has been shown for [STILL_MS]: the sender paused and this phone has played out what it had.
-     * Gives up after [STILL_GIVE_UP_MS] (the stream kept coming) without calling back.
+     * The sender paused after sending the picture at [stopUs] (media time, < 0 = not known). This phone shows
+     * every picture up to it (the decoder is drained: otherwise it keeps the last few back), then calls
+     * [onStill] (on a background thread) with the media time of the picture on screen, once nothing new has
+     * been shown for [STILL_MS]. After [STILL_GIVE_UP_MS] it answers with whatever is on screen.
      */
-    fun awaitStill(onStill: (mediaUs: Long) -> Unit) {
+    fun awaitStill(stopUs: Long, onStill: (mediaUs: Long) -> Unit) {
+        drainTargetUs = stopUs
+        drainWanted = true
         Thread({
             val deadline = System.nanoTime() + STILL_GIVE_UP_MS * 1_000_000L
             try {
                 while (running && System.nanoTime() < deadline) {
                     Thread.sleep(50)
                     val idleMs = (System.nanoTime() - lastRenderNs) / 1_000_000L
-                    if (lastRenderedMediaUs >= 0 && idleMs >= STILL_MS) { onStill(lastRenderedMediaUs); return@Thread }
+                    if (!drainWanted && lastRenderedMediaUs >= 0 && idleMs >= STILL_MS) {
+                        Log.i(TAG, "Paused: still on ${lastRenderedMediaUs / 1000} ms (sender stopped at ${stopUs / 1000} ms)")
+                        onStill(lastRenderedMediaUs); return@Thread
+                    }
+                }
+                if (running && lastRenderedMediaUs >= 0) {
+                    Log.w(TAG, "Paused: picture not still after $STILL_GIVE_UP_MS ms, answering ${lastRenderedMediaUs / 1000} ms")
+                    onStill(lastRenderedMediaUs)
                 }
             } catch (_: InterruptedException) {}
         }, "content-rx-still").start()
     }
+
+    /** The sender resumed before this phone drained: nothing to drain any more. */
+    fun cancelStill() { drainWanted = false }
 
     fun start() {
         if (running) return
@@ -316,15 +335,75 @@ class ContentReceiver(
         // out reordered).
         val arrivals = LinkedHashMap<Long, Long>()
         val mediaTimes = LinkedHashMap<Long, Long>()
+        // Pause: the decoder was given end-of-stream so it let out every picture it held; it takes no more input
+        // and is restarted on the next picture (the sender resumes from a keyframe).
+        var drained = false
+        var lastQueuedMediaUs = -1L
+        var lastQueuedNs = 0L
+
+        /** Shows (or skips) one decoded picture. */
+        fun output(c: MediaCodec, oi: Int) {
+            val nowUs = System.nanoTime() / 1000
+            val arrivalUs = arrivals.remove(info.presentationTimeUs) ?: nowUs
+            val mediaUs = mediaTimes.remove(info.presentationTimeUs)
+            val eosOnly = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0 && info.size == 0
+            if (eosOnly || !shouldShow(mediaUs, lastRenderedMediaUs)) {
+                // End-of-stream marker, or a picture at or before the one on screen: the sender re-sent the
+                // pictures from the keyframe before its pause point, only for the decoder.
+                c.releaseOutputBuffer(oi, false)
+                return
+            }
+            val renderAtUs = clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs)
+            c.releaseOutputBuffer(oi, renderAtUs * 1000)
+            if (mediaUs != null) lastRenderedMediaUs = mediaUs
+            // When it is actually on screen (its render time may still be ahead).
+            lastRenderNs = maxOf(nowUs, renderAtUs) * 1000
+        }
+
         while (running) {
+            val c0 = codec
+            if (c0 != null && drainWanted && !drained && held == null && pictures.isEmpty() &&
+                ((drainTargetUs >= 0 && lastQueuedMediaUs >= drainTargetUs) ||
+                    (lastQueuedNs > 0 && System.nanoTime() - lastQueuedNs >= STILL_MS * 1_000_000L))) {
+                try {
+                    val ii = c0.dequeueInputBuffer(20_000)
+                    if (ii >= 0) {
+                        c0.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        drained = true
+                        drainWanted = false
+                        var shown = 0
+                        val deadline = System.nanoTime() + 500_000_000L
+                        while (System.nanoTime() < deadline) {
+                            val oi = c0.dequeueOutputBuffer(info, 10_000)
+                            if (oi >= 0) {
+                                val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                                if (!eos || info.size > 0) shown++
+                                output(c0, oi)
+                                if (eos) break
+                            }
+                        }
+                        Log.i(TAG, "Paused: decoder gave out $shown held picture(s), last ${lastRenderedMediaUs / 1000} ms " +
+                            "(last received ${lastQueuedMediaUs / 1000} ms)")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Drain on pause: ${e.message}")
+                    drainWanted = false
+                }
+                continue
+            }
             val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             held = null
-            if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
-                // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
-                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
+            val restart = codec != null && picture != null && drained
+            if (codec != null && (restart || codecRotation != rotation || codecHevc != hevc)) {
+                // Rotation and codec are set when the decoder starts, and a drained decoder takes no more
+                // input: restart it, from the next keyframe.
+                Log.i(TAG, if (restart) "Resumed after pause: restarting the decoder" else
+                    "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
                 try { codec?.stop() } catch (_: Exception) {}
                 try { codec?.release() } catch (_: Exception) {}
                 codec = null
+                drained = false
+                arrivals.clear(); mediaTimes.clear()
             }
             if (codec == null && picture != null && !picture.key) continue
             val c = codec ?: (if (picture != null) startDecoder(rotation)?.also { codecRotation = rotation; codecHevc = hevc } else null)
@@ -343,8 +422,11 @@ class ContentReceiver(
                         c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
                         arrivals[ptsBaseUs] = picture.arrivalUs
                         if (arrivals.size > 64) arrivals.remove(arrivals.keys.first())
-                        mediaTimes[ptsBaseUs] = mediaUsOf(picture.rtpTs)
+                        val mediaUs = mediaUsOf(picture.rtpTs)
+                        mediaTimes[ptsBaseUs] = mediaUs
                         if (mediaTimes.size > 64) mediaTimes.remove(mediaTimes.keys.first())
+                        lastQueuedMediaUs = mediaUs
+                        lastQueuedNs = System.nanoTime()
                     } else {
                         held = picture // decoder busy: free its output below, then try again
                         stalls++
@@ -354,15 +436,7 @@ class ContentReceiver(
                 // jitter is absorbed instead of showing up as uneven motion.
                 while (true) {
                     val oi = c.dequeueOutputBuffer(info, 0)
-                    if (oi >= 0) {
-                        val nowUs = System.nanoTime() / 1000
-                        val arrivalUs = arrivals.remove(info.presentationTimeUs) ?: nowUs
-                        val renderAtUs = clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs)
-                        c.releaseOutputBuffer(oi, renderAtUs * 1000)
-                        mediaTimes.remove(info.presentationTimeUs)?.let { lastRenderedMediaUs = it }
-                        // When it is actually on screen (its render time may still be ahead).
-                        lastRenderNs = maxOf(nowUs, renderAtUs) * 1000
-                    }
+                    if (oi >= 0) output(c, oi)
                     else if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val (w, h) = shownSize(c.outputFormat, codecRotation)
                         if (w > 0 && h > 0 && (w != shownW || h != shownH)) {
@@ -472,6 +546,16 @@ class ContentReceiver(
         /** No new picture shown for this long: the picture has stopped (well past the playout delay). */
         const val STILL_MS = 250L
         private const val STILL_GIVE_UP_MS = 3_000L
+
+        /** A picture further back than this is a new start (not the sender's re-send before its pause point). */
+        private const val REWIND_LIMIT_US = 30_000_000L
+
+        /**
+         * Whether a decoded picture at [mediaUs] is shown, with [onScreenUs] on screen: never one at or before it
+         * (the pictures the sender re-sends after a pause, for the decoder only), unless far back (a new start).
+         */
+        fun shouldShow(mediaUs: Long?, onScreenUs: Long): Boolean =
+            mediaUs == null || onScreenUs < 0 || mediaUs > onScreenUs || mediaUs < onScreenUs - REWIND_LIMIT_US
 
         /** The sender's RTP timestamp is the file's media time at 90 kHz with no offset (H264RtpSender). */
         fun mediaUsOf(rtpTs: Long): Long = (rtpTs and 0xFFFFFFFFL) * 100 / 9

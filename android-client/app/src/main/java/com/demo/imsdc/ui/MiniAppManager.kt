@@ -1886,16 +1886,17 @@ class MiniAppManager(val activity: CallActivity) {
     fun pauseVideo(paused: Boolean) {
         userPausedVideo = paused
         if (!paused && com.demo.imsdc.call.CallHold.active) return // stays paused until the call is resumed
-        applyVideoPause(paused)
+        applyVideoPause(paused, drained = paused)
     }
 
     /**
-     * The stream stops first (before its next sample), then the preview. A pause by the user is then lined up on
-     * the frame the other phone actually stopped on (the page asks it, then calls [alignPreview]); a pause for
-     * hold goes straight to the last frame sent ([seekToSent]). Both resume from there.
+     * The stream stops first (before its next sample), then the preview. A pause by the user: the other phone
+     * shows every picture up to the last one sent ([drained]: it empties its decoder, so the resume starts again
+     * from a keyframe) and the page puts the preview on that same picture ([alignPreview]). A pause for hold goes
+     * straight to the last frame sent ([seekToSent]). Both resume from there.
      */
-    private fun applyVideoPause(paused: Boolean, seekToSent: Boolean = false) {
-        streamer?.let { if (paused) it.pause() else it.resume() }
+    private fun applyVideoPause(paused: Boolean, seekToSent: Boolean = false, drained: Boolean = false) {
+        streamer?.let { if (paused) it.pause(drained) else it.resume() }
         try {
             preview?.let { p ->
                 if (paused) {
@@ -1908,20 +1909,26 @@ class MiniAppManager(val activity: CallActivity) {
     }
 
     /**
-     * Receiver, after the sender's pause: once this phone's picture has stopped (it plays out what it already
-     * had), tells the page the media time of the frame on screen ('videoStill'), for the sender to match.
+     * Receiver, after the sender's pause at [stopUs] (media time of its last picture sent; < 0 = not known):
+     * shows every picture up to it, then tells the page the media time of the frame on screen ('videoStill').
      */
-    fun awaitVideoStill(seq: Int) {
+    fun awaitVideoStill(seq: Int, stopUs: Long = -1L) {
         val r = receiver ?: return
-        r.awaitStill { mediaUs ->
+        r.awaitStill(stopUs) { mediaUs ->
             emitShareEvent("videoStill", JSONObject().put("seq", seq).put("t", mediaUs / 1_000_000.0).toString())
         }
     }
 
+    /** Sender, just paused: media time of the last picture sent (the one the other phone stops on), -1 if none. */
+    fun videoStopUs(): Long = streamer?.lastSentVideoPtsUs ?: -1L
+
+    /** Receiver: the sender resumed (a pause not yet played out here needs no draining any more). */
+    fun videoResumed() { receiver?.cancelStill() }
+
     /**
-     * Sender, paused: puts the preview on [tSec] (the frame the other phone stopped on; < 0 = the last frame
-     * sent), then tells the page ('videoPaused') once the picture is still, so "Đã tạm dừng" never shows over
-     * a moving frame.
+     * Sender, paused: puts the preview on [tSec] (< 0 = the last frame sent, the one the other phone stops on),
+     * then tells the page ('videoPaused', with that frame's media time) once the picture is still, so
+     * "Đã tạm dừng" never shows over a moving frame.
      */
     fun alignPreview(tSec: Double) {
         activity.runOnUiThread {
@@ -1929,6 +1936,7 @@ class MiniAppManager(val activity: CallActivity) {
             val ms = if (tSec >= 0) (tSec * 1000).toLong() else if (sentUs >= 0) sentUs / 1000 else -1L
             val done = {
                 val t = if (ms >= 0) ms / 1000.0 else (streamer?.positionMs() ?: 0L) / 1000.0
+                Log.i(TAG, "Preview paused at ${(t * 1000).toLong()} ms (last sent ${sentUs / 1000} ms)")
                 emitShareEvent("videoPaused", JSONObject().put("t", t).toString())
             }
             val p = preview

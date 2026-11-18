@@ -255,7 +255,7 @@
  *
  * Trong phiên (ADC stream 1000, JSON):
  *   offer{photos:[{id,bytes,thumb}]} · fetch{id} · begin{id,chunks,bytes}
- *   goto{id,seq} · done{id,ok} · skind{kind} · vstart{name,dur} · vpause{paused} · vtime{t}
+ *   goto{id,seq} · done{id,ok} · skind{kind} · vstart{name,dur} · vpause{paused,seq,us} · vtime{t}
  * Ảnh: tối đa 6 trong phiên, vào trước ra trước (mỗi bên tự bỏ ảnh cũ nhất, cùng thứ tự).
  * Byte ảnh: PhotoShareTransport → window.receiveData("PSHARE:<idHash>:<b64>")
  * ═══════════════════════════════════════════════════════════════════ */
@@ -411,11 +411,8 @@ window.shareEvent = function (name, arg) {
     case 'videoPaused': // sender: the preview is still, on the frame the other phone stopped on
       if (state.video && state.video.paused) { state.video.still = true; renderTime(a.t); renderVideoState(); }
       break;
-    case 'videoStill': // receiver: this phone's picture has stopped; tell the sender which frame it is
-      if (state.video && state.video.paused && a.seq === state.video.pauseSeq) {
-        state.video.still = true; renderTime(a.t); renderVideoState();
-        sendJson({ t: 'vframe', v: a.t, seq: a.seq });
-      }
+    case 'videoStill': // receiver: this phone's picture has stopped, on the sender's last picture
+      if (state.video && state.video.paused && a.seq === state.video.pauseSeq) { state.video.still = true; renderTime(a.t); renderVideoState(); }
       break;
     case 'stopped': if (s) { toast('Đã dừng chia sẻ'); endSession(); } break; // nút trên thông báo
     case 'videoEnded': if (s && s.role === 'sender') { call('stopShare'); endSession(); } break;
@@ -714,32 +711,28 @@ function renderVideoState() {
   const b = $('btnPlayPause'); b.innerHTML = v.paused ? ICON.play : ICON.pause; b.title = v.paused ? 'Tiếp tục' : 'Tạm dừng';
 }
 function renderMute() { const b = $('btnMute'); b.innerHTML = state.muted ? ICON.muted : ICON.sound; b.title = state.muted ? 'Bật tiếng' : 'Tắt tiếng'; }
-/* Pausing: the other phone plays out what it already has and reports the frame it stopped on ('vframe');
- * the sender's own picture is then put on that frame. Each side shows "Đã tạm dừng" once its picture is still. */
+/* Pausing: the stream stops after a whole picture and its time goes with 'vpause' (us). The other phone shows
+ * every picture up to that one and stops there; the sender's own picture is put on that same one. Each side
+ * shows "Đã tạm dừng" once its picture is still. */
 $('btnPlayPause').onclick = () => {
   const v = state.video; if (!v) return;
   v.paused = !v.paused; v.still = false; v.pauseSeq = (v.pauseSeq || 0) + 1;
   renderVideoState();
-  call('pauseVideo', v.paused); sendJson({ t: 'vpause', paused: v.paused, seq: v.pauseSeq });
+  call('pauseVideo', v.paused);
+  const us = v.paused && B() && typeof B().videoStopUs === 'function' ? Number(B().videoStopUs()) : -1;
+  sendJson({ t: 'vpause', paused: v.paused, seq: v.pauseSeq, us: us });
   if (!v.paused) return;
-  const seq = v.pauseSeq;
   if (!B() || typeof B().alignPreview !== 'function') { v.still = true; renderVideoState(); return; } // older app
-  setTimeout(() => { // no answer from the other phone (older app): line up on the last frame sent
-    if (state.video === v && v.paused && v.pauseSeq === seq && v.alignedSeq !== seq) { v.alignedSeq = seq; call('alignPreview', -1); }
-  }, 1500);
+  call('alignPreview', -1); // the last picture sent: the one the other phone stops on
 };
-function onVframe(msg) {
-  const v = state.video;
-  if (!v || !v.paused || msg.seq !== v.pauseSeq || v.alignedSeq === msg.seq) return;
-  v.alignedSeq = msg.seq;
-  call('alignPreview', typeof msg.v === 'number' ? msg.v : -1);
-}
 function onRemotePause(msg) {
   const v = state.video; if (!v) return;
   v.paused = !!msg.paused; v.still = false; v.pauseSeq = msg.seq | 0;
   renderVideoState();
-  if (!v.paused) return;
-  if (B() && typeof B().awaitVideoStill === 'function') call('awaitVideoStill', v.pauseSeq);
+  if (!v.paused) { call('videoResumed'); return; }
+  const us = typeof msg.us === 'number' ? msg.us : -1;
+  if (B() && typeof B().awaitVideoStop === 'function') call('awaitVideoStop', JSON.stringify({ seq: v.pauseSeq, us: us }));
+  else if (B() && typeof B().awaitVideoStill === 'function') call('awaitVideoStill', v.pauseSeq);
   else { v.still = true; renderVideoState(); }
 }
 $('btnStop').onclick = () => { call('stopShare'); toast('Đã dừng chia sẻ'); endSession(); };
@@ -758,7 +751,6 @@ window.receiveData = function (dataStr) {
       case 'skind': state.hint = { kind: msg.kind, at: Date.now() }; break;
       case 'vstart': if (state.s && streamed(state.s.kind)) enterVideo({ name: msg.name, dur: msg.dur || 0, t: 0, paused: false }); break;
       case 'vpause': onRemotePause(msg); break;
-      case 'vframe': onVframe(msg); break;
       case 'vtime': if (state.video && state.s && state.s.role === 'receiver') renderTime(msg.v || 0); break;
       case 'done': onDone(msg); break;
       case 'begin': break;

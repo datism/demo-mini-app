@@ -45,6 +45,13 @@ class ContentStreamer(
      */
     @Volatile var lastSentVideoPtsUs = -1L
         private set
+    /** The last video sample sent, in decode order (its presentation time): where a resend after a pause ends. */
+    @Volatile private var lastSentSampleUs = -1L
+    /** Held while one video sample goes out: [pause] waits for it, so no sample is half sent or sent after. */
+    private val sendLock = Object()
+    /** The other phone drained its decoder on this pause: on resume, re-send from the keyframe before it. */
+    @Volatile private var resendOnResume = false
+    @Volatile private var resendPending = false
     private var videoSocket: DatagramSocket? = null
     private var audioSocket: DatagramSocket? = null
     private val threads = mutableListOf<Thread>()
@@ -86,6 +93,8 @@ class ContentStreamer(
         running = true
         paused = false
         lastSentVideoPtsUs = -1L
+        lastSentSampleUs = -1L
+        resendOnResume = false; resendPending = false
         originNs = System.nanoTime()
         videoSocket = bind(localVideoPort)
         audioSocket = bind(localAudioPort)
@@ -96,16 +105,29 @@ class ContentStreamer(
         Log.i(TAG, "Streaming $uri to MF $mfIp (video $mfVideoPort, audio $mfAudioPort)")
     }
 
-    fun pause() {
-        if (!running || paused) return
-        pausedAtNs = System.nanoTime()
-        paused = true
+    /**
+     * Stops before the next sample. When it returns no video sample is going out, so [lastSentVideoPtsUs] is the
+     * last picture the other phone gets. [drained]: the other phone will empty its decoder (a pause by the user),
+     * so the resume starts again from a keyframe ([resume]).
+     */
+    fun pause(drained: Boolean = false) {
+        if (!running) return
+        synchronized(sendLock) {
+            if (drained) resendOnResume = true
+            if (paused) return
+            pausedAtNs = System.nanoTime()
+            paused = true
+        }
+        Log.i(TAG, "Paused after sending video at ${lastSentVideoPtsUs / 1000} ms")
     }
 
     fun resume() {
         if (!running || !paused) return
-        originNs += System.nanoTime() - pausedAtNs
-        paused = false
+        synchronized(sendLock) {
+            originNs += System.nanoTime() - pausedAtNs
+            if (resendOnResume) { resendPending = true; resendOnResume = false }
+            paused = false
+        }
     }
 
     /** Position in the file, in milliseconds. */
@@ -173,7 +195,19 @@ class ContentStreamer(
             var frames = 0
             var lastLogNs = 0L
 
+            // After a pause the other phone's decoder was emptied and restarted: it needs the pictures from the
+            // keyframe before the pause point again. They go out at once (it decodes them without showing them),
+            // up to the last sample sent before the pause; then sending continues on time.
+            var resendUntilUs = -1L
+            var resent = 0
             while (running) {
+                if (resendPending) {
+                    resendPending = false
+                    if (lastSentSampleUs < 0) continue // nothing was sent before the pause
+                    resendUntilUs = lastSentSampleUs
+                    resent = 0
+                    ex.seekTo(lastSentVideoPtsUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                }
                 buf.clear()
                 val n = ex.readSampleData(buf, 0)
                 if (n < 0) break
@@ -182,18 +216,44 @@ class ContentStreamer(
                 val data = ByteArray(n)
                 buf.position(0)
                 buf.get(data, 0, n)
-                waitUntil(ptsUs)
+                if (resendUntilUs >= 0) {
+                    val nals = nalUnits(data)
+                    if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
+                    nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
+                    resent++
+                    if (ptsUs == resendUntilUs || resent >= MAX_RESEND) {
+                        Log.i(TAG, "Resumed: re-sent $resent sample(s) from the keyframe before ${resendUntilUs / 1000} ms")
+                        resendUntilUs = -1L
+                    } else Thread.sleep(2) // a short gap, not one burst
+                    ex.advance()
+                    continue
+                }
+                // Sent only while not paused, as a whole, under [sendLock] (see [pause]).
+                var sent = false
+                var back = false
+                while (running && !sent && !back) {
+                    waitUntil(ptsUs)
+                    if (!running) break
+                    synchronized(sendLock) {
+                        // Resumed after a drained pause: this sample comes after the re-send, not before it.
+                        if (resendPending) back = true
+                        else if (!paused) {
+                            val nals = nalUnits(data)
+                            if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
+                            nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
+                            if (running) { lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs); lastSentSampleUs = ptsUs }
+                            sent = true
+                        }
+                    }
+                }
                 if (!running) break
+                if (back) continue
                 frames++
                 val lateMs = ((System.nanoTime() - originNs) / 1000 - ptsUs) / 1000
                 if (!paused && System.nanoTime() - lastLogNs > 1_000_000_000L) {
                     Log.d(TAG, "video: $frames frames sent, ${lateMs} ms behind the clock")
                     lastLogNs = System.nanoTime()
                 }
-                val nals = nalUnits(data)
-                if (sync) paramSets.forEach { sendNal(it, ptsUs, false) }
-                nals.forEachIndexed { i, nal -> sendNal(nal, ptsUs, i == nals.lastIndex) }
-                if (running) lastSentVideoPtsUs = maxOf(lastSentVideoPtsUs, ptsUs)
                 ex.advance()
             }
         } finally {
@@ -302,6 +362,8 @@ class ContentStreamer(
     }
 
     companion object {
+        /** At most this many samples re-sent after a pause (a keyframe every 10 s at 30 fps). */
+        private const val MAX_RESEND = 300
         private val SUPPORTED_VIDEO = setOf(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC)
 
         /**

@@ -1,7 +1,7 @@
 {
   "appId": "photo-share",
   "appName": "Content Sharing",
-  "version": "2.6.4-content-sharing-grid",
+  "version": "2.6.5-content-sharing-grid",
   "connectionPolicy": "P2P",
   "qosHint": {
     "latencyMs": 200,
