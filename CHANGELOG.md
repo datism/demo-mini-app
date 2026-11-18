@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Callee kept ringing after a quick cancel: when the caller cancelled while the IMS-AS was still setting up the media, the call was loaded back from Redis and the INVITE reached the callee about 5 s later, with no CANCEL to follow. The IMS-AS now deletes the stored call on CANCEL/BYE and only forwards the INVITE while the original call is still live.
+- Callee stuck "in a call" after a crossed cancel: when A cancelled just as B answered, B ignored the CANCEL and stayed in a call nobody was on, so the next call to B was turned away as busy. The IMS-AS now ACKs B's 200 OK and ends B's leg with a BYE.
 - No demo history: the recent-calls list on the home screen no longer adds fake calls to 1001/1002/1003 (it shows "Chưa có cuộc gọi nào" until a real call), and a new 1900 caller starts with no bookings and 0 SkyLotus points instead of two seeded trips and 4800 points.
 - 1900 "Gặp tổng đài viên": Hold is greyed out and does nothing while the agent screen is up (ringing, then "Tổng đài viên không trả lời"); it works again once the booking page is back.
 - Hold on a hotline call (1900, 198): the hold screen no longer flashes and undoes itself. The hold / resume re-INVITE repeats the open app (`a=3gpp-req-app`), so the IMS-AS took it for an app switch and forwarded it toward the hotline number, where no phone answers. The IMS-AS now answers a hotline re-INVITE that asks for no new app itself (200 OK, same media as when the app opened).
