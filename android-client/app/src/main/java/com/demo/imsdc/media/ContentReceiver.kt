@@ -51,29 +51,22 @@ class ContentReceiver(
     /** Media time (the sender's file time) of the last picture handed to the screen, and when. */
     @Volatile private var lastRenderedMediaUs = -1L
     @Volatile private var lastRenderNs = 0L
-    /**
-     * The sender paused: once the picture it stopped on ([drainTargetUs], media time; < 0 = not known) is in the
-     * decoder, or nothing new came for [STILL_MS], the decoder gives out the pictures it still holds.
-     */
-    @Volatile private var drainWanted = false
-    @Volatile private var drainTargetUs = -1L
+    /** The sender resumed: show the pictures kept back since its pause (see decodeLoop). */
+    @Volatile private var releaseKept = false
 
     /**
-     * The sender paused after sending the picture at [stopUs] (media time, < 0 = not known). This phone shows
-     * every picture up to it (the decoder is drained: otherwise it keeps the last few back), then calls
-     * [onStill] (on a background thread) with the media time of the picture on screen, once nothing new has
-     * been shown for [STILL_MS]. After [STILL_GIVE_UP_MS] it answers with whatever is on screen.
+     * The sender paused after the picture at [stopUs] (media time, < 0 = not known). Once nothing new has been
+     * shown for [STILL_MS], calls [onStill] (on a background thread) with the media time of the picture on screen;
+     * after [STILL_GIVE_UP_MS] it answers with whatever is on screen.
      */
     fun awaitStill(stopUs: Long, onStill: (mediaUs: Long) -> Unit) {
-        drainTargetUs = stopUs
-        drainWanted = true
         Thread({
             val deadline = System.nanoTime() + STILL_GIVE_UP_MS * 1_000_000L
             try {
                 while (running && System.nanoTime() < deadline) {
                     Thread.sleep(50)
                     val idleMs = (System.nanoTime() - lastRenderNs) / 1_000_000L
-                    if (!drainWanted && lastRenderedMediaUs >= 0 && idleMs >= STILL_MS) {
+                    if (lastRenderedMediaUs >= 0 && idleMs >= STILL_MS) {
                         Log.i(TAG, "Paused: still on ${lastRenderedMediaUs / 1000} ms (sender stopped at ${stopUs / 1000} ms)")
                         onStill(lastRenderedMediaUs); return@Thread
                     }
@@ -86,8 +79,8 @@ class ContentReceiver(
         }, "content-rx-still").start()
     }
 
-    /** The sender resumed before this phone drained: nothing to drain any more. */
-    fun cancelStill() { drainWanted = false }
+    /** The sender resumed: the pictures kept back at its pause are shown now, on time. */
+    fun resumeKept() { releaseKept = true }
 
     fun start() {
         if (running) return
@@ -157,7 +150,9 @@ class ContentReceiver(
      * the next keyframe, so the picture stays live instead of lagging further.
      */
     /** [arrivalUs]: when its last packet came in, so playout is timed from arrival, not from decoding. */
-    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean, val arrivalUs: Long = System.nanoTime() / 1000)
+    /** [hidden]: sent after the sender's pause point, for the decoder only: kept back until it resumes. */
+    private class Picture(val data: ByteArray, val rtpTs: Long, val key: Boolean, val hidden: Boolean = false,
+                          val arrivalUs: Long = System.nanoTime() / 1000)
     private val pictures = java.util.concurrent.LinkedBlockingQueue<Picture>(PICTURE_QUEUE)
     @Volatile private var sps: ByteArray? = null
     @Volatile private var pps: ByteArray? = null
@@ -175,7 +170,8 @@ class ContentReceiver(
         // Packets can arrive out of order on the way through the MF (seen: 36835 before 36831..36834).
         // They are held here by sequence number and handled in order; a gap is only called a loss once
         // REORDER_WINDOW later packets have arrived without it.
-        val pending = HashMap<Int, ByteArray>()
+        val pending = HashMap<Int, RtpPacket>()
+        var frameHidden = false
         var expected = -1
         var broken = false
         var sawKey = false
@@ -228,8 +224,10 @@ class ContentReceiver(
             }
         }
 
-        fun handle(p: ByteArray) {
+        fun handle(rp: RtpPacket) {
+            val p = rp.data
             val n = p.size
+            if (rp.hidden) frameHidden = true
             val rtpTs = ((p[4].toLong() and 0xFF) shl 24) or ((p[5].toLong() and 0xFF) shl 16) or
                 ((p[6].toLong() and 0xFF) shl 8) or (p[7].toLong() and 0xFF)
             val marker = (p[1].toInt() and 0x80) != 0
@@ -259,6 +257,8 @@ class ContentReceiver(
 
             val picture = frame.toByteArray()
             frame.reset()
+            val hidden = frameHidden
+            frameHidden = false
             val keyframe = hasIdr
             hasIdr = false
             if (broken) {
@@ -270,7 +270,7 @@ class ContentReceiver(
             }
             if (keyframe) sawKey = true
             if (!sawKey) return // decoding can only start at a keyframe
-            val pic = Picture(picture, rtpTs, keyframe)
+            val pic = Picture(picture, rtpTs, keyframe, hidden)
             if (!pictures.offer(pic)) {
                 Log.w(TAG, "Decoder ${PICTURE_QUEUE} pictures behind: skipping to the next keyframe")
                 pictures.clear()
@@ -303,8 +303,8 @@ class ContentReceiver(
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
             if (expected < 0) expected = seq
             if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
-            val (packet, rot) = stripExtension(buf, n)
-            if (rot != null) rotation = rot
+            val packet = stripExtension(buf, n)
+            if (packet.rotation != null) rotation = packet.rotation
             pending[seq] = packet
             drain()
             if (pending.size > REORDER_WINDOW) {
@@ -335,24 +335,41 @@ class ContentReceiver(
         // out reordered).
         val arrivals = LinkedHashMap<Long, Long>()
         val mediaTimes = LinkedHashMap<Long, Long>()
-        // Pause: the decoder was given end-of-stream so it let out every picture it held; it takes no more input
-        // and is restarted on the next picture (the sender resumes from a keyframe).
-        var drained = false
-        var lastQueuedMediaUs = -1L
-        var lastQueuedNs = 0L
+        // Pictures sent after the sender's pause point (hidden): decoded, but kept back (output buffer not
+        // released) until the sender resumes, then shown on time. They pushed the pause picture out of the
+        // decoder, which gives out a picture only when later input arrives.
+        val hiddenPts = HashSet<Long>()
+        class Kept(val index: Int, val mediaUs: Long?)
+        val kept = ArrayList<Kept>()
 
-        /** Shows (or skips) one decoded picture. */
+        fun showKept(c: MediaCodec) {
+            releaseKept = false
+            if (kept.isEmpty()) return
+            val nowUs = System.nanoTime() / 1000
+            val fromUs = lastRenderedMediaUs
+            for (k in kept) {
+                val atUs = keptRenderAtUs(nowUs, PLAYOUT_DELAY_MS * 1000L, fromUs, k.mediaUs)
+                try { c.releaseOutputBuffer(k.index, atUs * 1000) } catch (_: Exception) {}
+                if (k.mediaUs != null) lastRenderedMediaUs = k.mediaUs
+                lastRenderNs = atUs * 1000
+            }
+            Log.i(TAG, "Resumed: showing ${kept.size} picture(s) kept back at the pause")
+            kept.clear()
+        }
+
+        /** Shows one decoded picture, or keeps it back (see [kept]). */
         fun output(c: MediaCodec, oi: Int) {
             val nowUs = System.nanoTime() / 1000
             val arrivalUs = arrivals.remove(info.presentationTimeUs) ?: nowUs
             val mediaUs = mediaTimes.remove(info.presentationTimeUs)
-            val eosOnly = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0 && info.size == 0
-            if (eosOnly || !shouldShow(mediaUs, lastRenderedMediaUs)) {
-                // End-of-stream marker, or a picture at or before the one on screen: the sender re-sent the
-                // pictures from the keyframe before its pause point, only for the decoder.
-                c.releaseOutputBuffer(oi, false)
+            if (hiddenPts.remove(info.presentationTimeUs)) {
+                kept += Kept(oi, mediaUs)
+                if (kept.size > MAX_KEPT) { // never hold the decoder's output buffers for long
+                    try { c.releaseOutputBuffer(kept.removeAt(0).index, false) } catch (_: Exception) {}
+                }
                 return
             }
+            if (kept.isNotEmpty()) showKept(c) // resumed: the sender's next picture came before its message
             val renderAtUs = clock.renderAtUs(info.presentationTimeUs, arrivalUs, nowUs)
             c.releaseOutputBuffer(oi, renderAtUs * 1000)
             if (mediaUs != null) lastRenderedMediaUs = mediaUs
@@ -361,49 +378,16 @@ class ContentReceiver(
         }
 
         while (running) {
-            val c0 = codec
-            if (c0 != null && drainWanted && !drained && held == null && pictures.isEmpty() &&
-                ((drainTargetUs >= 0 && lastQueuedMediaUs >= drainTargetUs) ||
-                    (lastQueuedNs > 0 && System.nanoTime() - lastQueuedNs >= STILL_MS * 1_000_000L))) {
-                try {
-                    val ii = c0.dequeueInputBuffer(20_000)
-                    if (ii >= 0) {
-                        c0.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        drained = true
-                        drainWanted = false
-                        var shown = 0
-                        val deadline = System.nanoTime() + 500_000_000L
-                        while (System.nanoTime() < deadline) {
-                            val oi = c0.dequeueOutputBuffer(info, 10_000)
-                            if (oi >= 0) {
-                                val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                                if (!eos || info.size > 0) shown++
-                                output(c0, oi)
-                                if (eos) break
-                            }
-                        }
-                        Log.i(TAG, "Paused: decoder gave out $shown held picture(s), last ${lastRenderedMediaUs / 1000} ms " +
-                            "(last received ${lastQueuedMediaUs / 1000} ms)")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Drain on pause: ${e.message}")
-                    drainWanted = false
-                }
-                continue
-            }
+            if (releaseKept) codec?.let { showKept(it) } ?: run { releaseKept = false }
             val picture = held ?: pictures.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
             held = null
-            val restart = codec != null && picture != null && drained
-            if (codec != null && (restart || codecRotation != rotation || codecHevc != hevc)) {
-                // Rotation and codec are set when the decoder starts, and a drained decoder takes no more
-                // input: restart it, from the next keyframe.
-                Log.i(TAG, if (restart) "Resumed after pause: restarting the decoder" else
-                    "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
+            if (codec != null && (codecRotation != rotation || codecHevc != hevc)) {
+                // Rotation and codec are set when the decoder starts: restart it, from the next keyframe.
+                Log.i(TAG, "Video rotation $codecRotation° -> $rotation°, hevc $codecHevc -> $hevc: restarting the decoder")
+                kept.clear()
                 try { codec?.stop() } catch (_: Exception) {}
                 try { codec?.release() } catch (_: Exception) {}
                 codec = null
-                drained = false
-                arrivals.clear(); mediaTimes.clear()
             }
             if (codec == null && picture != null && !picture.key) continue
             val c = codec ?: (if (picture != null) startDecoder(rotation)?.also { codecRotation = rotation; codecHevc = hevc } else null)
@@ -422,11 +406,10 @@ class ContentReceiver(
                         c.queueInputBuffer(ii, 0, picture.data.size, ptsBaseUs, 0)
                         arrivals[ptsBaseUs] = picture.arrivalUs
                         if (arrivals.size > 64) arrivals.remove(arrivals.keys.first())
-                        val mediaUs = mediaUsOf(picture.rtpTs)
-                        mediaTimes[ptsBaseUs] = mediaUs
+                        mediaTimes[ptsBaseUs] = mediaUsOf(picture.rtpTs)
                         if (mediaTimes.size > 64) mediaTimes.remove(mediaTimes.keys.first())
-                        lastQueuedMediaUs = mediaUs
-                        lastQueuedNs = System.nanoTime()
+                        if (picture.hidden) hiddenPts += ptsBaseUs else hiddenPts.remove(ptsBaseUs)
+                        if (hiddenPts.size > 64) hiddenPts.clear()
                     } else {
                         held = picture // decoder busy: free its output below, then try again
                         stalls++
@@ -547,15 +530,17 @@ class ContentReceiver(
         const val STILL_MS = 250L
         private const val STILL_GIVE_UP_MS = 3_000L
 
-        /** A picture further back than this is a new start (not the sender's re-send before its pause point). */
-        private const val REWIND_LIMIT_US = 30_000_000L
+        /** At most this many pictures kept back at a pause (each holds one of the decoder's output buffers). */
+        private const val MAX_KEPT = 6
 
         /**
-         * Whether a decoded picture at [mediaUs] is shown, with [onScreenUs] on screen: never one at or before it
-         * (the pictures the sender re-sends after a pause, for the decoder only), unless far back (a new start).
+         * When a picture kept back at the pause is shown, the sender having resumed at [nowUs]: the playout delay
+         * after now, plus how far it is past the pause picture [pausedUs], so they follow at the stream's pace.
          */
-        fun shouldShow(mediaUs: Long?, onScreenUs: Long): Boolean =
-            mediaUs == null || onScreenUs < 0 || mediaUs > onScreenUs || mediaUs < onScreenUs - REWIND_LIMIT_US
+        fun keptRenderAtUs(nowUs: Long, delayUs: Long, pausedUs: Long, mediaUs: Long?): Long {
+            val after = if (mediaUs == null || pausedUs < 0) 0L else (mediaUs - pausedUs).coerceIn(0L, 1_000_000L)
+            return nowUs + delayUs + after
+        }
 
         /** The sender's RTP timestamp is the file's media time at 90 kHz with no offset (H264RtpSender). */
         fun mediaUsOf(rtpTs: Long): Long = (rtpTs and 0xFFFFFFFFL) * 100 / 9
@@ -565,20 +550,21 @@ class ContentReceiver(
 
         /**
          * Returns the packet with a plain 12-byte header (CSRCs and header extension removed, so the payload
-         * starts at byte 12) and the rotation found in its extension, if any.
+         * starts at byte 12), the rotation found in its extension, if any, and its hidden mark.
          */
-        fun stripExtension(buf: ByteArray, n: Int): Pair<ByteArray, Int?> {
+        fun stripExtension(buf: ByteArray, n: Int): RtpPacket {
             val cc = buf[0].toInt() and 0x0F
             val hasExt = (buf[0].toInt() and 0x10) != 0
-            if (cc == 0 && !hasExt) return buf.copyOf(n) to null
+            if (cc == 0 && !hasExt) return RtpPacket(buf.copyOf(n), null, false)
             var off = 12 + 4 * cc
             var rotation: Int? = null
+            var hidden = false
             if (hasExt) {
-                if (off + 4 > n) return buf.copyOf(n) to null
+                if (off + 4 > n) return RtpPacket(buf.copyOf(n), null, false)
                 val profile = ((buf[off].toInt() and 0xFF) shl 8) or (buf[off + 1].toInt() and 0xFF)
                 val words = ((buf[off + 2].toInt() and 0xFF) shl 8) or (buf[off + 3].toInt() and 0xFF)
                 val end = off + 4 + 4 * words
-                if (end > n) return buf.copyOf(n) to null
+                if (end > n) return RtpPacket(buf.copyOf(n), null, false)
                 if (profile == 0xBEDE) { // one-byte elements: id(4) len-1(4) data...
                     var i = off + 4
                     while (i < end) {
@@ -588,6 +574,7 @@ class ContentReceiver(
                         val len = (b and 0x0F) + 1
                         if (id == 15 || i + 1 + len > end) break
                         if (id == H264RtpSender.ROTATION_EXT_ID) rotation = (buf[i + 1].toInt() and 3) * 90
+                        if (id == H264RtpSender.HIDDEN_EXT_ID) hidden = buf[i + 1].toInt() != 0
                         i += 1 + len
                     }
                 }
@@ -597,7 +584,7 @@ class ContentReceiver(
             System.arraycopy(buf, 0, out, 0, 12)
             out[0] = (out[0].toInt() and 0xE0).toByte() // clear X and CC
             System.arraycopy(buf, off, out, 12, n - off)
-            return out to rotation
+            return RtpPacket(out, rotation, hidden)
         }
         /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
         private const val REORDER_WINDOW = 64
@@ -632,3 +619,6 @@ class PlayoutClock(private val delayUs: Long, private val catchUpUs: Long = Cont
         const val LATE_RESET_US = 100_000L
     }
 }
+
+/** A received RTP packet with its header extension read: [data] has a plain 12-byte header. */
+class RtpPacket(val data: ByteArray, val rotation: Int?, val hidden: Boolean)

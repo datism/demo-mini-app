@@ -916,6 +916,8 @@ class MiniAppManager(val activity: CallActivity) {
         appId != HOME_APP && appId != "operator-menu" && appId != "smart-menu" && hotlineApp == null
 
     companion object {
+        /** Half a frame at 30 fps: closer than this to the pause point is on it. */
+        private const val HALF_FRAME_US = 16_000L
         private const val LOAD_CACHE_FALLBACK_MS = 8_000L
         private const val LOAD_RETRY_MS = 10_000L
         private const val LOAD_RETRIES = 2
@@ -1882,21 +1884,69 @@ class MiniAppManager(val activity: CallActivity) {
         else action()
     }
 
-    /** Sender: pause or resume the stream and the local preview together. */
+    /** Sender (older page): pause or resume the stream and the local preview together. */
     fun pauseVideo(paused: Boolean) {
         userPausedVideo = paused
         if (!paused && com.demo.imsdc.call.CallHold.active) return // stays paused until the call is resumed
-        applyVideoPause(paused, drained = paused)
+        applyVideoPause(paused)
+    }
+
+    /** Polls the preview while it plays on to the pause point. */
+    private var previewStopJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Sender: a pause by the user where both phones end on the same picture, and nothing jumps. The pause point
+     * is the later of the picture this phone shows and the last one sent (so nothing goes back): the preview plays
+     * on to it and stops ('videoPaused'), the stream sends up to it and stops ([ContentStreamer.pauseAt]), and
+     * the page tells the other phone ('videoStopAt' -> vpause), which plays on to the same picture.
+     */
+    fun pauseVideoSynced(paused: Boolean) {
+        if (!paused) { previewStopJob?.cancel(); pauseVideo(false); return }
+        userPausedVideo = true
+        if (com.demo.imsdc.call.CallHold.active) { applyVideoPause(true, seekToSent = true); return }
+        activity.runOnUiThread {
+            val s = streamer
+            val p = preview
+            val shownUs = try { p?.currentPosition?.toLong()?.times(1000) } catch (_: Exception) { null } ?: -1L
+            val sentUs = s?.lastSentVideoPtsUs ?: -1L
+            val stopUs = com.demo.imsdc.media.ContentStreamer.pauseStopUs(shownUs, sentUs)
+            Log.i(TAG, "Pause: both stop at ${stopUs / 1000} ms (preview at ${shownUs / 1000} ms, last sent ${sentUs / 1000} ms)")
+            s?.pauseAt(stopUs)
+            emitShareEvent("videoStopAt", JSONObject().put("us", stopUs).toString())
+            val done = {
+                val t = (if (stopUs >= 0) stopUs else (s?.positionMs() ?: 0L) * 1000) / 1_000_000.0
+                emitShareEvent("videoPaused", JSONObject().put("t", t).toString())
+            }
+            if (p == null || stopUs < 0) { done(); return@runOnUiThread }
+            previewStopJob?.cancel()
+            previewStopJob = activity.lifecycleScope.launch {
+                val deadline = System.nanoTime() + 500_000_000L
+                try {
+                    // Play on to the pause point (a few frames at most), then stop there.
+                    while (userPausedVideo && p.isPlaying && p.currentPosition * 1000L < stopUs - HALF_FRAME_US &&
+                        System.nanoTime() < deadline) delay(10)
+                    if (!userPausedVideo) return@launch
+                    p.pause()
+                    val atUs = p.currentPosition * 1000L
+                    if (kotlin.math.abs(atUs - stopUs) > HALF_FRAME_US) {
+                        p.setOnSeekCompleteListener { mp -> mp.setOnSeekCompleteListener(null); if (userPausedVideo) done() }
+                        p.seekTo(stopUs / 1000, android.media.MediaPlayer.SEEK_CLOSEST)
+                    } else done()
+                    Log.i(TAG, "Preview stopped at ${atUs / 1000} ms (pause point ${stopUs / 1000} ms)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Preview stop: ${e.message}")
+                    done()
+                }
+            }
+        }
     }
 
     /**
-     * The stream stops first (before its next sample), then the preview. A pause by the user: the other phone
-     * shows every picture up to the last one sent ([drained]: it empties its decoder, so the resume starts again
-     * from a keyframe) and the page puts the preview on that same picture ([alignPreview]). A pause for hold goes
-     * straight to the last frame sent ([seekToSent]). Both resume from there.
+     * The stream stops first (before its next sample), then the preview. A pause for hold goes straight to the
+     * last frame sent ([seekToSent]). Both resume from there.
      */
-    private fun applyVideoPause(paused: Boolean, seekToSent: Boolean = false, drained: Boolean = false) {
-        streamer?.let { if (paused) it.pause(drained) else it.resume() }
+    private fun applyVideoPause(paused: Boolean, seekToSent: Boolean = false) {
+        streamer?.let { if (paused) it.pause() else it.resume() }
         try {
             preview?.let { p ->
                 if (paused) {
@@ -1919,11 +1969,8 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    /** Sender, just paused: media time of the last picture sent (the one the other phone stops on), -1 if none. */
-    fun videoStopUs(): Long = streamer?.lastSentVideoPtsUs ?: -1L
-
     /** Receiver: the sender resumed (a pause not yet played out here needs no draining any more). */
-    fun videoResumed() { receiver?.cancelStill() }
+    fun videoResumed() { receiver?.resumeKept() }
 
     /**
      * Sender, paused: puts the preview on [tSec] (< 0 = the last frame sent, the one the other phone stops on),
