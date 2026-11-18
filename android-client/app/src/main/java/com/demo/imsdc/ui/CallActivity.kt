@@ -1230,6 +1230,9 @@ class CallActivity : AppCompatActivity() {
                 closeOpenPickers()
                 if (::miniAppManager.isInitialized) miniAppManager.resetShare()
                 stopRingbackTone()
+                // A call that was still ringing here: silence the ringtone now, not at onDestroy, which
+                // Android runs some time after finish() (the cancelled call kept ringing meanwhile).
+                try { ringtone?.stop() } catch (_: Exception) {}
                 // The peer hung up: silence the call now. Media, timer and the call notification used to
                 // keep running until onDestroy, after the "ended" label had shown for 1.5 s.
                 com.demo.imsdc.call.CallService.stop(this@CallActivity)
@@ -1973,10 +1976,14 @@ class CallActivity : AppCompatActivity() {
         agentCallJob?.cancel()
         com.demo.imsdc.call.CallService.stop(this)
         callServiceStarted = false
+        // Read before markCallEnding() clears it: a call the other side has not answered yet is
+        // withdrawn with CANCEL (RFC 3261 9.1), an answered one is ended with BYE.
+        val established = isCallActiveUiShown || sipManager.isCallActive
         sipManager.markCallEnding()
-        Log.i(TAG, "Ending call...")
+        Log.i(TAG, "Ending call (${if (established) "BYE" else "CANCEL"})...")
         IncomingCallNotificationManager.dismiss(this)
         stopRingbackTone()
+        try { ringtone?.stop() } catch (_: Exception) {}
         isDataChannelsOpened = false
         stopCallTimer()
         stopRtpInBackground()
@@ -1986,7 +1993,8 @@ class CallActivity : AppCompatActivity() {
         val cId = callId ?: sipManager.currentCallId
         val fTag = sipManager.currentFromTag
         lifecycleScope.launch(Dispatchers.IO) {
-            sipManager.bye(remoteUser, localIp, overrideCallId = cId, overrideFromTag = fTag)
+            if (established) sipManager.bye(remoteUser, localIp, overrideCallId = cId, overrideFromTag = fTag)
+            else sipManager.cancel(remoteUser, localIp, overrideCallId = cId, overrideFromTag = fTag)
         }
         resetAudio()
         releaseVideoViews()

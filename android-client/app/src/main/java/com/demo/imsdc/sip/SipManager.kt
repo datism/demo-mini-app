@@ -1249,6 +1249,12 @@ class SipManager(
      */
     suspend fun sendOkAnswer(originalInvite: String, sdpAnswer: String) =
         withContext(Dispatchers.IO) {
+            // The caller hung up while we were still setting up the answer: its CANCEL/BYE already reset
+            // the call. Answering now would mark us in a call nobody is on and turn every later call away.
+            if (!sameCall(getHeader(originalInvite, "call-id"), pendingCallId)) {
+                Log.w(TAG, "Not answering ${getHeader(originalInvite, "call-id")}: the call already ended")
+                return@withContext
+            }
             val localIp = getLocalIp()
             lastLocalIp = localIp
             callLocalIp = localIp
