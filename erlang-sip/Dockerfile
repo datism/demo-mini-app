@@ -1,4 +1,4 @@
-FROM erlang:26.2.3 AS builder
+FROM 172.20.1.22/proxy-cache/erlang:26.2.3 AS builder
 
 WORKDIR /app
 
@@ -8,16 +8,25 @@ RUN chmod +x /usr/local/bin/rebar3
 
 COPY . .
 RUN sed -i 's/\r$//' config/vm.args.src
-RUN rebar3 release
+RUN rm -rf _build .rebar3 local_deps/.rebar3 && \
+    mkdir -p _checkouts && \
+    cp -a local_deps/* _checkouts/ && \
+    rm -rf _checkouts/.rebar3
+RUN DIAGNOSTIC=1 DEBUG=1 rebar3 release
 
 # ---
 # Stage 2: Runtime image
 # Sử dụng erlang:26.2.3-slim (cùng nền tảng Debian với builder) để đảm bảo đồng bộ phiên bản GLIBC 100%
 # (Nếu chính sách doanh nghiệp bắt buộc dùng RedHat UBI, bạn cần build Erlang trên UBI để tránh lệch phiên bản GLIBC).
-FROM erlang:26.2.3-slim
-
-RUN apt-get update && apt-get install -y ca-certificates iproute2 && rm -rf /var/lib/apt/lists/*
-
+FROM 172.20.1.22/proxy-cache/erlang:26.2.3-slim
+RUN rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list \
+    && printf 'deb http://172.20.1.22:8081/repository/debian/ bookworm main\n\
+    deb http://172.20.1.22:8081/repository/debian-security/ bookworm-security main\n\
+    deb http://172.20.1.22:8081/repository/debian/ bookworm-updates main\n' \
+       > /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates iproute2 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/_build/default/rel/ims_dc_sip ./
 
