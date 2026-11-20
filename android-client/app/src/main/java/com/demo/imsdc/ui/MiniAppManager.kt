@@ -732,7 +732,21 @@ class MiniAppManager(val activity: CallActivity) {
             // Opening an app on the App line asks the other phone first: stay on the current page until it
             // accepts (sendChange shows the page on 200 OK); a decline or no answer leaves nothing to undo.
             if (sendRemoteTrigger && opensWithPeer(targetId)) {
+                val waiting = peerInviteTarget
+                if (waiting == targetId) {
+                    Log.i(TAG, "launchMiniApp $targetId: already waiting for ${activity.peerName}")
+                    return@launch
+                }
+                if (waiting != null) {
+                    // One app invite at a time: the first one is answered or withdrawn (Hủy) before another goes out.
+                    Log.i(TAG, "launchMiniApp $targetId refused: still waiting for ${activity.peerName} about $waiting")
+                    Toast.makeText(activity, "Đang chờ ${activity.peerName} trả lời lời mời ${appTitle(waiting)}", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 Log.i(TAG, "launchMiniApp $targetId: waiting for ${activity.peerName} to accept before showing it")
+                peerInviteTarget = targetId
+                appInviteCancelled = false
+                waitingDialog = showInviteWaitingSheet(targetId)
                 triggerAppNegotiationReInvite(targetId)
                 return@launch
             }
@@ -1024,16 +1038,92 @@ class MiniAppManager(val activity: CallActivity) {
     @Volatile private var endedByHold = false
     /** How a request waiting for our answer is turned down: 603 by the user, 480 when the call went on hold. */
     @Volatile private var heldDeclineCode = 603
-    @Volatile private var ringingToastShown = false
 
-    /** 180 for one of our Re-INVITEs: if it opens an app, the other phone is asking its user. */
+    /** 1xx for one of our Re-INVITEs: an app invite withdrawn (Hủy) before its CSeq was known is CANCELled now. */
     fun onReInviteProvisional(code: Int, cseq: Int) {
-        if (code != 180 || !awaitingPeerDecision || ringingToastShown || cseq != pending.peek()) return
-        ringingToastShown = true
-        activity.runOnUiThread {
-            Toast.makeText(activity, "Đang chờ ${activity.peerName} đồng ý…", Toast.LENGTH_SHORT).show()
+        if (!awaitingPeerDecision || cseq != pending.peek()) return
+        if (appInviteCancelled && !inviteCancelSent) {
+            inviteCancelSent = true
+            Log.i(TAG, "App invite withdrawn by the user: CANCEL for CSeq $cseq (on $code)")
+            activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cseq) }
         }
     }
+
+    // ── Our app invite, waiting for the other phone's user (the waiting card with Hủy) ──
+    /** The app we asked the other phone to open, while its user decides; null when none. Main thread. */
+    private var peerInviteTarget: String? = null
+    /** The user tapped Hủy (or Back) on the waiting card. */
+    @Volatile private var appInviteCancelled = false
+    @Volatile private var inviteCancelSent = false
+    private var waitingDialog: android.app.Dialog? = null
+
+    /** Hủy / Back on the waiting card: withdraw the invite (CANCEL -> 487), or skip it if not sent yet. */
+    private fun cancelAppInvite() {
+        if (peerInviteTarget == null || appInviteCancelled) return
+        Log.i(TAG, "App invite for $peerInviteTarget withdrawn by the user")
+        appInviteCancelled = true
+        waitingDialog?.dismiss()
+        waitingDialog = null
+        val cs = pending.peek()
+        if (awaitingPeerDecision && cs > 0) {
+            inviteCancelSent = true
+            activity.lifecycleScope.launch(Dispatchers.IO) { activity.sipManager.cancelReInvite(cs) }
+        } // otherwise the offer is skipped (runRequest) or CANCELled on its first 1xx (onReInviteProvisional)
+    }
+
+    /** The invite ended (accepted, declined, no answer, withdrawn, superseded, hold, call ended). Main thread. */
+    private fun endAppInvite() {
+        if (peerInviteTarget == null) return
+        peerInviteTarget = null
+        appInviteCancelled = false
+        inviteCancelSent = false
+        waitingDialog?.dismiss()
+        waitingDialog = null
+    }
+
+    /**
+     * Dark card in the middle of the screen while the other phone's user decides, in the style of the card it
+     * shows. Not touch-modal: End call and Mute below it still work. Caller is on the UI thread.
+     */
+    private fun showInviteWaitingSheet(appId: String): android.app.Dialog {
+        val sheet = android.app.Dialog(activity)
+        sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        sheet.setContentView(R.layout.sheet_app_invite_waiting)
+        sheet.setCancelable(true)               // Back withdraws the invite
+        sheet.setCanceledOnTouchOutside(false)  // a tap elsewhere (e.g. Mute) does not
+        sheet.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            val screenW = activity.resources.displayMetrics.widthPixels
+            setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(android.view.Gravity.CENTER)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.3f)
+            setWindowAnimations(android.R.style.Animation_Dialog)
+        }
+        val name = activity.peerName
+        sheet.findViewById<android.widget.TextView>(R.id.tv_wait_avatar).text =
+            name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        sheet.findViewById<android.widget.TextView>(R.id.tv_wait_name).text = name
+        sheet.findViewById<android.widget.TextView>(R.id.tv_wait_app).text = "Đang chờ đồng ý mở " + appTitle(appId)
+        val note = sheet.findViewById<android.widget.TextView>(R.id.tv_wait_note)
+        var left = (SHARE_DECISION_TIMEOUT_MS / 1000).toInt()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                note.text = "Đang trong cuộc gọi · ${left}s"
+                if (left-- > 0) handler.postDelayed(this, 1000)
+            }
+        }
+        tick.run()
+        sheet.setOnDismissListener { handler.removeCallbacks(tick) }
+        sheet.setOnCancelListener { cancelAppInvite() }
+        sheet.findViewById<View>(R.id.btn_wait_cancel).setOnClickListener { cancelAppInvite() }
+        sheet.show()
+        return sheet
+    }
+
+    private fun appTitle(appId: String): String = listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" ")
 
     @Volatile private var currentRequest: AdcRequest? = null
 
@@ -1049,6 +1139,12 @@ class MiniAppManager(val activity: CallActivity) {
                         return@launch
                     }
                 }
+                // Hủy on the waiting card before the app offer went out: nothing to ask the other phone.
+                if (request.target == peerInviteTarget && appInviteCancelled) {
+                    Log.i(TAG, "App invite for ${request.target} withdrawn before it was sent")
+                    Toast.makeText(activity, "Đã hủy lời mời", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 sendChange(request)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Log.d(TAG, "Re-INVITE coroutine cancelled for ${request.target} (call ended)")
@@ -1056,7 +1152,10 @@ class MiniAppManager(val activity: CallActivity) {
                 Log.e(TAG, "Failed to send Re-INVITE for ${request.target}: ${e.message}")
             } finally {
                 currentRequest = null
-                requests.complete()?.let { runRequest(it) }
+                val next = requests.complete()
+                // Our app invite is over once its request ran, or when a newer request replaced it in the queue.
+                if (peerInviteTarget != null && (request.target == peerInviteTarget || next?.target != peerInviteTarget)) endAppInvite()
+                next?.let { runRequest(it) }
             }
         }
     }
@@ -1085,7 +1184,7 @@ class MiniAppManager(val activity: CallActivity) {
                 Log.i(TAG, "Re-INVITE for ${request.target} (attempt $attempt): offer=$offered confirmed=$confirmed")
                 // Opening an app on the other phone waits for its user (180 ... 200 / 603), not only for its stack.
                 val asksPeer = offered.app != null && offered.app != confirmed?.app
-                awaitingPeerDecision = asksPeer; ringingToastShown = false
+                awaitingPeerDecision = asksPeer
                 val result = try {
                     if (asksPeer) transact(SHARE_ANSWER_TIMEOUT_MS, cancelOnTimeout = true) else transact()
                 } finally { awaitingPeerDecision = false }
@@ -1266,6 +1365,7 @@ class MiniAppManager(val activity: CallActivity) {
     /** Roll back the App slot only. Home ADC and BDC are untouched. */
     private fun rollbackMessage(result: ReInviteOutcome): String = when {
         result is ReInviteOutcome.Failed && result.code == 487 && endedByHold -> { endedByHold = false; "Đã hủy lời mời vì cuộc gọi đang giữ" }
+        result is ReInviteOutcome.Failed && result.code == 487 && appInviteCancelled -> "Đã hủy lời mời"
         result is ReInviteOutcome.Failed && result.code == 480 -> "${activity.peerName} đang giữ cuộc gọi, lời mời đã hủy"
         result is ReInviteOutcome.Failed && result.code == 603 -> "${activity.peerName} đã từ chối mở ứng dụng"
         result is ReInviteOutcome.Failed && result.code == 487 -> "${activity.peerName} không trả lời"
