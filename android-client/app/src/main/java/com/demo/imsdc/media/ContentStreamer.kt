@@ -227,6 +227,8 @@ class ContentStreamer(
             val paramSets = listOf("csd-0", "csd-1").flatMap { parameterSets(fmt, it) }
             val buf = ByteBuffer.allocate(4 * 1024 * 1024)
             val rtp = H264RtpSender(socket, target, mfVideoPort, TAG, hevc)
+            // Lost packets are sent again when the other phone asks (NACK); a file has no keyframe to make on a PLI.
+            rtp.startFeedback()
             // Phones store portrait video as landscape frames plus a rotation tag; the frames go out as stored,
             // so the tag goes with them (RTP header extension) for the other phone to apply.
             val rotation = if (fmt.containsKey("rotation-degrees")) ((fmt.getInteger("rotation-degrees") % 360 + 360) % 360) / 90 * 90 else 0
