@@ -279,7 +279,18 @@ route_pcscf(Msg, FromIP, FromPort, State) ->
                     %% Downlink request to client
                     case lookup_pcscf_contact(ToUser) of
                         {ok, IP2, Port2} ->
-                            forward_sip(Msg, IP2, Port2, State);
+                            case client_connected(IP2, Port2) of
+                                true ->
+                                    forward_sip(Msg, IP2, Port2, State);
+                                false when Method =:= "INVITE" ->
+                                    %% Clients only speak TCP: sending by UDP would lose the INVITE and leave the
+                                    %% caller ringing forever. 480 lets the IMS-AS play "không liên lạc được".
+                                    io_format("[P-CSCF] ❌ Connection to ~s (~s:~p) is gone. Replying 480 Temporarily Unavailable~n", [ToUser, IP2, Port2]),
+                                    Response = sip_parser:build_error_response(Msg, 480, "Temporarily Unavailable"),
+                                    send_sip_response(Response, FromIP, FromPort, State);
+                                false ->
+                                    io_format("[P-CSCF] ⚠️ Connection to ~s (~s:~p) is gone, dropping ~s~n", [ToUser, IP2, Port2, Method])
+                            end;
                         error ->
                             CallID = case sip_parser:get_header(Msg, "call-id") of
                                          undefined -> "";
@@ -290,6 +301,13 @@ route_pcscf(Msg, FromIP, FromPort, State) ->
                             send_sip_response(Response, FromIP, FromPort, State)
                     end
             end
+    end.
+
+%% Whether a client's TCP connection (the one its REGISTER came on) is still open.
+client_connected(IPStr, Port) ->
+    case inet:parse_address(IPStr) of
+        {ok, IP} -> ets:member(tcp_sockets, {IP, Port});
+        _ -> false
     end.
 
 lookup_pcscf_contact(undefined) -> error;
@@ -764,6 +782,7 @@ accept_loop(LSock) ->
     end.
 
 tcp_handler(CSock) ->
+    catch inet:setopts(CSock, [{keepalive, true}]),
     Peer = case inet:peername(CSock) of
         {ok, {PeerIP, PeerPort}} -> 
             ets:insert(tcp_sockets, {{PeerIP, PeerPort}, CSock}),
@@ -774,7 +793,9 @@ tcp_handler(CSock) ->
     if Peer =/= undefined -> ets:delete(tcp_sockets, Peer); true -> ok end.
 
 handle_tcp_data(CSock, Buffer) ->
-    case gen_tcp:recv(CSock, 0, 10000) of
+    %% No read timeout: a sleeping phone sends nothing for minutes (its keep-alive stops in Doze) and an
+    %% INVITE on this open connection is what wakes it. Dead peers are cleared by TCP keepalive instead.
+    case gen_tcp:recv(CSock, 0, infinity) of
         {ok, Data} ->
             NewBuffer = <<Buffer/binary, Data/binary>>,
             process_buffer(CSock, NewBuffer);
