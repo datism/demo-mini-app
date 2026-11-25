@@ -61,12 +61,6 @@
                 android:textSize="12.5sp" />
         </LinearLayout>
 
-        <ProgressBar
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_marginStart="10dp"
-            android:indeterminate="true"
-            android:indeterminateTint="#CCFFFFFF" />
     </LinearLayout>
 
     <TextView

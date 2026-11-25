@@ -395,6 +395,17 @@ class MiniAppManager(val activity: CallActivity) {
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
+    /**
+     * A request card's window: no dim over the screen. A dim layer over the call video (both cameras are live
+     * surfaces) makes the display compose every frame on the GPU, and the video behind lagged while a card was
+     * up. The card is still modal: taps outside it reach nothing behind.
+     */
+    private fun android.view.Window.noDimOverVideo() {
+        clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        setDimAmount(0f)
+    }
+
     /** Chia sẻ menu (full screen, the page asks): my camera and the other person side by side at the top, like Caro (no folding). */
     private fun shareRow(appId: String = activity.currentAppId) = appId == SHARE_APP && cameraRowRequested && isFullScreen(appId)
 
@@ -1083,22 +1094,20 @@ class MiniAppManager(val activity: CallActivity) {
 
     /**
      * Dark card in the middle of the screen while the other phone's user decides, in the style of the card it
-     * shows. Not touch-modal: End call and Mute below it still work. Caller is on the UI thread.
+     * shows. Modal: nothing behind it can be tapped; Hủy or Back withdraws the invite. Caller is on the UI thread.
      */
     private fun showInviteWaitingSheet(appId: String): android.app.Dialog {
         val sheet = android.app.Dialog(activity)
         sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         sheet.setContentView(R.layout.sheet_app_invite_waiting)
         sheet.setCancelable(true)               // Back withdraws the invite
-        sheet.setCanceledOnTouchOutside(false)  // a tap elsewhere (e.g. Mute) does not
+        sheet.setCanceledOnTouchOutside(false)  // a tap outside the card does nothing
         sheet.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
             val screenW = activity.resources.displayMetrics.widthPixels
             setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(android.view.Gravity.CENTER)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setDimAmount(0.3f)
+            noDimOverVideo()
             setWindowAnimations(android.R.style.Animation_Dialog)
         }
         val name = activity.peerName
@@ -1554,14 +1563,47 @@ class MiniAppManager(val activity: CallActivity) {
      * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
      * CANCEL it has already sent the final response (603 / 487) and returns false.
      */
-    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
-        rawMsg, isShare = true,
-        notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
-        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
-        dismiss = { emitShareEvent("cancelled") },
-        // Decided outside the page (the notification's Đồng ý / Từ chối): the page's popup follows (CS_48).
-        decided = { accepted -> emitShareEvent(if (accepted) "answered" else "dismissed") }
-    )
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
+        val notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video"
+        // The page's own popup sits in the WebView, under the native call buttons and pill; the request is asked
+        // with the native card instead (a window above everything), as app requests are. The page still gets
+        // the invite, so it keeps its state, and the card's buttons press the page's own buttons.
+        var sheet: android.app.Dialog? = null
+        var over = false // decided or withdrawn: a card not shown yet must not appear
+        fun close() = activity.runOnUiThread { over = true; sheet?.dismiss(); sheet = null }
+        return try {
+            awaitHeldDecision(
+                rawMsg, isShare = true, notice = notice,
+                ask = {
+                    emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString())
+                    activity.runOnUiThread {
+                        // The page knows the real kind (photo, video, screen, location) from its hint: use its wording.
+                        activity.binding.webviewMiniapp.evaluateJavascript(
+                            "(function(){var t=document.getElementById('inviteTitle');return t?t.textContent:''})()"
+                        ) { result ->
+                            if (over) return@evaluateJavascript
+                            val title = try { org.json.JSONArray("[$result]").optString(0) } catch (_: Exception) { "" }
+                            val at = title.indexOf("muốn")
+                            sheet = showRequestSheet(if (at >= 0) title.substring(at) else notice) { accept -> pressShareButton(accept) }
+                        }
+                    }
+                },
+                dismiss = { emitShareEvent("cancelled"); close() },
+                // Decided outside the page (the notification's Đồng ý / Từ chối): the page's popup follows (CS_48).
+                decided = { accepted -> emitShareEvent(if (accepted) "answered" else "dismissed"); close() }
+            )
+        } finally {
+            close()
+        }
+    }
+
+    /** The card's answer for a share request: the page's own Chấp nhận / Từ chối (its next view), else answer directly. */
+    private fun pressShareButton(accept: Boolean) {
+        val id = if (accept) "btnAccept" else "btnDecline"
+        activity.binding.webviewMiniapp.evaluateJavascript(
+            "(function(){var b=document.getElementById('$id');if(b&&b.onclick){b.onclick();return 1}return 0})()"
+        ) { result -> if (result != "1") answerShare(accept) }
+    }
 
     /**
      * The other phone opens an app (not the emote app): ask our user before 200 OK. A native dialog, since the
@@ -1573,7 +1615,7 @@ class MiniAppManager(val activity: CallActivity) {
             awaitHeldDecision(
                 rawMsg,
                 notice = "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" "),
-                ask = { activity.runOnUiThread { dialog = showAppRequestSheet(appId) } },
+                ask = { activity.runOnUiThread { dialog = showRequestSheet("muốn mở " + appTitle(appId)) { answerShare(it) } } },
                 dismiss = { activity.runOnUiThread { dialog?.dismiss() } }
             )
         } finally {
@@ -1581,8 +1623,11 @@ class MiniAppManager(val activity: CallActivity) {
         }
     }
 
-    /** Dark card in the middle of the screen, in the call screen's style; the buttons answer [answerShare]. Caller is on the UI thread. */
-    private fun showAppRequestSheet(appId: String): android.app.Dialog {
+    /**
+     * Dark card in the middle of the screen, in the call screen's style, asking about [text] ("muốn mở 🎨 Vẽ");
+     * the buttons call [onAnswer]. Caller is on the UI thread.
+     */
+    private fun showRequestSheet(text: String, onAnswer: (accept: Boolean) -> Unit): android.app.Dialog {
         val sheet = android.app.Dialog(activity)
         sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         sheet.setContentView(R.layout.sheet_app_request)
@@ -1593,16 +1638,14 @@ class MiniAppManager(val activity: CallActivity) {
             val screenW = activity.resources.displayMetrics.widthPixels
             setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(android.view.Gravity.CENTER)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setDimAmount(0.45f)
+            noDimOverVideo()
             setWindowAnimations(android.R.style.Animation_Dialog)
         }
         val name = activity.peerName
         sheet.findViewById<android.widget.TextView>(R.id.tv_req_avatar).text =
             name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         sheet.findViewById<android.widget.TextView>(R.id.tv_req_name).text = name
-        sheet.findViewById<android.widget.TextView>(R.id.tv_req_app).text =
-            "muốn mở " + listOfNotNull(appEmoji(appId), appLabel(appId)).joinToString(" ")
+        sheet.findViewById<android.widget.TextView>(R.id.tv_req_app).text = text
         val note = sheet.findViewById<android.widget.TextView>(R.id.tv_req_note)
         var left = (SHARE_DECISION_TIMEOUT_MS / 1000).toInt()
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -1614,8 +1657,8 @@ class MiniAppManager(val activity: CallActivity) {
         }
         tick.run()
         sheet.setOnDismissListener { handler.removeCallbacks(tick) }
-        sheet.findViewById<View>(R.id.btn_req_decline).setOnClickListener { answerShare(false); sheet.dismiss() }
-        sheet.findViewById<View>(R.id.btn_req_accept).setOnClickListener { answerShare(true); sheet.dismiss() }
+        sheet.findViewById<View>(R.id.btn_req_decline).setOnClickListener { sheet.dismiss(); onAnswer(false) }
+        sheet.findViewById<View>(R.id.btn_req_accept).setOnClickListener { sheet.dismiss(); onAnswer(true) }
         sheet.show()
         return sheet
     }
