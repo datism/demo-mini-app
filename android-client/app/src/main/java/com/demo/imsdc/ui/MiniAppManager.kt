@@ -395,6 +395,17 @@ class MiniAppManager(val activity: CallActivity) {
 
     private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
 
+    /**
+     * A request card's window: no dim over the screen. A dim layer over the call video (both cameras are live
+     * surfaces) makes the display compose every frame on the GPU, and the video behind lagged while a card was
+     * up. The card is still modal: taps outside it reach nothing behind.
+     */
+    private fun android.view.Window.noDimOverVideo() {
+        clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        setDimAmount(0f)
+    }
+
     /** Chia sẻ menu (full screen, the page asks): my camera and the other person side by side at the top, like Caro (no folding). */
     private fun shareRow(appId: String = activity.currentAppId) = appId == SHARE_APP && cameraRowRequested && isFullScreen(appId)
 
@@ -1083,22 +1094,20 @@ class MiniAppManager(val activity: CallActivity) {
 
     /**
      * Dark card in the middle of the screen while the other phone's user decides, in the style of the card it
-     * shows. Not touch-modal: End call and Mute below it still work. Caller is on the UI thread.
+     * shows. Modal: nothing behind it can be tapped; Hủy or Back withdraws the invite. Caller is on the UI thread.
      */
     private fun showInviteWaitingSheet(appId: String): android.app.Dialog {
         val sheet = android.app.Dialog(activity)
         sheet.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         sheet.setContentView(R.layout.sheet_app_invite_waiting)
         sheet.setCancelable(true)               // Back withdraws the invite
-        sheet.setCanceledOnTouchOutside(false)  // a tap elsewhere (e.g. Mute) does not
+        sheet.setCanceledOnTouchOutside(false)  // a tap outside the card does nothing
         sheet.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
             val screenW = activity.resources.displayMetrics.widthPixels
             setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(android.view.Gravity.CENTER)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setDimAmount(0.3f)
+            noDimOverVideo()
             setWindowAnimations(android.R.style.Animation_Dialog)
         }
         val name = activity.peerName
@@ -1629,8 +1638,7 @@ class MiniAppManager(val activity: CallActivity) {
             val screenW = activity.resources.displayMetrics.widthPixels
             setLayout(minOf(screenW - dp(48), dp(400)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(android.view.Gravity.CENTER)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setDimAmount(0.45f)
+            noDimOverVideo()
             setWindowAnimations(android.R.style.Animation_Dialog)
         }
         val name = activity.peerName
