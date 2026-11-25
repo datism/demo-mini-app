@@ -1000,8 +1000,14 @@ class CallActivity : AppCompatActivity() {
         binding.localVideoView.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
-                    // Caro shows my camera as a fixed tile next to the other person's video.
-                    if (miniAppManager.fixedTiles()) return@setOnTouchListener false
+                    // Caro shows my camera as a fixed tile next to the other person's video. Reset the drag
+                    // state too: the rest of this gesture still reaches this listener, and a canDrag left over
+                    // from a touch on the call screen would move the tile.
+                    if (miniAppManager.fixedTiles()) {
+                        canDrag = false
+                        isDragging = false
+                        return@setOnTouchListener false
+                    }
                     // Đảm bảo video view luôn ở trên cùng ngay khi bắt đầu chạm,
                     // phòng trường hợp WebView được bringToFront lại sau khi load page.
                     binding.localVideoView.bringToFront()
