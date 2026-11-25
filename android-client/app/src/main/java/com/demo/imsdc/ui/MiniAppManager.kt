@@ -1563,47 +1563,14 @@ class MiniAppManager(val activity: CallActivity) {
      * rings (180), asks the page and waits for the user. Returns true to accept; on a decline, a timeout or a
      * CANCEL it has already sent the final response (603 / 487) and returns false.
      */
-    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean {
-        val notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video"
-        // The page's own popup sits in the WebView, under the native call buttons and pill; the request is asked
-        // with the native card instead (a window above everything), as app requests are. The page still gets
-        // the invite, so it keeps its state, and the card's buttons press the page's own buttons.
-        var sheet: android.app.Dialog? = null
-        var over = false // decided or withdrawn: a card not shown yet must not appear
-        fun close() = activity.runOnUiThread { over = true; sheet?.dismiss(); sheet = null }
-        return try {
-            awaitHeldDecision(
-                rawMsg, isShare = true, notice = notice,
-                ask = {
-                    emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString())
-                    activity.runOnUiThread {
-                        // The page knows the real kind (photo, video, screen, location) from its hint: use its wording.
-                        activity.binding.webviewMiniapp.evaluateJavascript(
-                            "(function(){var t=document.getElementById('inviteTitle');return t?t.textContent:''})()"
-                        ) { result ->
-                            if (over) return@evaluateJavascript
-                            val title = try { org.json.JSONArray("[$result]").optString(0) } catch (_: Exception) { "" }
-                            val at = title.indexOf("muốn")
-                            sheet = showRequestSheet(if (at >= 0) title.substring(at) else notice) { accept -> pressShareButton(accept) }
-                        }
-                    }
-                },
-                dismiss = { emitShareEvent("cancelled"); close() },
-                // Decided outside the page (the notification's Đồng ý / Từ chối): the page's popup follows (CS_48).
-                decided = { accepted -> emitShareEvent(if (accepted) "answered" else "dismissed"); close() }
-            )
-        } finally {
-            close()
-        }
-    }
-
-    /** The card's answer for a share request: the page's own Chấp nhận / Từ chối (its next view), else answer directly. */
-    private fun pressShareButton(accept: Boolean) {
-        val id = if (accept) "btnAccept" else "btnDecline"
-        activity.binding.webviewMiniapp.evaluateJavascript(
-            "(function(){var b=document.getElementById('$id');if(b&&b.onclick){b.onclick();return 1}return 0})()"
-        ) { result -> if (result != "1") answerShare(accept) }
-    }
+    suspend fun awaitShareDecision(rawMsg: String, kind: String): Boolean = awaitHeldDecision(
+        rawMsg, isShare = true,
+        notice = if (kind == "photo") "muốn chia sẻ ảnh" else "muốn chia sẻ video",
+        ask = { emitShareEvent("invite", org.json.JSONObject().put("kind", kind).put("peer", activity.peerName).toString()) },
+        dismiss = { emitShareEvent("cancelled") },
+        // Decided outside the page (the notification's Đồng ý / Từ chối): the page's popup follows (CS_48).
+        decided = { accepted -> emitShareEvent(if (accepted) "answered" else "dismissed") }
+    )
 
     /**
      * The other phone opens an app (not the emote app): ask our user before 200 OK. A native dialog, since the
