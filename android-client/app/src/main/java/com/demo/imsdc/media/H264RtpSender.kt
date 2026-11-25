@@ -94,13 +94,61 @@ class H264RtpSender(
 
     private fun send(header: ByteArray, payload: ByteArray) {
         if (com.demo.imsdc.call.CallHold.active) return // shared content is suspended with the call
-        pace()
         val bytes = ByteArray(header.size + payload.size)
         System.arraycopy(header, 0, bytes, 0, header.size)
         System.arraycopy(payload, 0, bytes, header.size, payload.size)
+        sent.put(((bytes[2].toInt() and 0xFF) shl 8) or (bytes[3].toInt() and 0xFF), bytes)
+        transmit(bytes)
+    }
+
+    /** Paced send; also used for packets sent again, so the two never burst together. */
+    private fun transmit(bytes: ByteArray) = synchronized(sendLock) {
+        pace()
         try { socket.send(DatagramPacket(bytes, bytes.size, to, port)) } catch (e: Exception) {
             if (!closed) Log.w(tag, "RTP send failed: ${e.message}")
         }
+    }
+
+    private val sendLock = Any()
+    /** Packets already sent, for [startFeedback]: a lost one is sent again as it was. */
+    private val sent = SentPackets()
+    @Volatile private var resent = 0
+    @Volatile private var nacked = 0
+
+    /**
+     * Reads what the other phone sends back on this socket (through the MF content relay): a NACK is answered
+     * by sending those packets again, a PLI calls [onKeyframeRequest] (a screen share makes a new keyframe;
+     * a video file cannot). Stops when the socket is closed.
+     */
+    fun startFeedback(onKeyframeRequest: (() -> Unit)? = null) {
+        Thread({
+            val buf = ByteArray(1500)
+            var lastLogNs = System.nanoTime()
+            try { socket.soTimeout = 500 } catch (_: Exception) {}
+            while (!closed && !socket.isClosed) {
+                val pkt = DatagramPacket(buf, buf.size)
+                try { socket.receive(pkt) } catch (_: java.net.SocketTimeoutException) { continue } catch (_: Exception) { break }
+                val n = pkt.length
+                val lost = RtcpFeedback.parseNack(buf, n)
+                if (lost != null) {
+                    nacked += lost.size
+                    for (s in lost) {
+                        if (com.demo.imsdc.call.CallHold.active) break
+                        val p = sent.get(s) ?: continue
+                        transmit(p)
+                        resent++
+                    }
+                } else if (RtcpFeedback.isPli(buf, n)) {
+                    Log.i(tag, "Keyframe asked for by the other phone")
+                    onKeyframeRequest?.invoke()
+                }
+                if (System.nanoTime() - lastLogNs > 5_000_000_000L && nacked > 0) {
+                    Log.i(tag, "Last 5 s: ${nacked} packet(s) asked for again, $resent sent again")
+                    nacked = 0; resent = 0
+                    lastLogNs = System.nanoTime()
+                }
+            }
+        }, "$tag-feedback").apply { isDaemon = true; start() }
     }
 
     companion object {

@@ -110,6 +110,10 @@ class ScreenStreamer(
     private fun outputLoop(enc: MediaCodec) {
         val sock = socket ?: return
         val rtp = H264RtpSender(sock, InetAddress.getByName(mfIp), mfVideoPort, TAG)
+        // Lost packets are sent again when the other phone asks (NACK); a PLI gets a new keyframe at once.
+        rtp.startFeedback {
+            if (running) try { enc.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }) } catch (_: Exception) {}
+        }
         val info = MediaCodec.BufferInfo()
         var config: List<ByteArray> = emptyList() // SPS + PPS, sent again before every keyframe
         var lastKeyNs = System.nanoTime()

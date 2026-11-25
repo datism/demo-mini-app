@@ -10,6 +10,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Process
 import android.util.Log
 import android.view.Surface
@@ -91,6 +92,17 @@ class RtpMediaManager(
     private var videoSendErrors = 0
     @Volatile private var lastKeyframeForcedAt = 0L
     private var videoFramesDecoded = 0
+
+    // "📈 Call video" stats, logged every 5 s, to see where a delay sits (camera/encoder, network, decoder).
+    private val camFramesIn = java.util.concurrent.atomic.AtomicInteger()
+    private val camFramesEncBusy = java.util.concurrent.atomic.AtomicInteger()
+    private var framesEncoded = 0
+    private var lastSendStatsNs = 0L
+    /** When each NALU's picture (by PTS, µs) went into the decoder; guarded by [decoderLock]. */
+    private val decodeInAt = LinkedHashMap<Long, Long>()
+    private var holdSumMs = 0L
+    private var holdMaxMs = 0L
+    private var holdCount = 0
 
     // WebRTC connection tracking
     private var localVideoTrack: VideoTrack? = null
@@ -384,13 +396,30 @@ class RtpMediaManager(
     /** Caller holds [decoderLock]. A fresh decoder can only start from a keyframe: the receiver asks for one. */
     private fun reinitDecoder(surface: Surface): Boolean {
         return try {
-            val decoder = MediaCodec.createDecoderByType("video/avc")
+            var decoder = MediaCodec.createDecoderByType("video/avc")
             val format = MediaFormat.createVideoFormat("video/avc", 480, 640)
-            decoder.configure(format, surface, null, 0)
+            // Output each picture as soon as it is decoded. In the normal mode decoders keep the last few back
+            // until more input arrives: a delay of a few *frames*, which grows to seconds when the other phone's
+            // camera slows down (a warm phone) and never goes away. The call stream has no B-frames (encoder
+            // below), so decode order is display order.
+            var lowLatency = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            if (lowLatency) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            try {
+                decoder.configure(format, surface, null, 0)
+            } catch (e: Exception) {
+                if (!lowLatency) throw e
+                Log.w(TAG, "Decoder rejected low-latency (${e.message}), configuring without it")
+                try { decoder.release() } catch (_: Exception) {}
+                decoder = MediaCodec.createDecoderByType("video/avc")
+                format.removeKey(MediaFormat.KEY_LOW_LATENCY)
+                lowLatency = false
+                decoder.configure(format, surface, null, 0)
+            }
             decoder.start()
             videoDecoder = decoder
+            decodeInAt.clear()
             decoderNeedsKeyframe = true
-            Log.i(TAG, "H.264 Video Decoder initialized on surface")
+            Log.i(TAG, "H.264 Video Decoder ${decoder.name} initialized on surface (low-latency $lowLatency)")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to init video decoder: ${e.message}", e)
@@ -672,8 +701,10 @@ class RtpMediaManager(
         }
     }
 
-    private fun buildEncoderFormat(prepend: Boolean, iFrame: Boolean, color: Int): MediaFormat =
+    private fun buildEncoderFormat(prepend: Boolean, iFrame: Boolean, color: Int, noBFrames: Boolean): MediaFormat =
         MediaFormat.createVideoFormat("video/avc", 480, 640).apply {
+            // Pictures in display order, which the other phone's low-latency decoder needs.
+            if (noBFrames && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
             setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
             setInteger(MediaFormat.KEY_BIT_RATE, 800000) // 800kbps is crisp and smooth
             setInteger(MediaFormat.KEY_FRAME_RATE, 25)
@@ -693,10 +724,10 @@ class RtpMediaManager(
             Triple("semiplanar", false, true) to MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
         )
         var lastError: Exception? = null
-        for ((v, color) in variants) {
+        for ((v, color) in variants) for (noB in listOf(true, false)) {
             try {
-                enc.configure(buildEncoderFormat(v.second, v.third, color), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                Log.i(TAG, "🔬 Encoder ${enc.name} configured with variant '${v.first}' color=$color")
+                enc.configure(buildEncoderFormat(v.second, v.third, color, noB), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                Log.i(TAG, "🔬 Encoder ${enc.name} configured with variant '${v.first}' color=$color no-B-frames=$noB")
                 videoEncoder = enc
                 return
             } catch (e: IllegalArgumentException) {
@@ -772,8 +803,17 @@ class RtpMediaManager(
                                 }
                             }
                             seqNum = packetizeAndSendH264(naluBytes, bufferInfo.presentationTimeUs / 1000, seqNum, ssrc, socket, ipStr, !isConfig)
+                            if (!isConfig) framesEncoded++
                         }
                         encoder.releaseOutputBuffer(outputBufferIndex, false)
+                    }
+                    val now = System.nanoTime()
+                    if (now - lastSendStatsNs > 5_000_000_000L) {
+                        if (lastSendStatsNs != 0L) Log.i(TAG, "📈 Call video out, last 5 s: camera ${camFramesIn.getAndSet(0)} frame(s), " +
+                            "${camFramesEncBusy.getAndSet(0)} skipped (encoder busy), $framesEncoded encoded and sent${if (onHold) " (on hold)" else ""}")
+                        else { camFramesIn.set(0); camFramesEncBusy.set(0) }
+                        framesEncoded = 0
+                        lastSendStatsNs = now
                     }
                 } catch (e: Exception) {
                     if (!isRunning) break
@@ -833,8 +873,9 @@ class RtpMediaManager(
                 val nv12Width = if (rotation == 90 || rotation == 270) outWidth else i420.width
                 val nv12Height = if (rotation == 90 || rotation == 270) outHeight else i420.height
 
+                camFramesIn.incrementAndGet()
                 val inputBufferIndex = encoder.dequeueInputBuffer(5000)
-                if (inputBufferIndex < 0) return@VideoSink
+                if (inputBufferIndex < 0) { camFramesEncBusy.incrementAndGet(); return@VideoSink }
                 pendingInput = inputBufferIndex
                 // COLOR_FormatYUV420Flexible must be filled through the Image API: chroma layout
                 // (planar I420, semi-planar NV12, padded strides) differs per chip, and copying raw
@@ -1201,9 +1242,46 @@ class RtpMediaManager(
             var waitingForKeyframe = false
             var skippedNalus = 0
 
+            // 📈 stats: transit = local clock minus the sender's RTP time; its rise above the lowest seen this
+            // call is delay piled up before the decoder (network or socket backlog).
+            var nalusIn = 0
+            var minTransitMs = Long.MAX_VALUE
+            var transitSum = 0L; var transitMax = 0L; var transitCount = 0
+            var lostAtStats = 0
+            var shownAtStats = videoFramesDecoded
+            var lastRecvStatsNs = System.nanoTime()
+            fun noteTransit(ptsMs: Long) {
+                nalusIn++
+                val transit = android.os.SystemClock.elapsedRealtime() - ptsMs
+                // A new sender clock (or an RTP time wrap) moves it by far more than any real delay: start over.
+                if (minTransitMs == Long.MAX_VALUE || transit < minTransitMs || transit - minTransitMs > 600_000L) minTransitMs = transit
+                val above = transit - minTransitMs
+                transitSum += above; transitCount++; if (above > transitMax) transitMax = above
+            }
+            fun logRecvStats() {
+                val now = System.nanoTime()
+                if (now - lastRecvStatsNs < 5_000_000_000L) return
+                lastRecvStatsNs = now
+                if (nalusIn == 0 && transitCount == 0) return
+                val (holdAvg, holdMax) = synchronized(decoderLock) {
+                    val r = (if (holdCount > 0) holdSumMs / holdCount else -1L) to holdMaxMs
+                    holdSumMs = 0; holdMaxMs = 0; holdCount = 0
+                    r
+                }
+                val shown = videoFramesDecoded - shownAtStats
+                shownAtStats = videoFramesDecoded
+                Log.i(TAG, "📈 Call video in, last 5 s: $nalusIn NALU(s), $shown frame(s) shown, " +
+                    "delay before decoder avg ${if (transitCount > 0) transitSum / transitCount else 0} ms / max $transitMax ms (over the best this call), " +
+                    "decoder hold avg $holdAvg ms / max $holdMax ms, ${lostPackets - lostAtStats} packet(s) lost${if (waitingForKeyframe) ", waiting for a keyframe" else ""}")
+                nalusIn = 0; transitSum = 0; transitMax = 0; transitCount = 0
+                lostAtStats = lostPackets
+            }
+
+
             // After any loss, later frames reference the missing data and decode as smeared
             // blocks. Freeze on the last good picture until the next keyframe (SPS/IDR) instead.
             fun deliver(nalu: ByteArray, ptsMs: Long) {
+                noteTransit(ptsMs)
                 val type = if (nalu.size > 4) nalu[4].toInt() and 0x1F else 0
                 if (waitingForKeyframe) {
                     if (type == 5 || type == 7) {
@@ -1334,6 +1412,7 @@ class RtpMediaManager(
                         drainDecoder()
                         if (held.isNotEmpty() && System.currentTimeMillis() - oldestHeldAt > maxHoldMs) skipGap()
                         requestKeyframeIfFrozen()
+                        logRecvStats()
                         continue
                     }
                     val len = packet.length
@@ -1389,6 +1468,7 @@ class RtpMediaManager(
                         skipGap()
                     }
                     requestKeyframeIfFrozen()
+                    logRecvStats()
                 } catch (e: Exception) {
                     if (!isRunning) break
                 }
@@ -1419,6 +1499,10 @@ class RtpMediaManager(
                     inputBuffer.put(nalu)
                     decoder.queueInputBuffer(inputBufferIndex, 0, nalu.size, ptsMs * 1000, 0)
                     queued = true
+                    if (!decodeInAt.containsKey(ptsMs * 1000)) {
+                        decodeInAt[ptsMs * 1000] = System.nanoTime()
+                        if (decodeInAt.size > 64) decodeInAt.remove(decodeInAt.keys.first())
+                    }
                 }
             }
             drainDecoderLocked(decoder)
@@ -1458,6 +1542,10 @@ class RtpMediaManager(
         val bufferInfo = MediaCodec.BufferInfo()
         var outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)
         while (outputBufferIndex >= 0) {
+            decodeInAt.remove(bufferInfo.presentationTimeUs)?.let { inAt ->
+                val ms = (System.nanoTime() - inAt) / 1_000_000L
+                holdSumMs += ms; holdCount++; if (ms > holdMaxMs) holdMaxMs = ms
+            }
             decoder.releaseOutputBuffer(outputBufferIndex, System.nanoTime())
             videoFramesDecoded++
             if (videoFramesDecoded == 1 || videoFramesDecoded % 300 == 0) {

@@ -55,9 +55,10 @@
   .btn.ghost { border-color: transparent; color: var(--muted); }
 
   /* Sheet mời */
-  .scrim { position: absolute; inset: 0; background: rgba(15,18,22,.38); z-index: 30; display: flex; align-items: flex-end; }
-  .sheet { width: 100%; background: var(--bg); border-radius: 22px 22px 0 0; padding: 10px 18px 22px; display: grid; gap: 14px; }
-  .grab { width: 36px; height: 4px; border-radius: 4px; background: var(--line); justify-self: center; }
+  /* Centred card, not a bottom sheet: the call buttons and the call pill float over the page's bottom edge. */
+  .scrim { position: absolute; inset: 0; background: rgba(15,18,22,.38); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .sheet { width: 100%; max-width: 400px; background: var(--bg); border-radius: 22px; padding: 20px; display: grid; gap: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  .grab { display: none; }
   .sheet h4 { font-size: 16px; font-weight: 600; }
   .sheet .note { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .invite-head { display: flex; gap: 12px; align-items: center; }

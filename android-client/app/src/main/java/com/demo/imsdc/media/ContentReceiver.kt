@@ -161,7 +161,31 @@ class ContentReceiver(
     @Volatile private var hevc = false
     /** For the 5-second log line: packets given up as lost, and times the decoder had no free input buffer. */
     @Volatile private var lostPackets = 0
+    /** Packets asked for again (NACK) and those that then arrived. */
+    @Volatile private var nackedPackets = 0
+    @Volatile private var repairedPackets = 0
+    /** Pictures not decoded because a reference picture before them was lost (frozen until the next keyframe). */
+    @Volatile private var frozenAtLoss = 0
     private var stalls = 0
+    /** SSRC of the shared video (from its packets) and our own, for NACK / PLI. */
+    @Volatile private var mediaSsrc = 0
+    private val ownSsrc = kotlin.random.Random.nextInt()
+    @Volatile private var lastPliNs = 0L
+
+    /** Sends RTCP feedback to the sender, through the MF content relay (the same path as the keepalive). */
+    private fun sendFeedback(bytes: ByteArray) {
+        try { videoSocket?.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(mfIp), mfVideoPort)) } catch (e: Exception) {
+            if (running) Log.w(TAG, "RTCP feedback not sent: ${e.message}")
+        }
+    }
+
+    /** Asks the sender for a keyframe, at most every 300 ms. */
+    private fun sendPli() {
+        val now = System.nanoTime()
+        if (mediaSsrc == 0 || now - lastPliNs < 300_000_000L) return
+        lastPliNs = now
+        sendFeedback(RtcpFeedback.buildPli(ownSsrc, mediaSsrc))
+    }
 
     private fun videoLoop() {
         val socket = videoSocket ?: return
@@ -176,6 +200,12 @@ class ContentReceiver(
         var broken = false
         var sawKey = false
         var hasIdr = false
+        // Whether the picture being put together is referenced by later ones (H.264 nal_ref_idc != 0, H.265 a
+        // reference NAL type). Unknown (no picture NAL header seen) counts as a reference.
+        var sawSlice = false
+        var refSlice = false
+
+        fun noteSlice(ref: Boolean) { sawSlice = true; if (ref) refSlice = true }
 
         fun addNal(nal: ByteArray, off: Int, len: Int) {
             if (len <= 0) return
@@ -187,11 +217,13 @@ class ContentReceiver(
                     34 -> pps = nal.copyOfRange(off, off + len)
                 }
                 if (isHevcKey(type)) hasIdr = true
+                if (type < 32) noteSlice(isHevcReference(type))
             } else {
                 val type = nal[off].toInt() and 0x1F
                 if (type == 7) sps = nal.copyOfRange(off, off + len)
                 if (type == 8) pps = nal.copyOfRange(off, off + len)
                 if (type == 5) hasIdr = true
+                if (type == 1 || type == 5) noteSlice((nal[off].toInt() and 0x60) != 0)
             }
             frame.write(startCode); frame.write(nal, off, len)
         }
@@ -214,6 +246,7 @@ class ContentReceiver(
                     if ((fu and 0x80) != 0) {
                         val type = fu and 0x3F
                         if (isHevcKey(type)) hasIdr = true
+                        if (type < 32) noteSlice(isHevcReference(type))
                         frame.write(startCode)
                         frame.write((p[12].toInt() and 0x81) or (type shl 1))
                         frame.write(p[13].toInt())
@@ -248,6 +281,7 @@ class ContentReceiver(
                     if ((header and 0x80) != 0) {
                         val nalHeader = ((p[12].toInt() and 0xE0) or (header and 0x1F)).toByte()
                         if ((header and 0x1F) == 5) hasIdr = true
+                        if ((header and 0x1F) == 1 || (header and 0x1F) == 5) noteSlice((p[12].toInt() and 0x60) != 0)
                         frame.write(startCode); frame.write(nalHeader.toInt())
                     }
                     frame.write(p, 14, n - 14)
@@ -261,13 +295,22 @@ class ContentReceiver(
             frameHidden = false
             val keyframe = hasIdr
             hasIdr = false
+            val reference = !sawSlice || refSlice
+            sawSlice = false; refSlice = false
             if (broken) {
-                // Drop only the damaged picture. A damaged keyframe leaves nothing to decode against, so
-                // then wait for the next one; otherwise keep going (the decoder conceals the missing bit).
+                // A packet stayed lost even after asking for it again (NACK). Drop the damaged picture. If later
+                // pictures are decoded against it (a reference picture, or a keyframe) they would come out as
+                // blocks and smears until the next keyframe, so freeze on the last good picture until then
+                // instead, and ask for one (a screen share makes it at once; a video file has its own).
                 broken = false
-                if (keyframe) sawKey = false
+                if (keyframe || reference) {
+                    if (sawKey) Log.w(TAG, "Lost part of a ${if (keyframe) "keyframe" else "reference picture"}: freezing until the next keyframe")
+                    sawKey = false
+                    sendPli()
+                }
                 return
             }
+            if (!sawKey && !keyframe) frozenAtLoss++
             if (keyframe) sawKey = true
             if (!sawKey) return // decoding can only start at a keyframe
             val pic = Picture(picture, rtpTs, keyframe, hidden)
@@ -287,9 +330,50 @@ class ContentReceiver(
             }
         }
 
+        // Asking for lost packets again (NACK): when each missing one was first and last asked for.
+        val firstAskedNs = HashMap<Int, Long>()
+        val lastAskedNs = HashMap<Int, Long>()
+
+        /**
+         * The missing packets, oldest first (at most [MAX_NACK_SPAN]). Packets come slightly out of order through
+         * the MF: one is only called missing once [REORDER_SLACK] later ones have arrived, or when nothing has
+         * arrived for a while ([quiet]).
+         */
+        fun missing(quiet: Boolean): List<Int> {
+            if (pending.isEmpty()) return emptyList()
+            val newest = pending.keys.maxOf { (it - expected) and 0xFFFF }
+            val span = (if (quiet) newest else newest - REORDER_SLACK).coerceAtMost(MAX_NACK_SPAN)
+            return (0 until span).map { (expected + it) and 0xFFFF }.filter { it !in pending }
+        }
+
+        /** NACK what is missing and not asked for in the last [NACK_RETRY_MS]; give up on the oldest after [LOSS_WAIT_MS]. */
+        fun checkGaps(quiet: Boolean = false) {
+            if (pending.isEmpty()) { firstAskedNs.clear(); lastAskedNs.clear(); return }
+            val now = System.nanoTime()
+            val ask = missing(quiet).filter { s -> lastAskedNs[s]?.let { now - it > NACK_RETRY_MS * 1_000_000L } ?: true }
+            if (ask.isNotEmpty() && mediaSsrc != 0) {
+                ask.forEach { lastAskedNs[it] = now; firstAskedNs.putIfAbsent(it, now) }
+                nackedPackets += ask.size
+                sendFeedback(RtcpFeedback.buildNack(ownSsrc, mediaSsrc, ask))
+            }
+            val since = firstAskedNs[expected] ?: now
+            if (now - since > LOSS_WAIT_MS * 1_000_000L || pending.size > REORDER_WINDOW) {
+                // Still missing after asking again (or too much held): it is lost. Skip to the oldest one held.
+                val next = pending.keys.minByOrNull { (it - expected) and 0xFFFF }!!
+                val gap = (next - expected) and 0xFFFF
+                Log.w(TAG, "Lost $gap video packet(s) before seq $next")
+                for (i in 0 until gap) { val s = (expected + i) and 0xFFFF; firstAskedNs.remove(s); lastAskedNs.remove(s) }
+                broken = true
+                lostPackets += gap
+                expected = next
+                drain()
+            }
+        }
+
+        socket.soTimeout = GAP_CHECK_MS.toInt() // gaps are also checked while no packet comes
         while (running) {
             val pkt = DatagramPacket(buf, buf.size)
-            socket.receive(pkt)
+            try { socket.receive(pkt) } catch (_: java.net.SocketTimeoutException) { checkGaps(quiet = true); continue }
             val n = pkt.length
             val pt = buf[1].toInt() and 0x7F
             if (n < 13 || (pt != H264RtpSender.PT_H264 && pt != H264RtpSender.PT_H265)) continue
@@ -301,21 +385,16 @@ class ContentReceiver(
                 Log.i(TAG, "Shared video is ${if (hevc) "H.265" else "H.264"}")
             }
             val seq = ((buf[2].toInt() and 0xFF) shl 8) or (buf[3].toInt() and 0xFF)
+            mediaSsrc = ((buf[8].toInt() and 0xFF) shl 24) or ((buf[9].toInt() and 0xFF) shl 16) or
+                ((buf[10].toInt() and 0xFF) shl 8) or (buf[11].toInt() and 0xFF)
             if (expected < 0) expected = seq
             if (((seq - expected) and 0xFFFF) >= 0x8000) continue // older than what was already given up on
+            if (firstAskedNs.remove(seq) != null) { lastAskedNs.remove(seq); repairedPackets++ }
             val packet = stripExtension(buf, n)
             if (packet.rotation != null) rotation = packet.rotation
             pending[seq] = packet
             drain()
-            if (pending.size > REORDER_WINDOW) {
-                // Still missing after a window of later packets: it is lost. Skip to the oldest one held.
-                val next = pending.keys.minByOrNull { (it - expected) and 0xFFFF }!!
-                Log.w(TAG, "Lost ${(next - expected) and 0xFFFF} video packet(s) before seq $next")
-                broken = true
-                lostPackets += (next - expected) and 0xFFFF
-                expected = next
-                drain()
-            }
+            checkGaps()
         }
     }
 
@@ -445,8 +524,10 @@ class ContentReceiver(
                     else if (oi == MediaCodec.INFO_TRY_AGAIN_LATER) break
                 }
                 if (System.nanoTime() - lastStatsNs > 5_000_000_000L) {
-                    if (stalls > 0 || lostPackets > 0) Log.i(TAG, "video last 5 s: $lostPackets packet(s) lost, decoder busy $stalls time(s), ${pictures.size} picture(s) queued")
-                    stalls = 0; lostPackets = 0
+                    if (stalls > 0 || lostPackets > 0 || nackedPackets > 0) Log.i(TAG, "video last 5 s: $nackedPackets packet(s) asked for again, " +
+                        "$repairedPackets repaired, $lostPackets lost, $frozenAtLoss picture(s) frozen after a loss, " +
+                        "decoder busy $stalls time(s), ${pictures.size} picture(s) queued")
+                    stalls = 0; lostPackets = 0; nackedPackets = 0; repairedPackets = 0; frozenAtLoss = 0
                     lastStatsNs = System.nanoTime()
                 }
             } catch (e: Exception) {
@@ -601,8 +682,24 @@ class ContentReceiver(
             System.arraycopy(buf, off, out, 12, n - off)
             return RtpPacket(out, rotation, hidden)
         }
-        /** Packets held while waiting for a late one (about 60 ms of a 10 Mbit/s video). */
-        private const val REORDER_WINDOW = 64
+        /**
+         * At most this many packets held while waiting for a late or asked-again one (about 400 ms of a
+         * 20 Mbit/s video); past it the oldest gap is given up at once.
+         */
+        private const val REORDER_WINDOW = 1024
+        /** A missing packet is asked for again (NACK) this often until it arrives or is given up. */
+        private const val NACK_RETRY_MS = 60L
+        /** A missing packet is given up this long after it was first asked for. */
+        private const val LOSS_WAIT_MS = 200L
+        /** How often gaps are checked while no packet arrives. */
+        private const val GAP_CHECK_MS = 20L
+        /** A gap is only asked about once this many later packets arrived (or the stream went quiet). */
+        private const val REORDER_SLACK = 4
+        /** At most this many packets are asked for in one NACK (the sender keeps the last 2048). */
+        private const val MAX_NACK_SPAN = 512
+
+        /** H.265 picture NAL types that later pictures can reference (the _N types 0..14, even, are not). */
+        fun isHevcReference(type: Int) = !(type <= 14 && type % 2 == 0)
     }
 }
 
