@@ -2125,14 +2125,18 @@ class CallActivity : AppCompatActivity() {
         super.onDestroy()
         // Destroyed without endCall() (the system closed the call screen): still release the other phone below.
         val endedHere = isEndingCall
+        // Android can run onDestroy seconds after finish(). A newer call screen may already hold the next call
+        // (a quick redial after a decline): then the SIP state, callbacks, ringing and call service are its own,
+        // and clearing them here left that call ringing forever on one phone and half-answered on the other.
+        val superseded = activeInstance != null && activeInstance !== this
         agentCallJob?.cancel()
         mediaWatchdog?.cancel()
-        com.demo.imsdc.call.CallService.stop(this)
+        if (!superseded) com.demo.imsdc.call.CallService.stop(this)
         isEndingCall = true
         if (activeInstance === this) {
             activeInstance = null
         }
-        IncomingCallNotificationManager.dismiss(this)
+        if (!superseded) IncomingCallNotificationManager.dismiss(this)
         stopRingbackTone()
         // Stop ringtone if still playing
         try { ringtone?.stop() } catch (_: Exception) {}
@@ -2149,10 +2153,14 @@ class CallActivity : AppCompatActivity() {
         dcManager.photoShare?.cleanup(this)
         imsDcSdk.onCallEnded()
         // Ensure remote peer is released if call was in progress or ringing
-        if (!endedHere && (callId != null || SipManager.shared?.currentCallId != null)) {
+        // Only this screen's own call: one that already got its final answer (603, 486...) or was replaced by
+        // a newer call is left alone (a CANCEL here also reset the newer call's SIP state).
+        val smCallId = SipManager.shared?.currentCallId
+        val ownCall = callId == null || (smCallId != null && smCallId.removePrefix("b2b_") == callId!!.removePrefix("b2b_"))
+        if (!endedHere && !superseded && ownCall && smCallId != null) {
             val rUser = remoteUser
             val lIp = localIp
-            val cId = callId ?: SipManager.shared?.currentCallId
+            val cId = callId ?: smCallId
             val fTag = SipManager.shared?.currentFromTag
             val established = isCallActiveUiShown || (this::sipManager.isInitialized && sipManager.isCallActive)
             SipManager.shared?.let { sm ->
@@ -2170,22 +2178,11 @@ class CallActivity : AppCompatActivity() {
         resetAudio()
         releaseVideoViews()
         // NOTE: Redundant sipManager.resetCallState() removed to prevent wiping pendingCallId before sm.bye/sm.cancel sends packet
-        sipManager.onInviteResponse = null
-        sipManager.onCallEnded = null
-        sipManager.onIpChangedDuringCall = null
-        sipManager.onAckWithSdp = null
-        // Incoming calls go back to standby (this screen's handler dies with it); MainActivity takes over on resume.
-        com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
-        sipManager.onReInviteReceived = null
-        sipManager.onRemoteHoldChanged = null
-        com.demo.imsdc.call.CallHold.active = false
+        if (!superseded) releaseSharedCallState()
         if (::dcManager.isInitialized) dcManager.dropHeld()
         holdLayer?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
         holdLayer = null
-        sipManager.onReInviteFailed = null
-        sipManager.onHeldReInviteCancelled = null
         if (::miniAppManager.isInitialized) { miniAppManager.resetShare(); miniAppManager.resetRequests() }
-        sipManager.onReInviteResponse = null
         try {
             (binding.webviewMiniapp.parent as? android.view.ViewGroup)?.removeView(binding.webviewMiniapp)
             binding.webviewMiniapp.stopLoading()
@@ -2199,6 +2196,23 @@ class CallActivity : AppCompatActivity() {
             Log.w(TAG, "Error destroying WebView: ${e.message}")
         }
         webRtcManager.close()
+    }
+
+    /** The SIP callbacks, standby handler and hold flag; left to a newer call screen when one has taken over. */
+    private fun releaseSharedCallState() {
+        if (!::sipManager.isInitialized) return
+        sipManager.onInviteResponse = null
+        sipManager.onCallEnded = null
+        sipManager.onIpChangedDuringCall = null
+        sipManager.onAckWithSdp = null
+        // Incoming calls go back to standby (this screen's handler dies with it); MainActivity takes over on resume.
+        com.demo.imsdc.call.StandbyService.installIncomingHandler(applicationContext, sipManager)
+        sipManager.onReInviteReceived = null
+        sipManager.onRemoteHoldChanged = null
+        com.demo.imsdc.call.CallHold.active = false
+        sipManager.onReInviteFailed = null
+        sipManager.onHeldReInviteCancelled = null
+        sipManager.onReInviteResponse = null
     }
 
     private fun releaseVideoViews() {
