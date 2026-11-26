@@ -229,7 +229,8 @@ object IncomingCallNotificationManager {
 
         pendingNotification = notification
         // The app on screen opens the call screen itself (below): no heads-up over it.
-        if (appInForeground()) {
+        val foreground = appInForeground()
+        if (foreground) {
             Log.i(TAG, "App in the foreground: incoming call shown in the app, no notification")
         } else {
             val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -237,12 +238,19 @@ object IncomingCallNotificationManager {
             Log.i(TAG, "✅ Full-Screen Notification posted for incoming call")
         }
 
-        // 7. Thử khởi chạy trực tiếp Activity nếu hệ điều hành cho phép
-        try {
-            appContext.startActivity(callIntent)
-            Log.i(TAG, "Direct startActivity() invoked with NEW_TASK")
-        } catch (e: Exception) {
-            Log.w(TAG, "Direct startActivity from background constrained: ${e.message} (Full-Screen Intent will handle it)")
+        // 7. Open the call screen directly only while the app is on screen. From the background Android blocks the
+        // start but still parks a call screen with THIS call's details in the app's task: "Trả lời" on a later
+        // call then brought that screen up with the old call, which closed itself while the new call rang on.
+        // In the background the full-screen intent and the notification's buttons open the call screen.
+        if (foreground) {
+            try {
+                appContext.startActivity(callIntent)
+                Log.i(TAG, "Direct startActivity() invoked with NEW_TASK")
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct startActivity failed: ${e.message} (Full-Screen Intent will handle it)")
+            }
+        } else {
+            Log.i(TAG, "App in the background: call screen left to the full-screen intent / notification")
         }
     }
 

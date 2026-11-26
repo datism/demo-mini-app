@@ -2100,7 +2100,11 @@ class CallActivity : AppCompatActivity() {
         if (activeInstance === this) {
             activeInstance = null
         }
-        if (!superseded) IncomingCallNotificationManager.dismiss(this)
+        // A screen for an old call must not silence a different call that is ringing now.
+        val otherRinging = SipManager.shared?.currentCallId?.let { cur ->
+            callId != null && cur.removePrefix("b2b_") != callId!!.removePrefix("b2b_")
+        } ?: false
+        if (!superseded && !otherRinging) IncomingCallNotificationManager.dismiss(this)
         stopRingbackTone()
         // Stop ringtone if still playing
         try { ringtone?.stop() } catch (_: Exception) {}
