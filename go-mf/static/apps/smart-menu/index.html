@@ -1,672 +1,421 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Tổng Đài 198 - Smart Customer Service</title>
-  <style>
-    :root {
-      --primary: #38bdf8;
-      --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
-      --card-bg: rgba(15, 23, 42, 0.94);
-      --card-border: rgba(255, 255, 255, 0.16);
-      --text-main: #f8fafc;
-      --text-muted: rgba(248, 250, 252, 0.7);
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Tổng đài 198 – Tự phục vụ</title>
+<style>
+  :root {
+    --ground: #F6F7F9; --card: #FFFFFF; --ink: #111827; --ink-2: #374151; --muted: #4B5563;
+    --line: #E5E7EB; --line-2: #F3F4F6; --field: #D1D5DB;
+    --accent: #D9480F; --accent-soft: #FFF4ED; --accent-ink: #9A3412;
+    --ok: #15803D; --ok-soft: #DCFCE7;
+    --head: "Space Grotesk", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; min-height: 100%; background: var(--ground); }
+  body { font-family: var(--body); color: var(--ink); font-size: 14px; }
+  button, input, textarea { font-family: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; opacity: .55; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
+  .screen { display: none; min-height: 100vh; flex-direction: column; }
+  .screen.on { display: flex; }
+  .main { flex: 1; padding-bottom: 16px; }
+  .pad { padding: 0 20px; }
 
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: transparent;
-      height: 100vh;
-      width: 100vw;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      user-select: none;
-      -webkit-user-select: none;
-    }
+  .brand { display: flex; align-items: baseline; gap: 8px; padding: 18px 20px 0; }
+  .brand b { font-family: var(--head); font-size: 28px; font-weight: 700; letter-spacing: -.03em; color: var(--accent); }
+  .brand span { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .hello { padding: 22px 20px 0; display: flex; flex-direction: column; gap: 4px; }
+  .hello span { font-size: 14px; color: var(--muted); }
+  h1 { margin: 0; font-family: var(--head); font-weight: 600; letter-spacing: -.02em; }
+  .hello h1 { font-size: 28px; line-height: 1.15; }
 
-    .smart-menu-container {
-      width: 92%;
-      max-width: 380px;
-      max-height: 80vh;
-      background: var(--card-bg);
-      backdrop-filter: blur(28px);
-      -webkit-backdrop-filter: blur(28px);
-      border: 1px solid var(--card-border);
-      border-radius: 24px;
-      padding: 14px 14px 16px 14px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; }
+  .stats { margin: 18px 20px 0; padding: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .stat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .stat small { font-size: 12px; color: var(--muted); }
+  .stat b { font-family: var(--head); font-size: 24px; font-weight: 600; white-space: nowrap; }
+  .stat b em { font-style: normal; font-size: 15px; }
+  .bar { height: 6px; border-radius: 999px; background: var(--line-2); margin-top: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); width: 0; transition: width .3s; }
+  .sk { display: inline-block; height: 24px; width: 110px; border-radius: 8px; background: linear-gradient(90deg, #EEF0F3, #F8F9FA, #EEF0F3); background-size: 200% 100%; animation: sk 1.2s infinite linear; }
+  .sk.s { height: 12px; width: 80px; }
+  @keyframes sk { to { background-position: -200% 0; } }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.96) translateY(8px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
-    }
+  .label { padding: 22px 20px 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .rows { margin: 0 20px; display: flex; flex-direction: column; overflow: hidden; }
+  .row { min-height: 76px; padding: 0 16px; display: flex; align-items: center; gap: 14px; border: 0; background: none; text-align: left; width: 100%; border-bottom: 1px solid var(--line-2); }
+  .row:last-child { border-bottom: 0; }
+  .row:active { background: var(--ground); }
+  .ico { width: 44px; height: 44px; flex: none; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+  .row .t { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .row .t b { font-size: 15px; font-weight: 600; }
+  .row .t span { font-size: 13px; color: var(--muted); }
+  .foot-note { padding: 20px; font-size: 12px; color: var(--muted); text-align: center; }
 
-    /* Header */
-    .header-box {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-    }
+  .top { display: flex; align-items: center; gap: 4px; padding: 14px 20px 0 8px; }
+  .top h1 { font-size: 22px; flex: 1; }
+  .back { width: 44px; height: 44px; border: 0; background: none; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
 
-    .header-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 2px 8px;
-      background: rgba(56, 189, 248, 0.18);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      border-radius: 14px;
-      font-size: 9.5px;
-      font-weight: 700;
-      color: #38bdf8;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
+  .pkgs { display: flex; flex-direction: column; gap: 10px; }
+  .pkg { padding: 16px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); display: flex; align-items: center; gap: 14px; cursor: pointer; }
+  .pkg.sel { border: 2px solid var(--accent); padding: 15px; }
+  .pkg input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .pkg .t { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .pkg .t b { font-size: 15px; font-weight: 600; }
+  .pkg .t span { font-size: 13px; color: var(--muted); }
+  .pkg .p { font-family: var(--head); font-size: 18px; font-weight: 600; white-space: nowrap; }
+  .tag { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); font-size: 11px; font-weight: 600; vertical-align: 1px; }
 
-    .header-badge .dot {
-      width: 5px;
-      height: 5px;
-      background: #10b981;
-      border-radius: 50%;
-      box-shadow: 0 0 6px #10b981;
-      animation: pulseDot 2s infinite;
-    }
+  .total { margin: 20px 20px 0; padding: 18px; display: flex; flex-direction: column; gap: 4px; }
+  .total span { font-size: 13px; color: var(--muted); }
+  .total b { font-family: var(--head); font-size: 32px; font-weight: 600; letter-spacing: -.02em; }
+  .amounts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .amt { height: 48px; border-radius: 12px; border: 1px solid var(--field); background: var(--card); font-size: 14px; font-weight: 600; }
+  .amt.sel { border: 2px solid var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+  .hint { padding: 10px 20px 0; font-size: 13px; color: var(--muted); }
 
-    @keyframes pulseDot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.8); }
-    }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--field); background: var(--card); font-size: 13px; }
+  .chip.sel { border-color: var(--ink); background: var(--ink); color: #fff; font-weight: 600; }
+  .field { padding: 20px 20px 0; display: flex; flex-direction: column; gap: 8px; }
+  .field label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .field label em { font-style: normal; font-weight: 400; color: var(--muted); }
+  .field input, .field textarea { border-radius: 12px; border: 1px solid var(--field); background: var(--card); font-size: 14px; padding: 0 14px; width: 100%; }
+  .field input { height: 48px; }
+  .field textarea { padding: 12px 14px; resize: none; }
+  .reports { margin: 0 20px; display: flex; flex-direction: column; gap: 8px; }
+  .report { padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-radius: 16px; }
+  .report .t { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .report .t b { font-size: 14px; font-weight: 600; }
+  .report .t span { font-size: 12px; color: var(--muted); }
+  .st { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--accent-soft); color: var(--accent-ink); }
+  .st.done { background: var(--ok-soft); color: #166534; }
 
-    h1 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 800;
-      background: var(--primary-gradient);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      letter-spacing: -0.3px;
-    }
+  .ok-hero { padding: 48px 24px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+  .ok-hero .ring { width: 88px; height: 88px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: flex; align-items: center; justify-content: center; }
+  .ok-hero h1 { font-size: 28px; }
+  .ok-hero p { margin: 0; font-size: 15px; color: var(--muted); line-height: 1.5; }
+  .receipt { margin: 28px 20px 0; padding: 6px 18px; display: flex; flex-direction: column; }
+  .receipt div { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line-2); font-size: 14px; }
+  .receipt div:last-child { border-bottom: 0; }
+  .receipt span { color: var(--muted); }
+  .receipt b { font-weight: 600; text-align: right; }
 
-    .subtitle {
-      margin: 0;
-      font-size: 10.5px;
-      color: var(--text-muted);
-      line-height: 1.2;
-    }
+  .foot { position: sticky; bottom: 0; padding: 14px 20px 20px; background: var(--card); border-top: 1px solid var(--line); }
+  .foot.plain { background: none; border-top: 0; }
+  .cta { width: 100%; height: 52px; border: 0; border-radius: 14px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 600; }
 
-    /* Action Grid */
-    .action-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .action-card {
-      display: flex;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.07);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 14px;
-      padding: 8px 12px;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-      text-align: left;
-      position: relative;
-    }
-
-    .action-card:hover {
-      background: rgba(255, 255, 255, 0.14);
-      border-color: rgba(255, 255, 255, 0.3);
-      transform: translateY(-1px);
-    }
-
-    .action-card:active {
-      transform: scale(0.98);
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .action-icon {
-      font-size: 20px;
-      margin-right: 10px;
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
-    }
-
-    .icon-agent { background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.35)); }
-    .icon-video { background: linear-gradient(135deg, rgba(236, 72, 153, 0.35), rgba(244, 63, 94, 0.35)); }
-    .icon-time  { background: linear-gradient(135deg, rgba(245, 158, 11, 0.35), rgba(217, 119, 6, 0.35)); }
-
-    .action-details {
-      flex-grow: 1;
-    }
-
-    .action-title {
-      font-size: 13.5px;
-      font-weight: 700;
-      color: var(--text-main);
-      margin-bottom: 1px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .action-desc {
-      font-size: 10px;
-      color: var(--text-muted);
-      line-height: 1.2;
-    }
-
-    .action-arrow {
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.35);
-      margin-left: 6px;
-    }
-
-    /* Response / Live Status Panel */
-    .response-panel {
-      background: rgba(0, 0, 0, 0.55);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      border-radius: 14px;
-      padding: 10px 12px;
-      text-align: left;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-height: 68px;
-    }
-
-    .response-header {
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #38bdf8;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .response-content {
-      font-size: 12px;
-      font-weight: 600;
-      color: #ffffff;
-      line-height: 1.35;
-      word-break: break-word;
-    }
-
-    /* Waveform Animation */
-    .waveform-box {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 3px;
-      height: 18px;
-      margin-top: 2px;
-    }
-
-    .waveform-box.active {
-      display: flex;
-    }
-
-    .wave-bar {
-      width: 3px;
-      height: 5px;
-      background: #38bdf8;
-      border-radius: 2px;
-      animation: waveAnim 0.7s ease-in-out infinite alternate;
-    }
-
-    .wave-bar:nth-child(2) { animation-delay: 0.15s; height: 12px; background: #818cf8; }
-    .wave-bar:nth-child(3) { animation-delay: 0.3s; height: 18px; background: #c084fc; }
-    .wave-bar:nth-child(4) { animation-delay: 0.1s; height: 13px; background: #ec4899; }
-    .wave-bar:nth-child(5) { animation-delay: 0.25s; height: 7px; background: #38bdf8; }
-
-    @keyframes waveAnim {
-      0% { height: 4px; }
-      100% { height: 18px; }
-    }
-
-    /* Video Player Modal (Full Phone Screen Responsive) */
-    .video-modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(3, 7, 18, 0.95);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      z-index: 1000;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 16px 12px;
-      animation: fadeIn 0.25s ease;
-    }
-
-    .video-modal.open {
-      display: flex;
-    }
-
-    .video-wrapper {
-      position: relative;
-      width: 100%;
-      max-width: 440px;
-      background: #090d16;
-      border-radius: 24px;
-      overflow: hidden;
-      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.95), 0 0 35px rgba(236, 72, 153, 0.25);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      display: flex;
-      flex-direction: column;
-      animation: modalPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    @keyframes modalPop {
-      0% { transform: scale(0.92); opacity: 0; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-
-    .video-modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      background: rgba(255, 255, 255, 0.04);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    .video-modal-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      font-weight: 700;
-      color: #f1f5f9;
-      letter-spacing: 0.2px;
-    }
-
-    .video-quality-tag {
-      font-size: 9.5px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #ec4899, #8b5cf6);
-      color: #ffffff;
-    }
-
-    .video-close-btn {
-      position: static;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: #cbd5e1;
-      font-size: 15px;
-      font-weight: bold;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .video-close-btn:hover, .video-close-btn:active {
-      background: rgba(239, 68, 68, 0.8);
-      color: white;
-      transform: scale(1.05);
-    }
-
-    .video-container-inner {
-      position: relative;
-      width: 100%;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    video {
-      width: 100%;
-      height: auto;
-      max-height: 65vh;
-      display: block;
-      background: #000;
-      object-fit: contain;
-    }
-
-    .video-modal-footer {
-      padding: 10px 16px;
-      background: rgba(255, 255, 255, 0.03);
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 10.5px;
-      color: #94a3b8;
-    }
-
-    /* Footer / Back Button */
-    .btn-back {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      padding: 6px 12px;
-      color: #94a3b8;
-      font-size: 10.5px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-    }
-
-    .btn-back:hover {
-      background: rgba(255, 255, 255, 0.15);
-      color: #ffffff;
-    }
-  </style>
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 96px; padding: 12px 14px; border-radius: 14px; background: var(--ink); color: #fff; font-size: 14px; display: none; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(17, 24, 39, .18); z-index: 10; }
+  #toast.on { display: flex; }
+  #toast span { flex: 1; }
+  #toast button { border: 0; background: none; color: #FDBA74; font-weight: 600; font-size: 14px; padding: 6px 4px; }
+</style>
 </head>
 <body>
 
-  <div class="smart-menu-container">
-    <!-- Header -->
-    <div class="header-box">
-      <div class="header-badge">
-        <span class="dot"></span>
-        <span>Tổng đài 198 (5G DC)</span>
-      </div>
-      <h1>CSKH Thông Minh</h1>
-      <p class="subtitle">Tương tác trực tiếp với tổng đài qua 5G Data Channel</p>
+<!-- Home -->
+<section class="screen on" id="s-home">
+  <div class="main">
+    <div class="brand"><b>198</b><span>Dịch vụ tự phục vụ</span></div>
+    <div class="hello">
+      <span id="h-msisdn"><i class="sk s"></i></span>
+      <h1>Bạn muốn làm gì hôm nay?</h1>
     </div>
-
-    <!-- 3 Core Action Cards -->
-    <div class="action-grid">
-      <!-- 1. Gặp tổng đài viên -->
-      <div id="btn-agent" class="action-card" onclick="requestAgentGreeting()">
-        <div class="action-icon icon-agent">🎧</div>
-        <div class="action-details">
-          <div class="action-title">Gặp tổng đài viên</div>
-          <div class="action-desc">Lời chào tự động & giọng nói hỗ trợ</div>
-        </div>
-        <div class="action-arrow">›</div>
+    <div class="card stats">
+      <div class="stat">
+        <small>Tài khoản chính</small>
+        <b id="h-balance"><i class="sk"></i></b>
+        <small id="h-expiry"><i class="sk s"></i></small>
       </div>
-
-      <!-- 2. Video hoạt hình vui nhộn -->
-      <div id="btn-video" class="action-card" onclick="requestVideoPlayback()">
-        <div class="action-icon icon-video">🍿</div>
-        <div class="action-details">
-          <div class="action-title">Video hoạt hình vui nhộn</div>
-          <div class="action-desc">Phát video hoạt hình giải trí vui nhộn</div>
-        </div>
-        <div class="action-arrow">›</div>
-      </div>
-
-      <!-- 3. Thời gian hệ thống -->
-      <div id="btn-time" class="action-card" onclick="requestSystemTime()">
-        <div class="action-icon icon-time">⏰</div>
-        <div class="action-details">
-          <div class="action-title">Thời gian hệ thống</div>
-          <div class="action-desc">Truy vấn giờ thực từ máy chủ DCAS</div>
-        </div>
-        <div class="action-arrow">›</div>
+      <div class="stat">
+        <small>Data còn lại</small>
+        <b id="h-data"><i class="sk"></i></b>
+        <div class="bar"><i id="h-bar"></i></div>
       </div>
     </div>
-
-    <!-- Live Response / Status Panel -->
-    <div class="response-panel">
-      <div class="response-header">
-        <span>Phản hồi từ Tổng đài DCAS</span>
-        <span id="resp-status" style="color: #10b981;">ADC Sẵn sàng</span>
-      </div>
-      <div id="resp-text" class="response-content">
-        Chào mừng bạn đến với Tổng đài 198. Vui lòng chọn dịch vụ phía trên.
-      </div>
-      <div id="waveform" class="waveform-box">
-        <div class="wave-bar"></div>
-        <div class="wave-bar"></div>
-        <div class="wave-bar"></div>
-        <div class="wave-bar"></div>
-        <div class="wave-bar"></div>
-      </div>
-    </div>
-
-    <!-- Refresh / Reset 198 Menu -->
-    <div>
-      <button class="btn-back" onclick="resetSmartMenu()">
-        <span>🔄</span>
-        <span>Làm mới Menu Tổng đài 198</span>
+    <div class="label">Dịch vụ</div>
+    <div class="card rows">
+      <button class="row" data-go="packages">
+        <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><path d="M12 20h.01"/></svg></span>
+        <span class="t"><b>Gói cước &amp; data</b><span id="h-pkg">Đăng ký, gia hạn gói</span></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+      <button class="row" data-go="bill">
+        <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></span>
+        <span class="t"><b>Cước &amp; thanh toán</b><span>Tra cước, nạp tiền</span></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+      <button class="row" data-go="network">
+        <span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
+        <span class="t"><b>Báo sự cố mạng</b><span>Gửi phản ánh về sóng, data</span></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
       </button>
     </div>
   </div>
+  <div class="foot-note">Mọi thao tác được xử lý ngay trong cuộc gọi · không cần chờ máy</div>
+</section>
 
-  <!-- HTML5 Video Player Modal (Phone Screen Optimized) -->
-  <div id="videoModal" class="video-modal" onclick="closeVideoModal()">
-    <div class="video-wrapper" onclick="event.stopPropagation()">
-      <div class="video-modal-header">
-        <div class="video-modal-title">
-          <span>🍿 Video Hoạt hình Hài hước</span>
-          <span class="video-quality-tag">1080p HD</span>
-        </div>
-        <button class="video-close-btn" onclick="closeVideoModal()" title="Đóng video">✕</button>
-      </div>
-      <div class="video-container-inner">
-        <video id="hotlineVideo" controls playsinline preload="auto">
-          <source src="cartoon_video.mp4" type="video/mp4">
-          <source src="sample_video.mp4" type="video/mp4">
-          Trình duyệt không hỗ trợ phát video.
-        </video>
-      </div>
-      <div class="video-modal-footer">
-        <span>🎬 Hoạt hình giải trí • 5G Data Channel</span>
-        <span style="color: #ec4899; font-weight: 600;">Tổng đài 198</span>
-      </div>
-    </div>
+<!-- Packages -->
+<section class="screen" id="s-packages">
+  <div class="main">
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Gói cước &amp; data</h1></div>
+    <div class="label">Chọn gói muốn đăng ký</div>
+    <div class="pad pkgs" id="p-list"></div>
+    <div class="hint" id="p-after"></div>
   </div>
+  <div class="foot"><button class="cta" id="pkg-submit" data-act>Chọn một gói</button></div>
+</section>
 
-  <!-- Audio Element for Agent Greeting Voice -->
-  <audio id="agentAudio" src="agent_greeting.mp3" preload="auto"></audio>
+<!-- Success -->
+<section class="screen" id="s-success">
+  <div class="main">
+    <div class="ok-hero">
+      <div class="ring"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h1 id="ok-title"></h1>
+      <p id="ok-text"></p>
+    </div>
+    <div class="card receipt" id="ok-rows"></div>
+  </div>
+  <div class="foot plain"><button class="cta" id="done-btn">Làm việc khác</button></div>
+</section>
 
-  <script>
-    const sampleVideos = [
-      "cartoon_video.mp4",
-      "sample_video.mp4"
-    ];
+<!-- Bill -->
+<section class="screen" id="s-bill">
+  <div class="main">
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Cước &amp; thanh toán</h1></div>
+    <div class="card total"><span id="b-month">Cước tháng này (tạm tính)</span><b id="b-total">–</b></div>
+    <div class="label">Chọn số tiền nạp</div>
+    <div class="pad amounts" id="b-amounts">
+      <button class="amt" data-amt="50000">50.000đ</button>
+      <button class="amt sel" data-amt="100000">100.000đ</button>
+      <button class="amt" data-amt="200000">200.000đ</button>
+    </div>
+    <div class="hint" id="b-balance"></div>
+  </div>
+  <div class="foot"><button class="cta" id="topup-submit" data-act>Nạp 100.000đ</button></div>
+</section>
 
-    function sendAdcMessage(payload) {
-      const jsonStr = JSON.stringify(payload);
-      console.log("[SmartMenu] Sending via ADC:", jsonStr);
-      
-      let sent = false;
-      if (window.AndroidBridge && typeof window.AndroidBridge.sendData === 'function') {
-        window.AndroidBridge.sendData(jsonStr);
-        sent = true;
-      } else if (window.AndroidBridge && typeof window.AndroidBridge.send === 'function') {
-        window.AndroidBridge.send(1000, jsonStr);
-        sent = true;
-      } else if (window.IMSDataChannelBridge && typeof window.IMSDataChannelBridge.send === 'function') {
-        window.IMSDataChannelBridge.send(1000, jsonStr);
-        sent = true;
-      }
-      
-      // Immediate local rendering to ensure responsive visual feedback
-      handleLocalAction(payload);
+<!-- Network -->
+<section class="screen" id="s-network">
+  <div class="main">
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Báo sự cố mạng</h1></div>
+    <div class="label">Bạn gặp vấn đề gì?</div>
+    <div class="pad chips" id="n-issues">
+      <button class="chip" data-issue="Data chậm">Data chậm</button>
+      <button class="chip" data-issue="Mất sóng">Mất sóng</button>
+      <button class="chip" data-issue="Rớt cuộc gọi">Rớt cuộc gọi</button>
+      <button class="chip" data-issue="Không gửi được SMS">Không gửi được SMS</button>
+    </div>
+    <div class="field">
+      <label for="where">Địa điểm gặp sự cố</label>
+      <input id="where" maxlength="120" autocomplete="off" placeholder="VD: 12 Trần Thái Tông, Cầu Giấy, Hà Nội">
+    </div>
+    <div class="field">
+      <label for="note">Mô tả thêm <em>(không bắt buộc)</em></label>
+      <textarea id="note" rows="3" maxlength="300" placeholder="VD: Từ sáng nay vào mạng rất chậm"></textarea>
+    </div>
+    <div class="label">Phản ánh trước đó</div>
+    <div class="reports" id="n-reports"></div>
+  </div>
+  <div class="foot"><button class="cta" id="report-submit" data-act disabled>Gửi phản ánh</button></div>
+</section>
+
+<div id="toast" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-link" hidden>Nạp tiền</button></div>
+
+<script>
+(function () {
+  "use strict";
+  var TIMEOUT_MS = 8000;
+  var state = { screen: "home", account: null, packages: [], reports: [], pkg: null, amount: 100000, issue: null, pending: null };
+  var timer = null, toastTimer = null;
+
+  function $(id) { return document.getElementById(id); }
+  function vnd(n) { return String(n || 0).replace(/\B(?=(\d{3})+(?!\d))/g, ".") + "đ"; }
+  function gb(mb) { var v = Math.round(mb / 100) / 10; return String(v).replace(".", ","); }
+  function phone(m) {
+    if (!m || m === "guest") return "Khách";
+    var d = String(m).replace(/\D/g, "");
+    return d.length === 10 ? d.slice(0, 4) + " " + d.slice(4, 7) + " " + d.slice(7) : m;
+  }
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+
+  // ---- transport ----
+  function send(payload) {
+    payload.service = "smart-menu";
+    var json = JSON.stringify(payload);
+    var b = window.AndroidBridge, d = window.IMSDataChannelBridge;
+    try {
+      if (b && typeof b.sendData === "function") b.sendData(json);
+      else if (b && typeof b.send === "function") b.send(1000, json);
+      else if (d && typeof d.send === "function") d.send(1000, json);
+      else console.log("[198] no bridge:", json);
+    } catch (e) { console.log("[198] send failed", e); }
+  }
+
+  function request(payload) {
+    if (state.pending) return;
+    state.pending = payload.action;
+    renderBusy();
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      state.pending = null;
+      renderBusy();
+      toast("Không nhận được phản hồi, thử lại");
+    }, TIMEOUT_MS);
+    send(payload);
+  }
+
+  function onMessage(raw) {
+    var msg = raw;
+    if (typeof raw === "string") { try { msg = JSON.parse(raw); } catch (e) { return; } }
+    if (!msg || msg.service !== "smart-menu") return;
+    if (msg.action === state.pending) { state.pending = null; clearTimeout(timer); }
+    if (msg.account) state.account = msg.account;
+    if (msg.packages) state.packages = msg.packages;
+    if (msg.reports) state.reports = msg.reports;
+
+    if (msg.status === "error") {
+      if (msg.code === "insufficient_balance") toast(msg.message || "Số dư không đủ, vui lòng nạp thêm", "Nạp tiền", function () { go("bill"); });
+      else toast(msg.message || "Có lỗi xảy ra, thử lại");
+    } else if ((msg.action === "subscribe" || msg.action === "topup") && msg.receipt) {
+      showSuccess(msg);
+    } else if (msg.action === "report") {
+      state.issue = null; $("where").value = ""; $("note").value = "";
+      toast("Đã gửi phản ánh #" + msg.ticket);
     }
+    render();
+  }
+  window.receiveData = onMessage;
+  window.onDataChannelMessage = onMessage;
 
-    // 1. Gặp tổng đài viên
-    function requestAgentGreeting() {
-      sendAdcMessage({ service: "smart-menu", action: "agent" });
+  // ---- screens ----
+  function go(name) {
+    state.screen = name;
+    hideToast();
+    var all = document.querySelectorAll(".screen");
+    for (var i = 0; i < all.length; i++) all[i].classList.toggle("on", all[i].id === "s-" + name);
+    window.scrollTo(0, 0);
+    render();
+  }
+
+  function showSuccess(msg) {
+    $("ok-title").textContent = msg.receipt.title;
+    var a = state.account || {};
+    $("ok-text").textContent = msg.action === "subscribe"
+      ? "Gói " + a.package + " đã được kích hoạt cho thuê bao " + phone(a.msisdn) + ". Bạn có thể dùng ngay."
+      : "Tài khoản chính của thuê bao " + phone(a.msisdn) + " đã được cộng tiền.";
+    $("ok-rows").innerHTML = (msg.receipt.rows || []).map(function (r) {
+      return "<div><span>" + esc(r.label) + "</span><b>" + esc(r.value) + "</b></div>";
+    }).join("");
+    state.pkg = null;
+    go("success");
+  }
+
+  function render() {
+    var a = state.account;
+    if (a) {
+      $("h-msisdn").textContent = "Thuê bao " + phone(a.msisdn);
+      $("h-balance").textContent = vnd(a.balance);
+      $("h-expiry").textContent = "HSD " + a.expiry;
+      $("h-data").innerHTML = gb(a.data_left_mb) + " <em>/ " + gb(a.data_total_mb) + " GB</em>";
+      $("h-bar").style.width = (a.data_total_mb ? Math.max(0, Math.min(100, a.data_left_mb / a.data_total_mb * 100)) : 0) + "%";
+      $("h-pkg").textContent = "Đang dùng " + a.package;
+      $("b-month").textContent = "Cước tháng " + a.bill_month + " (tạm tính)";
+      $("b-total").textContent = vnd(a.bill_total);
+      $("b-balance").textContent = "Số dư hiện tại: " + vnd(a.balance) + " · sau khi nạp: " + vnd(a.balance + state.amount);
     }
+    // packages
+    $("p-list").innerHTML = state.packages.map(function (p) {
+      var cur = a && a.package === p.code;
+      return '<label class="pkg' + (state.pkg === p.code ? " sel" : "") + '" data-pkg="' + esc(p.code) + '">' +
+        '<input type="radio" name="pkg"' + (state.pkg === p.code ? " checked" : "") + '>' +
+        '<span class="t"><b>' + esc(p.code) + (cur ? '<span class="tag">Đang dùng</span>' : "") + '</b><span>' + esc(p.desc) + "</span></span>" +
+        '<span class="p">' + vnd(p.price) + "</span></label>";
+    }).join("");
+    var sel = state.packages.filter(function (p) { return p.code === state.pkg; })[0];
+    $("pkg-submit").textContent = sel ? "Đăng ký " + sel.code + " · " + vnd(sel.price) : "Chọn một gói";
+    $("p-after").textContent = sel && a ? (sel.price > a.balance
+      ? "Số dư " + vnd(a.balance) + " không đủ cho gói này."
+      : "Số dư sau: " + vnd(a.balance - sel.price)) : "";
+    // bill
+    var amts = document.querySelectorAll("[data-amt]");
+    for (var i = 0; i < amts.length; i++) amts[i].classList.toggle("sel", +amts[i].getAttribute("data-amt") === state.amount);
+    $("topup-submit").textContent = "Nạp " + vnd(state.amount);
+    // network
+    var chips = document.querySelectorAll("[data-issue]");
+    for (var j = 0; j < chips.length; j++) chips[j].classList.toggle("sel", chips[j].getAttribute("data-issue") === state.issue);
+    $("n-reports").innerHTML = state.reports.length ? state.reports.map(function (r) {
+      var done = r.status === "Đã xong";
+      return '<div class="card report"><div class="t"><b>#' + esc(r.ticket) + " · " + esc(r.issue) + '</b><span>Gửi ' + esc(r.sent) + "</span></div>" +
+        '<span class="st' + (done ? " done" : "") + '">' + esc(r.status) + "</span></div>";
+    }).join("") : '<div class="hint" style="padding:0">Chưa có phản ánh nào.</div>';
+    renderBusy();
+  }
 
-    // 2. Xem video hoạt hình vui nhộn
-    function requestVideoPlayback() {
-      sendAdcMessage({ service: "smart-menu", action: "video" });
-    }
+  function renderBusy() {
+    var busy = !!state.pending;
+    $("pkg-submit").disabled = busy || !state.pkg;
+    $("topup-submit").disabled = busy || !state.account;
+    $("report-submit").disabled = busy || !state.issue || !$("where").value.trim();
+    $("pkg-submit").setAttribute("aria-busy", busy);
+  }
 
-    // 3. Thời gian hệ thống
-    function requestSystemTime() {
-      sendAdcMessage({ service: "smart-menu", action: "time" });
-    }
+  function toast(text, linkLabel, onLink) {
+    $("toast-text").textContent = text;
+    var l = $("toast-link");
+    l.hidden = !linkLabel;
+    l.textContent = linkLabel || "";
+    l.onclick = onLink || null;
+    $("toast").classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 4000);
+  }
+  function hideToast() { $("toast").classList.remove("on"); }
 
-    // Handle local action response
-    function handleLocalAction(payload) {
-      if (payload.action === "agent") {
-        const greeting = "Xin chào quý khách! Tôi là tổng đài viên chăm sóc khách hàng 198. Tôi có thể hỗ trợ gì cho quý khách ạ?";
-        setResponseText(greeting, "#38bdf8");
-        playAgentVoice(greeting, "agent_greeting.mp3");
-      } else if (payload.action === "video") {
-        const randomUrl = sampleVideos[Math.floor(Math.random() * sampleVideos.length)];
-        setResponseText("Đang phát video hoạt hình vui nhộn...", "#ec4899");
-        openVideoModal(randomUrl);
-      } else if (payload.action === "time") {
-        const now = new Date();
-        const timeStr = "Thời gian hệ thống: " + now.toLocaleTimeString('vi-VN') + " - " + now.toLocaleDateString('vi-VN') + " (GMT+7)";
-        setResponseText(timeStr, "#f59e0b");
-      }
-    }
+  // ---- events ----
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-go],.back,[data-pkg],[data-amt],[data-issue]");
+    if (!t) return;
+    if (t.hasAttribute("data-go")) go(t.getAttribute("data-go"));
+    else if (t.classList.contains("back")) go("home");
+    else if (t.hasAttribute("data-pkg")) { e.preventDefault(); state.pkg = t.getAttribute("data-pkg"); render(); }
+    else if (t.hasAttribute("data-amt")) { state.amount = +t.getAttribute("data-amt"); render(); }
+    else if (t.hasAttribute("data-issue")) { state.issue = t.getAttribute("data-issue"); render(); }
+  });
+  $("where").addEventListener("input", renderBusy);
+  $("pkg-submit").addEventListener("click", function () { if (state.pkg) request({ action: "subscribe", code: state.pkg }); });
+  $("topup-submit").addEventListener("click", function () { request({ action: "topup", amount: state.amount }); });
+  $("report-submit").addEventListener("click", function () {
+    request({ action: "report", issue: state.issue, location: $("where").value.trim(), note: $("note").value.trim() });
+  });
+  $("done-btn").addEventListener("click", function () { go("home"); loadProfile(); });
 
-    function onDataReceived(data) {
-      console.log("[SmartMenu] onDataReceived:", data);
-      let parsed = data;
-      if (typeof data === 'string') {
-        try { parsed = JSON.parse(data); } catch (e) { parsed = { response: data }; }
-      }
-      const respText = parsed.response || parsed.greeting || parsed.time || JSON.stringify(parsed);
-      const action = parsed.action || "";
+  var profileTimer = null;
+  function loadProfile() {
+    // profile is a read: it never blocks the action buttons. If the very first
+    // one gets no answer, offer a retry instead of leaving the skeleton up.
+    send({ action: "profile" });
+    clearTimeout(profileTimer);
+    profileTimer = setTimeout(function () {
+      if (!state.account) toast("Không nhận được phản hồi, thử lại", "Thử lại", function () { hideToast(); loadProfile(); });
+    }, TIMEOUT_MS);
+  }
 
-      if (action === "agent" || (parsed.response && parsed.response.includes("Xin chào"))) {
-        const greeting = parsed.greeting || parsed.response || "Xin chào quý khách! Tôi là tổng đài viên chăm sóc khách hàng 198. Tôi có thể hỗ trợ gì cho quý khách ạ?";
-        const audioUrl = parsed.audioUrl || "agent_greeting.mp3";
-        setResponseText(greeting, "#38bdf8");
-        playAgentVoice(greeting, audioUrl);
-      } else if (action === "video" || parsed.videoUrl) {
-        setResponseText(parsed.response || "Đang phát video hoạt hình vui nhộn...", "#ec4899");
-        const videoUrl = parsed.videoUrl || sampleVideos[Math.floor(Math.random() * sampleVideos.length)];
-        openVideoModal(videoUrl);
-      } else if (action === "time" || parsed.time) {
-        const timeStr = parsed.time || parsed.response;
-        setResponseText(timeStr, "#f59e0b");
-      } else {
-        setResponseText(respText, "#38bdf8");
-      }
-    }
+  window.resetSmartMenu = function () {
+    state.pending = null; clearTimeout(timer);
+    state.pkg = null; state.issue = null; state.amount = 100000;
+    go("home");
+    loadProfile();
+  };
 
-    window.receiveData = function(jsonStr) { onDataReceived(jsonStr); };
-    window.onDataChannelMessage = function(jsonStr) { onDataReceived(jsonStr); };
-
-    function playAgentVoice(text, audioUrl) {
-      const wave = document.getElementById("waveform");
-      wave.classList.add("active");
-
-      // 1. Native Android Bridge MediaPlayer call
-      try {
-        if (window.AndroidBridge && typeof window.AndroidBridge.playAgentAudio === 'function') {
-          window.AndroidBridge.playAgentAudio();
-        }
-      } catch (e) {
-        console.log("Native AndroidBridge playAgentAudio error:", e);
-      }
-
-      // 2. HTML5 Audio Element playback
-      const audio = document.getElementById("agentAudio");
-      if (audio) {
-        if (audioUrl) {
-          audio.src = audioUrl;
-        }
-        audio.currentTime = 0;
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log("HTML5 audio playback started");
-          }).catch(err => {
-            console.log("HTML5 audio play error:", err);
-          });
-        }
-        audio.onended = () => wave.classList.remove("active");
-        audio.onerror = () => wave.classList.remove("active");
-      }
-
-      // 3. Fallback Web Speech Synthesis if available
-      if ('speechSynthesis' in window && !audio) {
-        try {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = "vi-VN";
-          utterance.rate = 1.0;
-          utterance.pitch = 1.0;
-          utterance.onend = () => wave.classList.remove("active");
-          utterance.onerror = () => wave.classList.remove("active");
-          window.speechSynthesis.speak(utterance);
-        } catch (e) {
-          console.log("SpeechSynthesis error:", e);
-        }
-      }
-
-      setTimeout(() => wave.classList.remove("active"), 5000);
-    }
-
-    function openVideoModal(url) {
-      const modal = document.getElementById("videoModal");
-      const video = document.getElementById("hotlineVideo");
-      video.src = url;
-      modal.classList.add("open");
-      video.play().catch(e => console.log("Autoplay:", e));
-    }
-
-    function closeVideoModal() {
-      const modal = document.getElementById("videoModal");
-      const video = document.getElementById("hotlineVideo");
-      video.pause();
-      video.currentTime = 0;
-      modal.classList.remove("open");
-    }
-
-    function setResponseText(text, statusColor = "#38bdf8") {
-      const el = document.getElementById("resp-text");
-      const statusEl = document.getElementById("resp-status");
-      el.innerText = text;
-      if (statusColor) statusEl.style.color = statusColor;
-    }
-
-    function resetSmartMenu() {
-      closeVideoModal();
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      const wave = document.getElementById("waveform");
-      if (wave) wave.classList.remove("active");
-      setResponseText("Chào mừng bạn đến với Tổng đài 198. Vui lòng chọn dịch vụ phía trên.", "#10b981");
-      const statusEl = document.getElementById("resp-status");
-      if (statusEl) statusEl.innerText = "ADC Sẵn sàng";
-    }
-
-    function goBackToMenu() {
-      resetSmartMenu();
-    }
-  </script>
+  render();
+  loadProfile();
+})();
+</script>
 </body>
 </html>
