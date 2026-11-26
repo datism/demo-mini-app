@@ -319,11 +319,11 @@ class MiniAppManager(val activity: CallActivity) {
         WebView.setWebContentsDebuggingEnabled(true)
     }
 
-    // Flight-booking is a full-height sheet with its own header and call timer, so it gets
-    // the whole screen above the call controls instead of the band under the top bar.
+    // The hotline pages (1900 flight-booking, 198 smart-menu) are full-height sheets with their own header,
+    // so they get the whole screen above the call controls instead of the band under the top bar.
     private fun applyWebViewBounds(appId: String) {
         val b = activity.binding
-        val full = appId == "flight-booking"
+        val full = appId == "flight-booking" || appId == "smart-menu"
         val fullScreen = isFullScreen(appId)
         val lp = b.webviewMiniapp.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
         val unset = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
@@ -808,7 +808,7 @@ class MiniAppManager(val activity: CallActivity) {
             } else if (targetId == CallActivity.HOME_APP) {
                 activity.binding.tvCallStatus.text = "\ud83d\udfe2 Cu\u1ed9c g\u1ecdi tho\u1ea1i & video \u0111\u00e3 k\u1ebft n\u1ed1i"
             } else if (targetId == "smart-menu") {
-                activity.binding.tvCallStatus.text = "📞 Tổng đài 198 (Smart Menu)"
+                activity.binding.tvCallStatus.text = "📞 Tổng đài 198 · Tự phục vụ"
             } else if (targetId == "caro") {
                 activity.binding.tvCallStatus.text = "♟️ Game Cờ Caro (5G New Calling)"
             } else if (targetId == "flight-booking") {

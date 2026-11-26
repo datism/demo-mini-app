@@ -1,7 +1,7 @@
 {
   "appId": "smart-menu",
   "appName": "Tổng đài 198 – Tự phục vụ",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "connectionPolicy": "P2A",
   "qosHint": {
     "latencyMs": 100,

@@ -26,7 +26,12 @@
   .main { flex: 1; padding-bottom: 16px; }
   .pad { padding: 0 20px; }
 
-  .brand { display: flex; align-items: baseline; gap: 8px; padding: 18px 20px 0; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 18px 20px 0; }
+  .brand .name { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; white-space: nowrap; }
+  .live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: #16A34A; }
+  .live.pill { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+  .ok-top { display: flex; justify-content: flex-end; padding: 18px 20px 0; }
   .brand b { font-family: var(--head); font-size: 28px; font-weight: 700; letter-spacing: -.03em; color: var(--accent); }
   .brand span { font-size: 13px; font-weight: 500; color: var(--muted); }
   .hello { padding: 22px 20px 0; display: flex; flex-direction: column; gap: 4px; }
@@ -96,7 +101,7 @@
   .st { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--accent-soft); color: var(--accent-ink); }
   .st.done { background: var(--ok-soft); color: #166534; }
 
-  .ok-hero { padding: 48px 24px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+  .ok-hero { padding: 28px 24px 0; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
   .ok-hero .ring { width: 88px; height: 88px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: flex; align-items: center; justify-content: center; }
   .ok-hero h1 { font-size: 28px; }
   .ok-hero p { margin: 0; font-size: 15px; color: var(--muted); line-height: 1.5; }
@@ -121,7 +126,7 @@
 <!-- Home -->
 <section class="screen on" id="s-home">
   <div class="main">
-    <div class="brand"><b>198</b><span>Dịch vụ tự phục vụ</span></div>
+    <div class="brand"><span class="name"><b>198</b><span>Dịch vụ tự phục vụ</span></span><span class="live pill"><i></i><span class="live-t" data-long>Đang gọi · 00:00</span></span></div>
     <div class="hello">
       <span id="h-msisdn"><i class="sk s"></i></span>
       <h1>Bạn muốn làm gì hôm nay?</h1>
@@ -163,7 +168,7 @@
 <!-- Packages -->
 <section class="screen" id="s-packages">
   <div class="main">
-    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Gói cước &amp; data</h1></div>
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Gói cước &amp; data</h1><span class="live"><i></i><span class="live-t">00:00</span></span></div>
     <div class="label">Chọn gói muốn đăng ký</div>
     <div class="pad pkgs" id="p-list"></div>
     <div class="hint" id="p-after"></div>
@@ -174,6 +179,7 @@
 <!-- Success -->
 <section class="screen" id="s-success">
   <div class="main">
+    <div class="ok-top"><span class="live"><i></i><span class="live-t" data-long>Đang gọi · 00:00</span></span></div>
     <div class="ok-hero">
       <div class="ring"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
       <h1 id="ok-title"></h1>
@@ -187,7 +193,7 @@
 <!-- Bill -->
 <section class="screen" id="s-bill">
   <div class="main">
-    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Cước &amp; thanh toán</h1></div>
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Cước &amp; thanh toán</h1><span class="live"><i></i><span class="live-t">00:00</span></span></div>
     <div class="card total"><span id="b-month">Cước tháng này (tạm tính)</span><b id="b-total">–</b></div>
     <div class="label">Chọn số tiền nạp</div>
     <div class="pad amounts" id="b-amounts">
@@ -203,7 +209,7 @@
 <!-- Network -->
 <section class="screen" id="s-network">
   <div class="main">
-    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Báo sự cố mạng</h1></div>
+    <div class="top"><button class="back" aria-label="Quay lại"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button><h1>Báo sự cố mạng</h1><span class="live"><i></i><span class="live-t">00:00</span></span></div>
     <div class="label">Bạn gặp vấn đề gì?</div>
     <div class="pad chips" id="n-issues">
       <button class="chip" data-issue="Data chậm">Data chậm</button>
@@ -425,6 +431,17 @@
     go("home");
     loadProfile();
   };
+
+  // Call time since the page opened (Android hides its own call bar for hotline pages, like 1900).
+  var callStart = Date.now();
+  function tickCall() {
+    var t = Math.floor((Date.now() - callStart) / 1000);
+    var mmss = String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+    var els = document.querySelectorAll(".live-t");
+    for (var i = 0; i < els.length; i++) els[i].textContent = els[i].hasAttribute("data-long") ? "Đang gọi · " + mmss : mmss;
+  }
+  setInterval(tickCall, 1000);
+  tickCall();
 
   render();
   loadProfile();

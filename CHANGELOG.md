@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Hotline 198 is now a self-service app (app id `smart-menu`, v2.0.0) instead of the old Smart Menu: the caller sees balance and data, registers a package (SPEED120 / MAX90 / DAY10), sees this month's charges and tops up (50k/100k/200k), and reports a network problem, all inside the call. DCAS answers from a per-caller in-memory account (`internal/dcas/selfcare_198.go`, lost on DCAS restart). Stream-1000 routing: only `service:"smart-menu"` reaches it; caro, enterprise-callerid, flight-booking and draw/clear are unchanged, other payloads are logged and dropped.
+- 198 now opens like 1900: the call top bar ("Tổng đài 198 (Smart Menu)" and its timer) is hidden and the page takes the screen above the call buttons (`MiniAppManager.applyWebViewBounds`, needs an APK rebuild). The page shows its own "Đang gọi · mm:ss" (app v2.0.1).
 - Removed the old Smart Menu actions (agent / video / story / time / balance), `triggerVideo`, and the app's `cartoon_video.mp4`, `sample_video.mp4` and `agent_greeting.mp3`. No Android change.
 - Stale device scripts (they drive the removed Smart Menu UI, left untouched): `test_smart_menu_198.py`, `test_tap_smartmenu.py`, `test_smartmenu_cartoon_video.py`, `test_smartmenu_refresh_and_back.py`, `test_funny_cartoon_1080p.py`, `test_interactive_video_proof.py`, `test_agent_voice_playback.py`, section 5 of `test_all_services_e2e_regression.py`.
 
