@@ -102,14 +102,6 @@ func NewDCASServer(httpAddr, tcpAddr, dcsfAddr string) *DCASServer {
 	}
 }
 
-type MenuAction struct {
-	Action string `json:"action"`
-}
-
-type MenuResponse struct {
-	Response string `json:"response"`
-}
-
 type EnterpriseCallerIDRequest struct {
 	Service string `json:"service"`
 	Action  string `json:"action"`
@@ -254,7 +246,7 @@ func (s *DCASServer) processMdc2Payload(sessionID, streamID string, payload []by
 			s.mu.RUnlock()
 			s.handleFunCallingMessage(sessionID, callID, payload)
 		case "smart-menu":
-			s.handleSmartMenuMessage(sessionID, payload, nil)
+			s.handleSelfcareMessage(sessionID, payload, nil)
 		case "enterprise-callerid":
 			s.handleEnterpriseCallerIDMessage(sessionID, payload)
 		case "flight-booking":
@@ -382,16 +374,6 @@ func (s *DCASServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type SmartMenuResponse struct {
-	Service  string `json:"service"`
-	Action   string `json:"action"`
-	Response string `json:"response"`
-	Greeting string `json:"greeting,omitempty"`
-	AudioURL string `json:"audioUrl,omitempty"`
-	VideoURL string `json:"videoUrl,omitempty"`
-	Time     string `json:"time,omitempty"`
-}
-
 func (s *DCASServer) handleEnterpriseCallerIDMessage(sessionID string, data []byte) {
 	log.Printf("[DCAS] Enterprise Caller ID Event from Session %s: %s", sessionID, string(data))
 
@@ -429,133 +411,65 @@ func (s *DCASServer) handleEnterpriseCallerIDMessage(sessionID string, data []by
 	s.sendToSession(sessionID, "1000", resp)
 }
 
-func (s *DCASServer) handleSmartMenuMessage(sessionID string, data []byte, conn *websocket.Conn) {
-	// 0. Check if this is a Caro game message or Enterprise Caller ID message
-	var rawMsg map[string]interface{}
-	if err := json.Unmarshal(data, &rawMsg); err == nil {
-		service, _ := rawMsg["service"].(string)
-		if service == "caro" {
-			s.handleCaroMessage(sessionID, data, conn)
-			return
-		}
-		if service == "enterprise-callerid" {
-			s.handleEnterpriseCallerIDMessage(sessionID, data)
-			return
-		}
-		if service == "flight-booking" {
-			s.handleFlightBookingMessage(sessionID, data)
-			return
-		}
-
-		// 1. Check if this is a draw or clear event from mini-app, and relay to the peer phone
-		msgType, _ := rawMsg["type"].(string)
-		if msgType == "draw" || msgType == "clear" {
-			log.Printf("[DCAS] Relay Draw/Clear message from Session %s to peer", sessionID)
-
-			s.mu.RLock()
-			legacyPeer, isInterwork := s.interworkingSessions[sessionID]
-			s.mu.RUnlock()
-			if isInterwork {
-				log.Printf("[DCAS Interworking Engine] Interworking active: translating drawing coordinates from Session %s to out-of-band legacy SMS delivery...", sessionID)
-				link := fmt.Sprintf("http://%s/view-whiteboard?session=%s", s.dcsfAddr, sessionID)
-				log.Printf("[DCAS Interworking Engine] SMS SENT to %s: \"Ban nhan duoc hinh ve tu peer. Xem hinh ve truc tiep tai day: %s\"", legacyPeer, link)
-			}
-
-			callID := s.sessionCalls[sessionID]
-			sessions := getSessionsFromRedis(callID)
-			var targetSessions []string
-			for _, sid := range sessions {
-				if sid != sessionID {
-					targetSessions = append(targetSessions, sid)
-				}
-			}
-
-			for _, targetSid := range targetSessions {
-				s.sendToSession(targetSid, "1000", rawMsg)
-			}
-			return
-		}
+// smartMenuRoute decides where a stream-1000 payload goes. Only
+// service "smart-menu" reaches the 198 self-care handler; other services keep
+// their handlers, draw/clear is relayed to the peer, the rest is dropped.
+func smartMenuRoute(data []byte) string {
+	var raw map[string]interface{}
+	if json.Unmarshal(data, &raw) != nil {
+		return "drop"
 	}
-
-	var action MenuAction
-	if err := json.Unmarshal(data, &action); err != nil {
-		log.Printf("[DCAS] Failed to parse Smart Menu JSON: %v", err)
-		return
+	switch service, _ := raw["service"].(string); service {
+	case "caro", "enterprise-callerid", "flight-booking":
+		return service
+	case "smart-menu":
+		return "selfcare"
 	}
-
-	log.Printf("[DCAS] Smart Menu Event from Session %s: Action=%s", sessionID, action.Action)
-	var respObj SmartMenuResponse
-	respObj.Service = "smart-menu"
-	respObj.Action = action.Action
-
-	switch action.Action {
-	case "video":
-		sampleVideos := []string{
-			"cartoon_video.mp4",
-			"sample_video.mp4",
-		}
-		randomIdx := time.Now().UnixNano() % int64(len(sampleVideos))
-		videoUrl := sampleVideos[randomIdx]
-		respObj.Response = "Đang phát video hoạt hình vui nhộn từ hệ thống tổng đài..."
-		respObj.VideoURL = videoUrl
-		s.mu.RLock()
-		callID := s.sessionCalls[sessionID]
-		s.mu.RUnlock()
-		if callID != "" {
-			go s.triggerVideo(callID)
-		}
-	case "story":
-		respObj.Response = "Ngày xửa ngày xưa, ở một tổng đài 5G New Calling nọ, các Data Channel truyền tin nhanh như chớp..."
-	case "time":
-		timeFormatted := fmt.Sprintf("Thời gian hệ thống: %s (GMT+7)", time.Now().Format("15:04:05 - 02/01/2006"))
-		respObj.Response = timeFormatted
-		respObj.Time = timeFormatted
-	case "agent":
-		greeting := "Xin chào quý khách! Tôi là tổng đài viên chăm sóc khách hàng 198. Tôi có thể hỗ trợ gì cho quý khách ạ?"
-		respObj.Response = greeting
-		respObj.Greeting = greeting
-		respObj.AudioURL = "agent_greeting.mp3"
-	case "balance":
-		respObj.Response = "Số dư tài khoản trả trước của bạn là 150.000đ. Cảm ơn bạn đã lựa chọn dịch vụ của chúng tôi!"
-	default:
-		respObj.Response = fmt.Sprintf("Hệ thống đã nhận sự kiện: %s", action.Action)
+	if t, _ := raw["type"].(string); t == "draw" || t == "clear" {
+		return "relay"
 	}
-
-	respBytes, _ := json.Marshal(respObj)
-	if conn != nil {
-		if err := conn.WriteMessage(websocket.TextMessage, respBytes); err != nil {
-			log.Printf("[DCAS] Write error: %v", err)
-		}
-	} else {
-		s.sendToSession(sessionID, "1000", respBytes)
-	}
+	return "drop"
 }
 
-func (s *DCASServer) triggerVideo(callID string) {
-	log.Printf("[DCAS] Triggering video playback for CallID %s to DCSF on %s", callID, s.dcsfAddr)
+func (s *DCASServer) handleSmartMenuMessage(sessionID string, data []byte, conn *websocket.Conn) {
+	switch smartMenuRoute(data) {
+	case "caro":
+		s.handleCaroMessage(sessionID, data, conn)
+	case "enterprise-callerid":
+		s.handleEnterpriseCallerIDMessage(sessionID, data)
+	case "flight-booking":
+		s.handleFlightBookingMessage(sessionID, data)
+	case "selfcare":
+		s.handleSelfcareMessage(sessionID, data, conn)
+	case "relay":
+		var rawMsg map[string]interface{}
+		_ = json.Unmarshal(data, &rawMsg)
+		log.Printf("[DCAS] Relay Draw/Clear message from Session %s to peer", sessionID)
 
-	url := fmt.Sprintf("http://%s/play_video", s.dcsfAddr)
-	payload := map[string]string{
-		"call_id": callID,
-		"action":  "funny_video",
-	}
-	bytesPayload, _ := json.Marshal(payload)
+		s.mu.RLock()
+		legacyPeer, isInterwork := s.interworkingSessions[sessionID]
+		s.mu.RUnlock()
+		if isInterwork {
+			log.Printf("[DCAS Interworking Engine] Interworking active: translating drawing coordinates from Session %s to out-of-band legacy SMS delivery...", sessionID)
+			link := fmt.Sprintf("http://%s/view-whiteboard?session=%s", s.dcsfAddr, sessionID)
+			log.Printf("[DCAS Interworking Engine] SMS SENT to %s: \"Ban nhan duoc hinh ve tu peer. Xem hinh ve truc tiep tai day: %s\"", legacyPeer, link)
+		}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bytesPayload))
-	if err != nil {
-		log.Printf("[DCAS] Failed to create HTTP request for video play: %v", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
+		callID := s.sessionCalls[sessionID]
+		sessions := getSessionsFromRedis(callID)
+		var targetSessions []string
+		for _, sid := range sessions {
+			if sid != sessionID {
+				targetSessions = append(targetSessions, sid)
+			}
+		}
 
-	client := newH2CClient(5 * time.Second)
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("[DCAS] Failed to invoke play_video to DCSF: %v", err)
-		return
+		for _, targetSid := range targetSessions {
+			s.sendToSession(targetSid, "1000", rawMsg)
+		}
+	default:
+		log.Printf("[DCAS] Dropping stream-1000 payload with no smart-menu service from session %s: %s", sessionID, string(data))
 	}
-	defer resp.Body.Close()
-	log.Printf("[DCAS] play_video request sent to DCSF. Response: %s", resp.Status)
 }
 
 func (s *DCASServer) handleFunCallingMessage(sessionID, callID string, data []byte) {

@@ -171,3 +171,22 @@ func TestFormatVND(t *testing.T) {
 		}
 	}
 }
+
+func TestSmartMenuRoutingLeavesOtherServices(t *testing.T) {
+	cases := map[string]string{
+		`{"service":"smart-menu","action":"profile"}`:    "selfcare",
+		`{"service":"caro","action":"move"}`:             "caro",
+		`{"service":"flight-booking","action":"search"}`: "flight-booking",
+		`{"service":"enterprise-callerid"}`:              "enterprise-callerid",
+		`{"type":"draw","x":1}`:                          "relay",
+		`{"type":"clear"}`:                               "relay",
+		`{"action":"heart"}`:                             "drop",
+		`{"service":"whatever","action":"x"}`:            "drop",
+		`not json`:                                       "drop",
+	}
+	for in, want := range cases {
+		if got := smartMenuRoute([]byte(in)); got != want {
+			t.Errorf("%s: got %q want %q", in, got, want)
+		}
+	}
+}
