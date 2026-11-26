@@ -700,6 +700,9 @@ class SipManager(
                     } else {
                         Log.w(TAG, "INVITE response: $statusCode")
                         onInviteResponse?.invoke(statusCode, null, "", null)
+                        // The call is over (declined, busy, not found...): nothing is left to CANCEL, and a late
+                        // response for it must not touch the next call.
+                        resetCallState()
                     }
                 }
             }

@@ -1124,71 +1124,23 @@ class CallActivity : AppCompatActivity() {
                             sdpAnswer?.let { handleSdpAnswer(it, toHeaderVal, rawSdp ?: "") }
                         }
                         487 -> {
-                            stopRingbackTone()
-                            binding.tvCallStatus.text = "📴 Cuộc gọi kết thúc"
-                            lifecycleScope.launch {
-                                delay(1500)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("📴 Cuộc gọi kết thúc")
                         }
                         404 -> {
-                            stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ Không tìm thấy $peerName"
-                            lifecycleScope.launch {
-                                delay(2000)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("❌ Không tìm thấy $peerName")
                         }
                         480 -> {
-                            stopRingbackTone()
-                            binding.tvCallStatus.text = "❌ $peerName không trực tuyến (Offline)"
-                            lifecycleScope.launch {
-                                delay(2000)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("❌ $peerName không trực tuyến (Offline)")
                         }
                         486 -> {
-                            stopRingbackTone()
                             // No local voice: the network plays the announcement (the called phone answers 480).
-                            binding.tvCallStatus.text = "Người dùng đang bận"
-                            lifecycleScope.launch {
-                                delay(2000)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("Người dùng đang bận")
                         }
                         603 -> {
-                            stopRingbackTone()
-                            binding.tvCallStatus.text = "Người dùng từ chối cuộc gọi"
-                            lifecycleScope.launch {
-                                delay(2000)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("Người dùng từ chối cuộc gọi")
                         }
                         408 -> {
-                            stopRingbackTone()
-                            binding.tvCallStatus.text = "⏱️ Yêu cầu hết hạn - Không trả lời (408)"
-                            lifecycleScope.launch {
-                                delay(2000)
-                                resetAudio()
-                                releaseVideoViews()
-                                webRtcManager.close()
-                                finish()
-                            }
+                            endAfterFailure("⏱️ Yêu cầu hết hạn - Không trả lời (408)")
                         }
                         430 -> {
                             stopRingbackTone()
@@ -1219,15 +1171,7 @@ class CallActivity : AppCompatActivity() {
                         }
                         else -> {
                             if (statusCode >= 300) {
-                                stopRingbackTone()
-                                binding.tvCallStatus.text = "⚠️ Cuộc gọi thất bại ($statusCode)"
-                                lifecycleScope.launch {
-                                    delay(2000)
-                                    resetAudio()
-                                    releaseVideoViews()
-                                    webRtcManager.close()
-                                    finish()
-                                }
+                                endAfterFailure("⚠️ Cuộc gọi thất bại ($statusCode)")
                             }
                         }
                     }
@@ -2016,6 +1960,22 @@ class CallActivity : AppCompatActivity() {
             }
         }
         com.demo.imsdc.call.CallService.start(this, peerName, camera = isVideoEnabled)
+    }
+
+    /**
+     * The call failed for good (declined, busy, not found, no answer...): stop at once, show [label] briefly and
+     * close. The slow releases (audio, video views, WebRTC) run in onDestroy, not before finish(). isEndingCall
+     * also stops onDestroy from sending a CANCEL for a call that is already over.
+     */
+    private fun endAfterFailure(label: String) {
+        stopRingbackTone()
+        binding.tvCallStatus.text = label
+        isEndingCall = true
+        stopRtpInBackground()
+        lifecycleScope.launch {
+            delay(800)
+            finish()
+        }
     }
 
     private fun endCall() {

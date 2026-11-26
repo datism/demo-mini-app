@@ -187,10 +187,13 @@ func TestErrorResponse_486InitialInviteEndsCall(t *testing.T) {
 	if _, ok := r.b.sessions["c1"]; ok {
 		t.Fatalf("session kept after initial INVITE failure")
 	}
+	// The release runs after the 486 is relayed, in the background.
 	found := false
-	for _, d := range r.deleted() {
-		if d == "/nmf-mrm/v1/contexts/c1" {
-			found = true
+	for deadline := time.Now().Add(2 * time.Second); !found && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		for _, d := range r.deleted() {
+			if d == "/nmf-mrm/v1/contexts/c1" {
+				found = true
+			}
 		}
 	}
 	if !found {

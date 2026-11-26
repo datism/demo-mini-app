@@ -638,37 +638,13 @@ func (b *B2BUA) handleErrorResponse(msg *SIPMessage, callID, data string) {
 		session, ok := b.sessions[callID]
 		delete(b.sessions, callID)
 		b.mu.Unlock()
+		// Drop the Redis copy too: a late message for this call (the caller's CANCEL after the decline)
+		// would otherwise load it back as a live call.
+		b.forgetStoredSession(callID)
 
-		if ok && session != nil && session.ContextID != "" {
-			mfHost := session.MfHost
-			if mfHost == "" {
-				mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-			}
-			mfURL := fmt.Sprintf("http://%s:%d", mfHost, b.cfg.Services.Mf.Port)
-			b.closeAppSlot(session)
-			log.Printf("[IMS-AS] Releasing MF Context %s", session.ContextID)
-			_ = b.CallNmfDeleteMediaContext(mfURL, session.ContextID)
-		}
-
+		// Tell the caller first: releasing the MF/DCSF resources takes HTTP round trips (see handleBye).
 		if ok && session != nil {
-			dcsfHost := resolveAndHashHost(b.cfg.Services.Dcsf.Host, callID)
-			dcsfURL := fmt.Sprintf("http://%s:%d", dcsfHost, b.cfg.Services.Dcsf.Port)
-			log.Printf("[IMS-AS] Releasing DCSF Event Subscription for call %s", callID)
-			_ = b.CallNimsasSessionEventRelease(dcsfURL, callID)
-		}
-
-		// Release dc2 sessions
-		if ok && session != nil {
-			mfHost := session.MfHost
-			if mfHost == "" {
-				mfHost = resolveAndHashHost(b.cfg.Services.Mf.Host, callID)
-			}
-			if session.SessionIDA != "" {
-				go b.callDc2Release(mfHost, session.SessionIDA)
-			}
-			if session.SessionIDB != "" {
-				go b.callDc2Release(mfHost, session.SessionIDB)
-			}
+			defer func() { go b.releaseCallResources(session, callID) }()
 		}
 	}
 	b.forwardToSCSCF(data)
