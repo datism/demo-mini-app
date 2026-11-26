@@ -117,11 +117,11 @@ MAX90 (5 GB/tháng · 30 ngày, 90.000), DAY10 (2 GB · 24 giờ, 10.000).
 ### Backend (`internal/dcas/selfcare_198.go` + `_test.go`)
 
 - New account store keyed by caller number (mutex + map), new account seeded with:
-  balance 148.500đ, package MAX90, data 3.200/5.000 MB, bill 86.400đ, one old report
+  balance 148.500đ, package MAX90, data 3 200/5 000 MB, bill 86.400đ, one old report
   `#PA-20431 · Mất sóng · Đã xong`.
 - `subscribe`: price ≤ balance → deduct, add price to `bill_total` (it is a
   charge this month), set package, reset data to the package's current allowance
-  (SPEED120 4 096 MB — today's quota; MAX90 5 120 MB; DAY10 2 048 MB), txn
+  (SPEED120 4 000 MB — today's quota; MAX90 5 000 MB; DAY10 2 000 MB; page shows GB = MB/1000), txn
   `GD-XXXXXX`; else `insufficient_balance` (no change). Re-subscribing the
   current package is allowed (renews it). `expiry` never changes. *(my calls)*
 - `topup`: add amount to `balance` only (bill unchanged), txn.
