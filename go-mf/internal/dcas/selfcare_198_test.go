@@ -190,3 +190,18 @@ func TestSmartMenuRoutingLeavesOtherServices(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfcareRetryWithSameReqIDIsNotAppliedTwice(t *testing.T) {
+	st := newSelfcareStore()
+	first := scReply(st, "1001", SelfcareRequest{Action: "subscribe", Code: "DAY10", ReqID: "r1"})
+	again := scReply(st, "1001", SelfcareRequest{Action: "subscribe", Code: "DAY10", ReqID: "r1"})
+	if first.ReqID != "r1" || again.ReqID != "r1" {
+		t.Fatalf("req_id not echoed: %q %q", first.ReqID, again.ReqID)
+	}
+	if again.Status != "ok" || again.Txn != first.Txn || again.Account.Balance != 138500 || again.Account.BillTotal != 96400 {
+		t.Fatalf("retry applied twice: %+v %+v", again, again.Account)
+	}
+	if r := scReply(st, "1001", SelfcareRequest{Action: "subscribe", Code: "DAY10", ReqID: "r2"}); r.Account.Balance != 128500 {
+		t.Fatalf("new req_id not applied: %+v", r.Account)
+	}
+}

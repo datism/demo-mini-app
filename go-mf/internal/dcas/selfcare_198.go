@@ -25,6 +25,7 @@ type SelfcareRequest struct {
 	Issue    string `json:"issue,omitempty"`
 	Location string `json:"location,omitempty"`
 	Note     string `json:"note,omitempty"`
+	ReqID    string `json:"req_id,omitempty"` // page's id for this tap; a retry reuses it
 }
 
 type SelfcareAccount struct {
@@ -67,6 +68,7 @@ type SelfcareResponse struct {
 	Service  string            `json:"service"`
 	Action   string            `json:"action"`
 	Status   string            `json:"status"` // "ok" or "error"
+	ReqID    string            `json:"req_id,omitempty"`
 	Code     string            `json:"code,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Txn      string            `json:"txn,omitempty"`
@@ -90,6 +92,10 @@ var selfcareIssues = map[string]bool{"Data chậm": true, "Mất sóng": true, "
 type selfcareState struct {
 	acct    SelfcareAccount
 	reports []SelfcareReport // newest first
+	// last request and its reply, so a retry of a slow request (same req_id)
+	// is answered again instead of charging twice.
+	lastReqID string
+	lastResp  SelfcareResponse
 }
 
 type selfcareStore struct {
@@ -157,7 +163,10 @@ func buildSelfcareReply(req SelfcareRequest, caller string, st *selfcareStore, i
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	s := st.state(caller)
-	resp := SelfcareResponse{Service: "smart-menu", Action: req.Action, Status: "ok"}
+	if req.ReqID != "" && req.ReqID == s.lastReqID {
+		return s.lastResp
+	}
+	resp := SelfcareResponse{Service: "smart-menu", Action: req.Action, Status: "ok", ReqID: req.ReqID}
 	fail := func(code, msg string) {
 		resp.Status, resp.Code, resp.Message = "error", code, msg
 	}
@@ -217,6 +226,9 @@ func buildSelfcareReply(req SelfcareRequest, caller string, st *selfcareStore, i
 	acct := s.acct
 	resp.Account = &acct
 	resp.Reports = append([]SelfcareReport(nil), s.reports...)
+	if req.ReqID != "" {
+		s.lastReqID, s.lastResp = req.ReqID, resp
+	}
 	return resp
 }
 

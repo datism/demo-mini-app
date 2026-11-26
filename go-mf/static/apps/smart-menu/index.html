@@ -231,7 +231,7 @@
 (function () {
   "use strict";
   var TIMEOUT_MS = 8000;
-  var state = { screen: "home", account: null, packages: [], reports: [], pkg: null, amount: 100000, issue: null, pending: null };
+  var state = { screen: "home", account: null, packages: [], reports: [], pkg: null, amount: 100000, issue: null, pending: null, retry: null };
   var timer = null, toastTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -257,12 +257,22 @@
     } catch (e) { console.log("[198] send failed", e); }
   }
 
+  // Each tap gets a req_id that DCAS echoes. A retry after a timeout reuses the
+  // id, so DCAS answers it again instead of charging twice; a late reply to an
+  // older request only refreshes the numbers and never changes the screen.
+  function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
   function request(payload) {
     if (state.pending) return;
-    state.pending = payload.action;
+    var key = JSON.stringify(payload);
+    var id = state.retry && state.retry.key === key ? state.retry.id : newId();
+    state.retry = null;
+    state.pending = { action: payload.action, id: id, key: key };
+    payload.req_id = id;
     renderBusy();
     clearTimeout(timer);
     timer = setTimeout(function () {
+      state.retry = { key: key, id: id };
       state.pending = null;
       renderBusy();
       toast("Không nhận được phản hồi, thử lại");
@@ -274,10 +284,13 @@
     var msg = raw;
     if (typeof raw === "string") { try { msg = JSON.parse(raw); } catch (e) { return; } }
     if (!msg || msg.service !== "smart-menu") return;
-    if (msg.action === state.pending) { state.pending = null; clearTimeout(timer); }
+    var p = state.pending;
+    var current = !!p && (msg.req_id ? msg.req_id === p.id : msg.action === p.action);
+    if (current) { state.pending = null; state.retry = null; clearTimeout(timer); }
     if (msg.account) state.account = msg.account;
     if (msg.packages) state.packages = msg.packages;
     if (msg.reports) state.reports = msg.reports;
+    if (!current && msg.req_id) { render(); return; }
 
     if (msg.status === "error") {
       if (msg.code === "insufficient_balance") toast(msg.message || "Số dư không đủ, vui lòng nạp thêm", "Nạp tiền", function () { go("bill"); });
@@ -407,7 +420,7 @@
   }
 
   window.resetSmartMenu = function () {
-    state.pending = null; clearTimeout(timer);
+    state.pending = null; state.retry = null; clearTimeout(timer);
     state.pkg = null; state.issue = null; state.amount = 100000;
     go("home");
     loadProfile();

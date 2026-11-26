@@ -740,6 +740,7 @@ Dưới đây là danh sách các lỗi nghiêm trọng về đồng bộ vòng 
   | khác | – | lỗi `unknown_action` |
 
 * **Dữ liệu theo thuê bao**: DCAS giữ một tài khoản cho mỗi số gọi đến (lấy từ phiên IMS-AS, không xác định được thì dùng chung `guest`), trong bộ nhớ, mất khi DCAS khởi động lại. Tài khoản mới: 148.500đ, gói MAX90, data 3,2/5 GB, cước tháng 86.400đ, một phản ánh cũ #PA-20431. Đăng ký gói trừ tiền, cộng vào cước tháng, đặt lại data theo gói; nạp tiền chỉ cộng số dư.
+* **Chống trừ tiền 2 lần**: mỗi lần bấm, trang gửi kèm `req_id`, DCAS trả lại `req_id`. Bấm thử lại sau khi hết 8 s chờ thì dùng lại `req_id` cũ, nên DCAS gửi lại kết quả cũ chứ không trừ tiền thêm lần nữa. Kết quả đến muộn chỉ cập nhật số liệu, không chuyển màn hình.
 * **Định tuyến stream 1000**: chỉ `service:"smart-menu"` vào app 198; caro / enterprise-callerid / flight-booking và draw/clear giữ nguyên; payload khác bị bỏ qua (có log).
 * **Kiểm thử**: `cd go-mf && go test ./internal/dcas/ -run 'Selfcare|SmartMenuRouting'`. Android không đổi.
 
