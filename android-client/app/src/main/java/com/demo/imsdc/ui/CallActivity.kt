@@ -729,10 +729,14 @@ class CallActivity : AppCompatActivity() {
 
     /** The incoming call ended before this screen showed it: no ringing, no screen, nothing sent. */
     private fun closeEndedIncoming(callId: String) {
-        Log.i(TAG, "Incoming call $callId ended before the call screen opened: closing it")
+        val ringingId = SipManager.shared?.currentCallId
+        Log.i(TAG, "Incoming call $callId ended before the call screen opened: closing it (ringing now: $ringingId)")
         isEndingCall = true
         try { ringtone?.stop() } catch (_: Exception) {}
-        IncomingCallNotificationManager.dismiss(this)
+        // Another call ringing now keeps its notification and ringtone.
+        if (ringingId == null || ringingId.removePrefix("b2b_") == callId.removePrefix("b2b_")) {
+            IncomingCallNotificationManager.dismiss(this)
+        }
         finish()
     }
 

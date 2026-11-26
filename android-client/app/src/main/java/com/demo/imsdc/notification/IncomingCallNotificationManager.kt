@@ -132,6 +132,10 @@ object IncomingCallNotificationManager {
         // 2. Phát chuông & rung
         startRingtoneAndVibration(appContext)
 
+        // The PendingIntents below are made with FLAG_CANCEL_CURRENT: with FLAG_UPDATE_CURRENT, "Trả lời" after a
+        // call declined from this notification opened the call screen with the declined call's Call-ID, which
+        // closed itself at once ("ended before the call screen opened") while the new call rang on.
+
         // 3. Tạo Full-Screen Intent trỏ tới CallActivity (hiển thị giao diện cuộc gọi đến)
         val callIntent = Intent(appContext, CallActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -162,7 +166,7 @@ object IncomingCallNotificationManager {
             appContext,
             NOTIFICATION_ID,
             callIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
             activityOptionsBundle
         )
 
@@ -187,7 +191,7 @@ object IncomingCallNotificationManager {
             appContext,
             NOTIFICATION_ID + 2,
             answerIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE,
             activityOptionsBundle
         )
 
@@ -204,7 +208,7 @@ object IncomingCallNotificationManager {
             appContext,
             NOTIFICATION_ID + 1,
             declineIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
         // 7. Build Notification
