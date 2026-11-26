@@ -725,16 +725,23 @@ Dưới đây là danh sách các lỗi nghiêm trọng về đồng bộ vòng 
   * **Game Cờ Caro 9x9 (`caro`)**: Bàn cờ 9x9 đối kháng thời gian thực, đồng bộ hóa nước đi (X/O) và máy trạng thái hiển thị lượt chơi ("Lượt của bạn" / "Đợi đối thủ").
   * **Fun Calling (`fun-calling-app`)**: Thanh tương tác 5 biểu cảm (❤️, 👍, 😊, 😡, ✋) và thông báo toast nhận biểu cảm thời gian thực đè trên nền video trực tiếp.
 
-### K. Dịch vụ Tổng Đài Chăm Sóc Khách Hàng Thông Minh 198 (Smart Customer Service - Tag v15.0.3)
-* **Mô tả**: Hiện thực hóa kịch bản doanh nghiệp tiêu biểu của chuẩn **GSMA 5G New Calling (Enterprise Use Case)**: Tổng đài CSKH Thông minh (Smart Menu 198) thay thế hoàn toàn hệ thống IVR thoại truyền thống bằng menu tương tác đồ họa trực quan, kết nối trực tiếp với máy chủ DCAS qua kênh dữ liệu Application Data Channel (ADC).
-* **Chi tiết sửa đổi**:
-  * **Hotline UAS Terminating Role**: Máy chủ IMS-AS và DCAS đóng vai trò UAS đích cho số tổng đài `198`, tự động trả lời cuộc gọi (`200 OK`), cấp phát kênh BDC nạp gói ứng dụng `smart-menu` và đàm phán kênh ADC (Stream ID 1000) theo chính sách Phone-to-Application (P2A) `UDP_PROXY`.
-  * **3 Chức năng Tương tác Trực quan Cốt lõi**:
-    1. 🎧 **Gặp tổng đài viên**: Gửi action `"agent"`, máy chủ DCAS trả về lời chào *"Xin chào, tôi có thể giúp gì cho bạn"*, kích hoạt hiệu ứng sóng âm động đa màu sắc (Waveform Visualizer) và tổng hợp giọng nói tiếng Việt (Web Speech TTS).
-    2. 🎬 **Xem 1 video**: Gửi action `"video"`, máy chủ DCAS trả về URL video ngẫu nhiên, mở trình phát HTML5 Video Player Modal chất lượng cao ngay trong giao diện cuộc gọi.
-    3. ⏰ **Thời gian hệ thống**: Gửi action `"time"`, máy chủ DCAS phản hồi thời gian thực tế chính xác của server hiển thị lên màn hình.
-  * **Tối ưu Bố cục Cuộc gọi Hotline (`CallActivity.kt`)**: Tự động nhận diện cuộc gọi đến đầu số `198` để ẩn khung camera cục bộ và từ xa, mở rộng không gian hiển thị tối đa cho menu dịch vụ trực quan.
-  * **Kiểm chứng Toàn diện & Không Ảnh Hưởng (Zero-Regression)**: Xác thực trực quan trên thiết bị Samsung Galaxy S24 thật, bảo đảm cả 4 dịch vụ (Bảng vẽ tương tác TuYaApp, Cờ Caro 9x9, Fun Calling và Tổng đài CSKH 198) hoạt động độc lập và đồng bộ 100%.
+### K. Tổng đài 198 – Dịch vụ tự phục vụ (app id `smart-menu`, app v2.0.0)
+* **Mô tả**: Gọi **198** là mở ngay một app tự phục vụ trong cuộc gọi (kịch bản GSMA 5G New Calling "enterprise hotline"): khách tự xem số dư/data, đăng ký gói, tra cước và nạp tiền, báo sự cố mạng. Không chuyển tổng đài viên. Thay thế hoàn toàn Smart Menu cũ (lời chào tổng đài viên, video hoạt hình, giờ hệ thống).
+* **Luồng**: IMS-AS/DCAS trả lời 198 (UAS), BDC nạp app `smart-menu` từ DCAR, ADC stream 1000 (P2A). Trang gửi `{"service":"smart-menu","action":...}`, DCAS (`go-mf/internal/dcas/selfcare_198.go`) trả lời.
+* **4 chức năng** (`go-mf/static/apps/smart-menu/index.html`): Trang chủ (thuê bao, tài khoản chính + HSD, data còn lại), Gói cước & data (SPEED120 / MAX90 / DAY10), Cước & thanh toán (cước tháng tạm tính, nạp 50k/100k/200k), Báo sự cố mạng (chọn vấn đề, địa điểm nhập tay, mô tả tùy chọn, danh sách phản ánh trước).
+* **Thông điệp ADC 1000**:
+
+  | action | trường gửi | trả lời (`status` = `ok` / `error`) |
+  |---|---|---|
+  | `profile` | – | `account`, `packages`, `reports` |
+  | `subscribe` | `code` | `txn`, `account`, `receipt` · lỗi `insufficient_balance`, `unknown_package` |
+  | `topup` | `amount` (50000/100000/200000) | `txn`, `account`, `receipt` · lỗi `bad_amount` |
+  | `report` | `issue`, `location`, `note` | `ticket`, `reports` · lỗi `missing_field` |
+  | khác | – | lỗi `unknown_action` |
+
+* **Dữ liệu theo thuê bao**: DCAS giữ một tài khoản cho mỗi số gọi đến (lấy từ phiên IMS-AS, không xác định được thì dùng chung `guest`), trong bộ nhớ, mất khi DCAS khởi động lại. Tài khoản mới: 148.500đ, gói MAX90, data 3,2/5 GB, cước tháng 86.400đ, một phản ánh cũ #PA-20431. Đăng ký gói trừ tiền, cộng vào cước tháng, đặt lại data theo gói; nạp tiền chỉ cộng số dư.
+* **Định tuyến stream 1000**: chỉ `service:"smart-menu"` vào app 198; caro / enterprise-callerid / flight-booking và draw/clear giữ nguyên; payload khác bị bỏ qua (có log).
+* **Kiểm thử**: `cd go-mf && go test ./internal/dcas/ -run 'Selfcare|SmartMenuRouting'`. Android không đổi.
 
 
 

@@ -40,7 +40,7 @@ Android Client ←→ P-CSCF (Erlang) ←→ IMS-AS (Go B2BUA) ←→ MF (WebRTC
 - [x] **Mini-App Fun-Calling (Thả tim tương tác)**: Hoạt động 2 chiều cả khi Caller hoặc Callee mở trước (Sửa lỗi B2BUA Response routing & Passive DTLS role).
 - [x] **Giao diện nhận cuộc gọi (Incoming Call UI)**: Tinh gọn 2 nút Reject/Answer, loại bỏ hoàn toàn chữ thừa và khung video đen khi chuông reo.
 - [x] **Mini-App Caro game & Operator Menu**: Đồng bộ trạng thái bàn cờ qua MDC2 TCP frame và hiển thị đầy đủ font chữ.
-- [x] **Video Hoạt hình Hài hước Full HD 1080p Tổng đài 198**: Nâng cấp video hoạt hình Full HD 1080p và HD 720p ngẫu nhiên, tối ưu giao diện modal khớp chuẩn màn hình điện thoại Samsung Galaxy S24.
+- [ ] **Tổng đài 198 tự phục vụ (2026-11-26)**: app `smart-menu` v2.0.0 thay Smart Menu cũ (xem README mục K). Go test + Playwright đã qua; CHƯA kiểm trên máy S24 thật. Script thiết bị cũ của Smart Menu (`test_smart_menu_198.py`, `test_tap_smartmenu.py`, `test_smartmenu_*`, `test_funny_cartoon_1080p.py`, `test_interactive_video_proof.py`, `test_agent_voice_playback.py`, mục 5 của `test_all_services_e2e_regression.py`) đã lỗi thời.
 
 ### Bug đã fix (đã deploy & test trực tiếp trên thiết bị)
 | Bug | File | Trạng thái |

@@ -309,4 +309,7 @@
           + Kết nối SIP Server `10.204.101.54` ổn định, gửi nhận TCP keep-alive đều đặn và sẵn sàng kiểm thử.
         - **Trạng thái Git**: KHÔNG commit, KHÔNG push lên Git (tuân thủ nghiêm ngặt quy tắc).
 
-
+   39. **Tổng đài 198 → app tự phục vụ (2026-11-26)**:
+        - App `smart-menu` (giữ id, v2.0.0): xem số dư/data, đăng ký gói, cước & nạp tiền, báo sự cố mạng. Không chuyển tổng đài viên.
+        - DCAS `internal/dcas/selfcare_198.go`: tài khoản theo số gọi đến, trong bộ nhớ. Chỉ `service:"smart-menu"` vào handler mới (`smartMenuRoute` trong `dcas.go`).
+        - Đã xóa video/mp3 cũ của smart-menu. Android không đổi. Chưa test trên S24.
