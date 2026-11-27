@@ -1537,10 +1537,14 @@
         if (albumPages.size >= MAX_ALBUM_PHOTOS) { failed += images.length-index; break; }
         showProgress('Đang thêm ảnh ' + (index+1) + ' / ' + images.length);
         try {
+          const t0 = performance.now();
           const b64 = await fileToJpegB64(images[index]);
+          const t1 = performance.now();
           if (!boardActive || token !== importGeneration) return;
           const id = newPhotoId();
           const res = JSON.parse(window.AndroidBridge.importPhotoB64(JSON.stringify({id,data:b64,type:'image/jpeg'})) || '{}');
+          const t2 = performance.now();
+          console.log('[SK-TIME] pick ' + id + ' src=' + images[index].size + 'B jpegB64=' + b64.length + ' resize=' + Math.round(t1-t0) + 'ms import=' + Math.round(t2-t1) + 'ms');
           if (!res.ok) throw new Error(res.error || 'import_failed');
           const version = stamp(), url = window.AndroidBridge.mediaUrl(id,false);
           const page = addAlbumPage({id,bytes:res.bytes},{id,ready:true,url,img:null},version);
@@ -1548,6 +1552,7 @@
           let thumb = await thumbB64Of(id);
           if (thumb.length > 48000) thumb = ''; // Keep the control JSON below the 64 KB ADC limit.
           if (!boardActive || token !== importGeneration) return;
+          console.log('[SK-TIME] photo msg ' + id + ' thumb=' + Math.round(performance.now()-t2) + 'ms total=' + Math.round(performance.now()-t0) + 'ms');
           sendJson({t:'photo',id,bytes:res.bytes,thumb,album:1,order:version});
           // First successful photo from this selection becomes the shared current page.
           if (added++ === 0) selectPage(id);
@@ -1626,6 +1631,7 @@
     const page = albumPages.get(msg.id);
     if (!page || !page.photo || !page.photo.ready || !window.AndroidBridge) return;
     try {
+      console.log('[SK-TIME] fetch received ' + msg.id + ' at ' + Date.now());
       const res = JSON.parse(window.AndroidBridge.sendPhoto(JSON.stringify({id:msg.id})) || '{}');
       if (res.ok) sendJson({t:'begin',id:msg.id,chunks:res.chunks,bytes:res.bytes});
     } catch (error) { console.warn('[SK] sendPhoto failed', error && error.message); }

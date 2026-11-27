@@ -435,10 +435,13 @@ class AndroidBridgeInterface(
             if (id.isEmpty() || data.isEmpty()) {
                 return """{"ok":false,"error":"id_or_data_missing"}"""
             }
+            val tStart = android.os.SystemClock.elapsedRealtime()
             val bytes = android.util.Base64.decode(data, android.util.Base64.NO_WRAP)
+            val tDecoded = android.os.SystemClock.elapsedRealtime()
             val result = kotlinx.coroutines.runBlocking {
                 transport.importFromBytes(context, bytes, id)
             }
+            Log.i(TAG, "importPhotoB64 $id: b64=${data.length} base64Decode=${tDecoded - tStart}ms transcode=${android.os.SystemClock.elapsedRealtime() - tDecoded}ms")
             if (result == null) {
                 """{"ok":false,"error":"decode_failed"}"""
             } else {

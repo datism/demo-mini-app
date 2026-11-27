@@ -152,9 +152,13 @@ class PhotoShareTransport(
 
     /** Stream 1 file theo chunk, gate theo bufferedAmount. */
     private suspend fun streamFile(job: SendJob) {
+        val tQueued = android.os.SystemClock.elapsedRealtime()
         val adc = awaitOpenChannel() ?: run {
+            Log.w(TAG, "streamFile ${job.photoId}: no open channel after ${android.os.SystemClock.elapsedRealtime() - tQueued}ms")
             job.onDone?.invoke(false); return
         }
+        val tStream = android.os.SystemClock.elapsedRealtime()
+        if (tStream - tQueued > 200) Log.w(TAG, "streamFile ${job.photoId}: waited ${tStream - tQueued}ms for an open channel")
         val idHash = idHashOf(job.photoId)
         val total = job.totalChunks
         Log.i(TAG, "streamFile start: ${job.photoId} ($total chunks) via channel '${adc.label()}' state=${adc.state()}")
@@ -206,7 +210,7 @@ class PhotoShareTransport(
                 kotlinx.coroutines.delay(CHUNK_PACE_MS)
             }
         }
-        Log.i(TAG, "streamFile done: ${job.photoId} ($total chunks)")
+        Log.i(TAG, "streamFile done: ${job.photoId} ($total chunks) in ${android.os.SystemClock.elapsedRealtime() - tStream}ms, buffered=${adc.bufferedAmount()}")
         job.onDone?.invoke(true)
     }
 
