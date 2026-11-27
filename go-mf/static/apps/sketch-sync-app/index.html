@@ -1514,14 +1514,23 @@
       // Read the picked file first, so a slow content-provider read is timed on its own.
       const buf = await file.arrayBuffer(); lap('read');
       const bmp = await createImageBitmap(new Blob([buf], {type: file.type || 'image/jpeg'})); lap('decode');
-      const MAX = 1920, k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+      const bw = bmp.width, bh = bmp.height;
+      const MAX = 1920, k = Math.min(1, MAX / Math.max(bw, bh));
+      // Already a JPEG within the size limit: skip the canvas. WebView's GPU canvas can stall
+      // toBlob for ~4 s on Android; native re-encodes on import anyway.
+      if (k === 1 && (file.type === 'image/jpeg') && file.size <= 3 * 1024 * 1024) {
+        if (bmp.close) bmp.close();
+        const out = await blobToB64(new Blob([buf], {type: 'image/jpeg'})); lap('b64');
+        console.log('[SK-TIME] resize passthrough ' + bw + 'x' + bh + ' ' + JSON.stringify(T)); return out;
+      }
       const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(bmp.width * k));
-      c.height = Math.max(1, Math.round(bmp.height * k));
-      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      c.width = Math.max(1, Math.round(bw * k));
+      c.height = Math.max(1, Math.round(bh * k));
+      // willReadFrequently forces a CPU canvas, avoiding the GPU readback stall in toBlob.
+      c.getContext('2d', {willReadFrequently: true}).drawImage(bmp, 0, 0, c.width, c.height);
       if (bmp.close) bmp.close(); lap('draw');
       const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85)); lap('toBlob');
-      if (blob) { const out = await blobToB64(blob); lap('b64'); console.log('[SK-TIME] resize ' + bmp.width + 'x' + bmp.height + ' ' + JSON.stringify(T)); return out; }
+      if (blob) { const out = await blobToB64(blob); lap('b64'); console.log('[SK-TIME] resize ' + bw + 'x' + bh + ' ' + JSON.stringify(T)); return out; }
     } catch (e) { console.log('[SK-TIME] resize failed ' + (e && e.message) + ' ' + JSON.stringify(T)); }
     if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
     return await blobToB64(file);
