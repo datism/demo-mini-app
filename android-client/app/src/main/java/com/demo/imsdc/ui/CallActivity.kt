@@ -227,26 +227,8 @@ class CallActivity : AppCompatActivity() {
     // (not the Activity Result API, which hides its codes) so closeOpenPickers() can close them when the
     // call ends or the other phone leaves the share (IW_25, CS_44, CS_53): finishActivity needs the code.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
-    /**
-     * File chooser that lists only files stored on the phone (EXTRA_LOCAL_ONLY). The system photo picker
-     * (and ACTION_GET_CONTENT, which Android 13+ turns into it) ignores that flag and mixes in cloud photos,
-     * which must be downloaded before they can be read; ACTION_OPEN_DOCUMENT honours it.
-     */
-    private fun localMediaIntent(mimeTypes: List<String>, multiple: Boolean): android.content.Intent =
-        android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(android.content.Intent.CATEGORY_OPENABLE)
-            if (mimeTypes.size == 1) type = mimeTypes[0]
-            else { type = "*/*"; putExtra(android.content.Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray()) }
-            putExtra(android.content.Intent.EXTRA_LOCAL_ONLY, true)
-            putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, multiple)
-        }
-
-    private fun pickedUris(data: android.content.Intent?): List<android.net.Uri> {
-        if (data == null) return emptyList()
-        val clip = data.clipData
-        if (clip != null) return (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
-        return listOfNotNull(data.data)
-    }
+    private val multiMediaContract = androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
+    private val singleMediaContract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     private val openPickers = mutableSetOf<Int>()
 
     /**
@@ -261,13 +243,16 @@ class CallActivity : AppCompatActivity() {
         fileChooserCallback?.onReceiveValue(null) // a previous chooser must always be completed
         fileChooserCallback = callback
         val types = acceptTypes.orEmpty().map { it.trim().lowercase() }.filter { it.isNotEmpty() }
-        val mimeTypes = when {
-            types.isNotEmpty() && types.all { it.startsWith("image/") } -> listOf("image/*")
-            types.isNotEmpty() && types.all { it.startsWith("video/") } -> listOf("video/*")
-            else -> listOf("image/*", "video/*")
+        val mediaType = when {
+            types.isNotEmpty() && types.all { it.startsWith("image/") } ->
+                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+            types.isNotEmpty() && types.all { it.startsWith("video/") } ->
+                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly
+            else -> androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo
         }
         return try {
-            launchPicker(RC_MEDIA, localMediaIntent(mimeTypes, multiple = true))
+            val request = androidx.activity.result.PickVisualMediaRequest.Builder().setMediaType(mediaType).build()
+            launchPicker(RC_MEDIA, multiMediaContract.createIntent(this, request))
             true
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Cannot open visual media picker: ${e.message}", e)
@@ -297,7 +282,10 @@ class CallActivity : AppCompatActivity() {
     fun launchVideoPicker(onPicked: (android.net.Uri?) -> Unit) {
         videoPickerCallback = onPicked
         try {
-            launchPicker(RC_VIDEO, localMediaIntent(listOf("video/*"), multiple = false))
+            val request = androidx.activity.result.PickVisualMediaRequest.Builder()
+                .setMediaType(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly)
+                .build()
+            launchPicker(RC_VIDEO, singleMediaContract.createIntent(this, request))
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Cannot open the video picker: ${e.message}", e)
             videoPickerCallback = null
@@ -318,12 +306,12 @@ class CallActivity : AppCompatActivity() {
         if (!openPickers.remove(requestCode)) return
         when (requestCode) {
             RC_MEDIA -> {
-                val uris = if (resultCode == RESULT_OK) pickedUris(data) else emptyList()
+                val uris = multiMediaContract.parseResult(resultCode, data)
                 fileChooserCallback?.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
                 fileChooserCallback = null
             }
             RC_VIDEO -> {
-                videoPickerCallback?.invoke(if (resultCode == RESULT_OK) pickedUris(data).firstOrNull() else null)
+                videoPickerCallback?.invoke(singleMediaContract.parseResult(resultCode, data))
                 videoPickerCallback = null
             }
             RC_SCREEN -> {
