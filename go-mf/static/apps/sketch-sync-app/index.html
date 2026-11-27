@@ -1508,17 +1508,21 @@
   }
 
   async function fileToJpegB64(file) {
+    const T = {}; let t = performance.now();
+    const lap = k => { const n = performance.now(); T[k] = Math.round(n - t); t = n; };
     try {
-      const bmp = await createImageBitmap(file);
+      // Read the picked file first, so a slow content-provider read is timed on its own.
+      const buf = await file.arrayBuffer(); lap('read');
+      const bmp = await createImageBitmap(new Blob([buf], {type: file.type || 'image/jpeg'})); lap('decode');
       const MAX = 1920, k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
       const c = document.createElement('canvas');
       c.width = Math.max(1, Math.round(bmp.width * k));
       c.height = Math.max(1, Math.round(bmp.height * k));
       c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      if (bmp.close) bmp.close();
-      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
-      if (blob) return await blobToB64(blob);
-    } catch (e) {}
+      if (bmp.close) bmp.close(); lap('draw');
+      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85)); lap('toBlob');
+      if (blob) { const out = await blobToB64(blob); lap('b64'); console.log('[SK-TIME] resize ' + bmp.width + 'x' + bmp.height + ' ' + JSON.stringify(T)); return out; }
+    } catch (e) { console.log('[SK-TIME] resize failed ' + (e && e.message) + ' ' + JSON.stringify(T)); }
     if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
     return await blobToB64(file);
   }
