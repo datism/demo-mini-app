@@ -761,8 +761,10 @@
     if (!validPhotoId(meta.id) || !validStamp(version) || !Number.isFinite(meta.bytes) || meta.bytes <= 0 || meta.bytes > 6 * 1024 * 1024) return null;
     albumClock = Math.max(albumClock, version.clock);
     if (albumPages.has(meta.id)) return albumPages.get(meta.id);
-    const used = Array.from(albumPages.values()).reduce((n,p) => n + p.bytes, 0);
-    if (albumPages.size >= MAX_ALBUM_PHOTOS || used + meta.bytes > MAX_ALBUM_BYTES) { toast('Album tối đa 10 ảnh, tổng 32 MB trong cuộc gọi'); return null; }
+    // Full album: the oldest photo drops out, first in first out like Chia sẻ ảnh. Both phones add photos
+    // in the same order, so each trims its own album and they drop the same ones.
+    const usedBytes = () => Array.from(albumPages.values()).reduce((n,p) => n + p.bytes, 0);
+    while (albumPages.size && (albumPages.size >= MAX_ALBUM_PHOTOS || usedBytes() + meta.bytes > MAX_ALBUM_BYTES)) evictOldestPage();
     // Native binary frames have a 16-bit ID. Never accept an ambiguous ID in this album.
     if (Array.from(albumPages.keys()).some(id => hash16(id) === hash16(meta.id))) { toast('Ảnh bị trùng mã truyền. Hãy chọn lại ảnh đó.'); return null; }
     const page = { id:meta.id, bytes:meta.bytes, order:version, mutation:version, deleted:false,
@@ -770,6 +772,16 @@
     albumPages.set(meta.id, page);
     if (desiredPageId === meta.id) displayPage(meta.id);
     updateAlbumNav(); return page;
+  }
+  function evictOldestPage() {
+    const old = Array.from(albumPages.values()).sort((a,b) => compareStamp(a.order,b.order) || a.id.localeCompare(b.id))[0];
+    if (!old) return;
+    if (activePageId === old.id) displayPage(albumOrder().find(id => id !== old.id) || null);
+    if (downloadActive === old.id) { clearTimeout(downloadTimer); downloadTimer = null; downloadActive = null; state.pendingPhoto = null; }
+    const queued = downloadQueue.indexOf(old.id); if (queued >= 0) downloadQueue.splice(queued, 1);
+    if (old.photo && old.photo.url && old.photo.url.startsWith('blob:')) URL.revokeObjectURL(old.photo.url);
+    albumPages.delete(old.id);
+    nextAlbumDownload();
   }
   function newPhotoId() {
     let id;
@@ -1529,15 +1541,13 @@
     if (!window.AndroidBridge || typeof window.AndroidBridge.importPhotoB64 !== 'function') { toast('Không tìm thấy AndroidBridge'); return; }
     let images = files.filter(file => !file.type || file.type.startsWith('image/'));
     if (!images.length) { toast('Hãy chọn tệp ảnh'); return; }
-    const room = Math.max(0, MAX_ALBUM_PHOTOS - albumPages.size);
-    if (images.length > room) { toast('Album tối đa ' + MAX_ALBUM_PHOTOS + ' ảnh' + (room ? ' — chỉ thêm ' + room + ' ảnh đầu' : '')); images = images.slice(0, room); if (!images.length) return; }
+    if (images.length > MAX_ALBUM_PHOTOS) { images = images.slice(-MAX_ALBUM_PHOTOS); toast('Tối đa ' + MAX_ALBUM_PHOTOS + ' ảnh — chỉ thêm ' + MAX_ALBUM_PHOTOS + ' ảnh cuối'); }
     const token = ++importGeneration;
     importBusy = true; updateAlbumNav();
     let added = 0, failed = files.length - images.length;
     try {
       for (let index = 0; index < images.length; index++) {
         if (!boardActive || token !== importGeneration) return;
-        if (albumPages.size >= MAX_ALBUM_PHOTOS) { failed += images.length-index; break; }
         showProgress('Đang thêm ảnh ' + (index+1) + ' / ' + images.length);
         try {
           const t0 = performance.now();
