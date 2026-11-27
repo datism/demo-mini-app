@@ -65,6 +65,9 @@ class PhotoShareTransport(
         /** Ngưỡng ngưng gửi khi SCTP buffer còn treo nhiều data (đơn vị byte). */
         const val HIGH_WATER_MARK: Int = 512 * 1024
 
+        /** On the shared ADC (stream 1000, also carrying strokes) keep little in flight: a big burst is lost and resent with growing waits. */
+        const val ADC_HIGH_WATER_MARK: Int = 64 * 1024
+
         /** Nhịp nghỉ tối thiểu giữa 2 chunk liên tiếp (ms) — chống burst làm ngợm pacer nội bộ libwebrtc. */
         const val CHUNK_PACE_MS: Long = 3
 
@@ -157,6 +160,7 @@ class PhotoShareTransport(
             Log.w(TAG, "streamFile ${job.photoId}: no open channel after ${android.os.SystemClock.elapsedRealtime() - tQueued}ms")
             job.onDone?.invoke(false); return
         }
+        val highWater = if (adc === webRtcManager.shareChannel) HIGH_WATER_MARK else ADC_HIGH_WATER_MARK
         val tStream = android.os.SystemClock.elapsedRealtime()
         if (tStream - tQueued > 200) Log.w(TAG, "streamFile ${job.photoId}: waited ${tStream - tQueued}ms for an open channel")
         val idHash = idHashOf(job.photoId)
@@ -175,7 +179,7 @@ class PhotoShareTransport(
 
                 // Flow control: chờ cống rãnh thông thoáng trước khi nhét thêm.
                 var waited = 0
-                while (adc.bufferedAmount() > HIGH_WATER_MARK && waited < 30_000) {
+                while (adc.bufferedAmount() > highWater && waited < 30_000) {
                     kotlinx.coroutines.delay(30)
                     waited += 30
                 }
