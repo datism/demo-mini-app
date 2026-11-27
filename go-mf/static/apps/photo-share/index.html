@@ -455,17 +455,29 @@ const blobToB64 = blob => new Promise((resolve, reject) => {
   r.readAsDataURL(blob);
 });
 async function fileToJpegB64(file) {
+  const T = {}; let t = performance.now();
+  const lap = k => { const n = performance.now(); T[k] = Math.round(n - t); t = n; };
+  // Fast path: send the original bytes. Native importFromBytes already applies EXIF rotation, sampled
+  // decode and the 1920 px scale, so the page canvas is redundant. WebView canvas toBlob can stall ~4 s.
+  if (file.size <= 8 * 1024 * 1024) {
+    try {
+      const out = await blobToB64(file); lap('b64');
+      console.log('[PS-TIME] resize passthrough ' + file.size + 'B ' + JSON.stringify(T)); return out;
+    } catch (e) { console.log('[PS-TIME] passthrough failed ' + (e && e.message)); }
+  }
+  // Large file: downscale in the page first to keep the bridge payload small.
   try {
     const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height));
+    const bw = bmp.width, bh = bmp.height;
+    const k = Math.min(1, 1920 / Math.max(bw, bh));
     const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    c.width = Math.max(1, Math.round(bw * k)); c.height = Math.max(1, Math.round(bh * k));
+    c.getContext('2d', { willReadFrequently: true }).drawImage(bmp, 0, 0, c.width, c.height);
     if (bmp.close) bmp.close();
     const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
     if (blob) return await blobToB64(blob);
   } catch (e) { /* dùng bản gốc */ }
-  if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
+  if (file.size > 12 * 1024 * 1024) throw new Error('ảnh quá lớn');
   return await blobToB64(file);
 }
 async function thumbB64Of(id) {
@@ -491,8 +503,11 @@ $('fileInput').onchange = async () => {
     const id = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + i;
     let res;
     try {
+      const t0 = performance.now();
       const data = await fileToJpegB64(files[i]);
+      const t1 = performance.now();
       res = JSON.parse(B().importPhotoB64(JSON.stringify({ id, data, type: 'image/jpeg' })) || '{}');
+      console.log('[PS-TIME] pick ' + id + ' src=' + files[i].size + 'B resize=' + Math.round(t1 - t0) + 'ms import=' + Math.round(performance.now() - t1) + 'ms');
     } catch (e) { toast('Không đọc được ảnh: ' + (e && e.message || e)); continue; }
     if (!res.ok) { toast('Không nhập được ảnh: ' + (res.error || '?')); continue; }
     state.photos[id] = { id, mimeType: 'image/jpeg', bytes: res.bytes, local: true, ready: true, url: B().mediaUrl(id, false), thumbUrl: B().mediaUrl(id, true) };
@@ -576,6 +591,7 @@ function armFetchTimeout(id) { // đề phòng mất gói; thời gian giữ má
   }, 30000);
 }
 function onFetch(msg) {
+  console.log('[PS-TIME] fetch received ' + msg.id + ' at ' + Date.now());
   const p = state.photos[msg.id];
   if (!p || !p.local || !B()) return;
   const res = JSON.parse(B().sendPhoto(JSON.stringify({ id: msg.id })) || '{}');
