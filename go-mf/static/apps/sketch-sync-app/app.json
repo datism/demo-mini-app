@@ -1,7 +1,7 @@
 {
   "appId": "sketch-sync-app",
   "appName": "Bảng vẽ",
-  "version": "2.3.4-fix-toblob-stall",
+  "version": "2.3.5-no-canvas-import",
   "qosHint": {
     "latencyMs": 50,
     "packetLossRate": 0.01

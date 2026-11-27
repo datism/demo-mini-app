@@ -1510,29 +1510,30 @@
   async function fileToJpegB64(file) {
     const T = {}; let t = performance.now();
     const lap = k => { const n = performance.now(); T[k] = Math.round(n - t); t = n; };
+    // Fast path: send the original bytes. Native importFromBytes already applies EXIF rotation,
+    // sampled decode and the 1920 px scale, so the page canvas is redundant. WebView's canvas
+    // toBlob can stall ~4 s on Android, which is what made some picks slow.
+    if (file.size <= 8 * 1024 * 1024) {
+      try {
+        const out = await blobToB64(file); lap('b64');
+        console.log('[SK-TIME] resize passthrough ' + file.size + 'B ' + JSON.stringify(T)); return out;
+      } catch (e) { console.log('[SK-TIME] passthrough failed ' + (e && e.message)); }
+    }
+    // Large file: downscale in the page first to keep the bridge payload small.
     try {
-      // Read the picked file first, so a slow content-provider read is timed on its own.
       const buf = await file.arrayBuffer(); lap('read');
       const bmp = await createImageBitmap(new Blob([buf], {type: file.type || 'image/jpeg'})); lap('decode');
       const bw = bmp.width, bh = bmp.height;
       const MAX = 1920, k = Math.min(1, MAX / Math.max(bw, bh));
-      // Already a JPEG within the size limit: skip the canvas. WebView's GPU canvas can stall
-      // toBlob for ~4 s on Android; native re-encodes on import anyway.
-      if (k === 1 && (file.type === 'image/jpeg') && file.size <= 3 * 1024 * 1024) {
-        if (bmp.close) bmp.close();
-        const out = await blobToB64(new Blob([buf], {type: 'image/jpeg'})); lap('b64');
-        console.log('[SK-TIME] resize passthrough ' + bw + 'x' + bh + ' ' + JSON.stringify(T)); return out;
-      }
       const c = document.createElement('canvas');
       c.width = Math.max(1, Math.round(bw * k));
       c.height = Math.max(1, Math.round(bh * k));
-      // willReadFrequently forces a CPU canvas, avoiding the GPU readback stall in toBlob.
       c.getContext('2d', {willReadFrequently: true}).drawImage(bmp, 0, 0, c.width, c.height);
       if (bmp.close) bmp.close(); lap('draw');
       const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85)); lap('toBlob');
       if (blob) { const out = await blobToB64(blob); lap('b64'); console.log('[SK-TIME] resize ' + bw + 'x' + bh + ' ' + JSON.stringify(T)); return out; }
     } catch (e) { console.log('[SK-TIME] resize failed ' + (e && e.message) + ' ' + JSON.stringify(T)); }
-    if (file.size > 6 * 1024 * 1024) throw new Error('ảnh quá lớn');
+    if (file.size > 12 * 1024 * 1024) throw new Error('ảnh quá lớn');
     return await blobToB64(file);
   }
 
