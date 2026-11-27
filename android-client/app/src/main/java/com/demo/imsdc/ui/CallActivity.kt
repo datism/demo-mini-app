@@ -228,11 +228,12 @@ class CallActivity : AppCompatActivity() {
     // call ends or the other phone leaves the share (IW_25, CS_44, CS_53): finishActivity needs the code.
     private var fileChooserCallback: android.webkit.ValueCallback<Array<android.net.Uri>>? = null
     /**
-     * Gallery intent that lists only photos stored on the phone (EXTRA_LOCAL_ONLY): the system visual media
-     * picker mixes in cloud photos, which must be downloaded before they can be read.
+     * File chooser that lists only files stored on the phone (EXTRA_LOCAL_ONLY). The system photo picker
+     * (and ACTION_GET_CONTENT, which Android 13+ turns into it) ignores that flag and mixes in cloud photos,
+     * which must be downloaded before they can be read; ACTION_OPEN_DOCUMENT honours it.
      */
     private fun localMediaIntent(mimeTypes: List<String>, multiple: Boolean): android.content.Intent =
-        android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+        android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(android.content.Intent.CATEGORY_OPENABLE)
             if (mimeTypes.size == 1) type = mimeTypes[0]
             else { type = "*/*"; putExtra(android.content.Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray()) }
